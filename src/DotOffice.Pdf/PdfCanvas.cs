@@ -15,12 +15,23 @@ public readonly record struct TextSegment(double X, string Text);
 public sealed class PdfCanvas
 {
     private readonly StringBuilder _content = new();
+    private readonly Stack<double> _savedCharSpacing = new();
+    private double _charSpacing;
 
     internal HashSet<PdfFont> Fonts { get; } = [];
     internal HashSet<PdfImage> Images { get; } = [];
 
-    public PdfCanvas SaveState() => Op("q");
-    public PdfCanvas RestoreState() => Op("Q");
+    public PdfCanvas SaveState()
+    {
+        _savedCharSpacing.Push(_charSpacing);
+        return Op("q");
+    }
+
+    public PdfCanvas RestoreState()
+    {
+        if (_savedCharSpacing.TryPop(out var spacing)) _charSpacing = spacing;
+        return Op("Q");
+    }
 
     public PdfCanvas SetFillColor(double r, double g, double b) => Op($"{N(r)} {N(g)} {N(b)} rg");
     public PdfCanvas SetStrokeColor(double r, double g, double b) => Op($"{N(r)} {N(g)} {N(b)} RG");
@@ -58,11 +69,16 @@ public sealed class PdfCanvas
     {
         if (segments.Count == 0) return this;
         Fonts.Add(font);
+        // Tc persists in the graphics state, so it is tracked and only emitted when it changes.
+        if (style.CharacterSpacing != _charSpacing)
+        {
+            Op($"{N(style.CharacterSpacing)} Tc");
+            _charSpacing = style.CharacterSpacing;
+        }
         bool wrap = style.FakeBold;
-        if (wrap) Op("q");
+        if (wrap) SaveState();
         var sb = new StringBuilder("BT /").Append(font.ResourceName).Append(' ').Append(N(fontSize)).Append(" Tf ");
         if (style.FakeBold) sb.Append("2 Tr ").Append(N(fontSize * 0.03)).Append(" w ");
-        if (style.CharacterSpacing != 0) sb.Append(N(style.CharacterSpacing)).Append(" Tc ");
         double x = segments[0].X;
         sb.Append(style.FakeItalic ? "1 0 0.2126 1 " : "1 0 0 1 ").Append(N(x)).Append(' ').Append(N(y)).Append(" Tm [");
         for (int i = 0; i < segments.Count; i++)
@@ -75,7 +91,7 @@ public sealed class PdfCanvas
         }
         sb.Append("] TJ ET");
         Op(sb.ToString());
-        return wrap ? Op("Q") : this;
+        return wrap ? RestoreState() : this;
     }
 
     public PdfCanvas DrawImage(PdfImage image, double x, double y, double width, double height)
