@@ -40,6 +40,10 @@ public sealed class TrueTypeFont
     public short UnderlinePosition { get; }
     public short UnderlineThickness { get; }
 
+    /// <summary>OS/2 usWinAscent/usWinDescent (0 when absent); Office line metrics are based on these.</summary>
+    public ushort WinAscent { get; }
+    public ushort WinDescent { get; }
+
     /// <summary>Strikeout offset above the baseline in font units.</summary>
     public short StrikeoutPosition { get; }
     public short StrikeoutSize { get; }
@@ -116,6 +120,11 @@ public sealed class TrueTypeFont
             WeightClass = (ushort)U16(o + 4);
             int fsType = U16(o + 8);
             IsEmbeddingRestricted = (fsType & 0x000F) == 0x0002;
+            if (os2.Length >= 78)
+            {
+                WinAscent = (ushort)U16(o + 74);
+                WinDescent = (ushort)U16(o + 76);
+            }
             if (os2.Length >= 30)
             {
                 StrikeoutSize = S16(o + 26);
