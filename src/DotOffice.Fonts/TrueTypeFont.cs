@@ -30,6 +30,20 @@ public sealed class TrueTypeFont
     public bool IsItalic { get; }
     public ushort WeightClass { get; }
 
+    /// <summary>Style name from the name table (e.g. "Bold Italic").</summary>
+    public string SubfamilyName { get; }
+
+    /// <summary>Typographic family (name id 16) when present, otherwise <see cref="FamilyName"/>.</summary>
+    public string TypographicFamilyName { get; }
+
+    /// <summary>Underline offset from the baseline in font units (negative is below).</summary>
+    public short UnderlinePosition { get; }
+    public short UnderlineThickness { get; }
+
+    /// <summary>Strikeout offset above the baseline in font units.</summary>
+    public short StrikeoutPosition { get; }
+    public short StrikeoutSize { get; }
+
     /// <summary>True when the OS/2 fsType forbids embedding (restricted license).</summary>
     public bool IsEmbeddingRestricted { get; }
 
@@ -92,6 +106,8 @@ public sealed class TrueTypeFont
         _cmap = ParseCmap(Table("cmap"));
 
         CapHeight = (short)(Ascender * 0.7);
+        StrikeoutPosition = (short)(Ascender * 0.3);
+        StrikeoutSize = (short)(UnitsPerEm / 20);
         WeightClass = 400;
         if (_tables.TryGetValue("OS/2", out var os2))
         {
@@ -100,6 +116,11 @@ public sealed class TrueTypeFont
             WeightClass = (ushort)U16(o + 4);
             int fsType = U16(o + 8);
             IsEmbeddingRestricted = (fsType & 0x000F) == 0x0002;
+            if (os2.Length >= 30)
+            {
+                StrikeoutSize = S16(o + 26);
+                StrikeoutPosition = S16(o + 28);
+            }
             if (version >= 2 && os2.Length >= 90) CapHeight = S16(o + 88);
         }
 
@@ -107,13 +128,22 @@ public sealed class TrueTypeFont
         {
             ItalicAngle = (int)U32(post.Offset + 4) / 65536.0;
             IsFixedPitch = U32(post.Offset + 12) != 0;
+            UnderlinePosition = S16(post.Offset + 8);
+            UnderlineThickness = S16(post.Offset + 10);
+        }
+        if (UnderlineThickness <= 0)
+        {
+            UnderlinePosition = (short)(-UnitsPerEm / 10);
+            UnderlineThickness = (short)(UnitsPerEm / 20);
         }
 
         IsBold = (macStyle & 1) != 0 || WeightClass >= 700;
         IsItalic = (macStyle & 2) != 0 || ItalicAngle != 0;
 
-        var names = ParseNames();
+        var names = FontNames.Parse(GetTableData("name"));
         FamilyName = names.GetValueOrDefault(1) ?? "Unknown";
+        SubfamilyName = names.GetValueOrDefault(2) ?? "Regular";
+        TypographicFamilyName = names.GetValueOrDefault(16) ?? FamilyName;
         PostScriptName = SanitizePostScriptName(names.GetValueOrDefault(6) ?? FamilyName);
     }
 
@@ -221,31 +251,6 @@ public sealed class TrueTypeFont
             }
         }
         return map;
-    }
-
-    private Dictionary<int, string> ParseNames()
-    {
-        var result = new Dictionary<int, string>();
-        if (!_tables.TryGetValue("name", out var t)) return result;
-        int count = U16(t.Offset + 2);
-        int strings = t.Offset + U16(t.Offset + 4);
-        for (int i = 0; i < count; i++)
-        {
-            int rec = t.Offset + 6 + i * 12;
-            int platform = U16(rec), encoding = U16(rec + 2), language = U16(rec + 4);
-            int nameId = U16(rec + 6), length = U16(rec + 8), offset = U16(rec + 10);
-            if (nameId != 1 && nameId != 6) continue;
-            string? value = (platform, encoding) switch
-            {
-                (3, 1) or (0, _) => Encoding.BigEndianUnicode.GetString(_data, strings + offset, length),
-                (1, 0) => Encoding.Latin1.GetString(_data, strings + offset, length),
-                _ => null,
-            };
-            // Prefer Windows English names, but accept anything as a fallback.
-            if (value is not null && (!result.ContainsKey(nameId) || (platform == 3 && language == 0x409)))
-                result[nameId] = value;
-        }
-        return result;
     }
 
     private static string SanitizePostScriptName(string name)
