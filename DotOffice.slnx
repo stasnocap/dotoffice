@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/DotOffice.Samples/DotOffice.Samples.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/DotOffice.Converter/DotOffice.Converter.csproj" />
+    <Project Path="src/DotOffice.Core/DotOffice.Core.csproj" />
+    <Project Path="src/DotOffice.Docx/DotOffice.Docx.csproj" />
+    <Project Path="src/DotOffice.Fonts/DotOffice.Fonts.csproj" />
+    <Project Path="src/DotOffice.Layout/DotOffice.Layout.csproj" />
+    <Project Path="src/DotOffice.Pdf/DotOffice.Pdf.csproj" />
+    <Project Path="src/DotOffice.Pptx/DotOffice.Pptx.csproj" />
+    <Project Path="src/DotOffice.Xlsx/DotOffice.Xlsx.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DotOffice.Tests/DotOffice.Tests.csproj" />
+  </Folder>
+</Solution>
