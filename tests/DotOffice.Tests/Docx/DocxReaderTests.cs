@@ -367,3 +367,31 @@ public class DocxReaderTests
         Assert.Equal("word/a b.png", OpcPackage.Resolve("word/document.xml", "a%20b.png"));
     }
 }
+public class DocxFuzzTests
+{
+    /// <summary>Corrupted packages must either convert or fail with InvalidDataException — never anything else.</summary>
+    [Fact]
+    public void Mutated_documents_fail_cleanly()
+    {
+        var builder = new DocxBuilder
+        {
+            Body = string.Concat(Enumerable.Range(0, 20).Select(i =>
+                DocxBuilder.P(DocxBuilder.R($"Paragraph {i}") + "<w:r><w:tab/><w:t>x</w:t></w:r>", "<w:jc w:val=\"both\"/>")))
+                + "<w:tbl><w:tblGrid><w:gridCol w:w=\"2000\"/></w:tblGrid><w:tr><w:tc>" + DocxBuilder.P(DocxBuilder.R("cell")) + "</w:tc></w:tr></w:tbl>",
+        };
+        var original = builder.Build();
+        var rng = new Random(1234);
+        for (int i = 0; i < 60; i++)
+        {
+            var bytes = (byte[])original.Clone();
+            for (int k = 0; k < 1 + i % 6; k++) bytes[rng.Next(bytes.Length)] ^= (byte)rng.Next(1, 256);
+            try
+            {
+                DocxReader.Read(new MemoryStream(bytes));
+            }
+            catch (InvalidDataException)
+            {
+            }
+        }
+    }
+}
