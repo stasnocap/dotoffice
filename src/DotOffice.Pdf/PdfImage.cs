@@ -1,23 +1,31 @@
 namespace DotOffice.Pdf;
 
-/// <summary>An image XObject. JPEG data is embedded as-is (DCTDecode) without decoding.</summary>
+/// <summary>
+/// An image XObject. JPEG data is embedded as-is (DCTDecode) without decoding; PNG data is decoded
+/// and re-embedded as FlateDecode samples with an optional soft mask for alpha.
+/// </summary>
 public sealed class PdfImage
 {
     private readonly byte[] _data;
-    private readonly int _components;
+    private readonly string _colorSpace;
+    private readonly bool _isJpeg;
     private readonly bool _adobeInverted;
+    private readonly byte[]? _alpha;
 
-    private PdfImage(byte[] data, int width, int height, int components, bool adobeInverted)
+    private PdfImage(byte[] data, int width, int height, string colorSpace, bool isJpeg, bool adobeInverted = false, byte[]? alpha = null)
     {
         _data = data;
         Width = width;
         Height = height;
-        _components = components;
+        _colorSpace = colorSpace;
+        _isJpeg = isJpeg;
         _adobeInverted = adobeInverted;
+        _alpha = alpha;
     }
 
     public int Width { get; }
     public int Height { get; }
+    public bool HasAlpha => _alpha is not null;
 
     internal string ResourceName { get; set; } = "";
 
@@ -45,22 +53,48 @@ public sealed class PdfImage
                 int height = (data[pos + 5] << 8) | data[pos + 6];
                 int width = (data[pos + 7] << 8) | data[pos + 8];
                 int components = data[pos + 9];
-                if (components is not (1 or 3 or 4))
-                    throw new NotSupportedException($"JPEG with {components} components is not supported.");
-                return new PdfImage(data, width, height, components, adobe && components == 4);
+                var colorSpace = components switch
+                {
+                    1 => "/DeviceGray",
+                    3 => "/DeviceRGB",
+                    4 => "/DeviceCMYK",
+                    _ => throw new NotSupportedException($"JPEG with {components} components is not supported."),
+                };
+                if (width <= 0 || height <= 0) throw new InvalidDataException("JPEG has invalid dimensions.");
+                return new PdfImage(data, width, height, colorSpace, isJpeg: true, adobe && components == 4);
             }
             pos += 2 + length;
         }
         throw new InvalidDataException("JPEG has no frame header.");
     }
 
+    /// <summary>Decodes a PNG (any standard color type/bit depth, interlaced or not).</summary>
+    public static PdfImage FromPng(byte[] data, long maxPixels = PngDecoder.DefaultMaxPixels)
+    {
+        var png = PngDecoder.Decode(data, maxPixels);
+        return new PdfImage(png.Color, png.Width, png.Height, png.Channels == 1 ? "/DeviceGray" : "/DeviceRGB",
+            isJpeg: false, alpha: png.Alpha);
+    }
+
     internal void Write(PdfWriter writer, int id)
     {
-        var colorSpace = _components switch { 1 => "/DeviceGray", 3 => "/DeviceRGB", _ => "/DeviceCMYK" };
-        var decode = _adobeInverted ? " /Decode [1 0 1 0 1 0 1 0]" : "";
-        writer.WriteStream(id,
-            $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace {colorSpace} " +
-            $"/BitsPerComponent 8 /Filter /DCTDecode{decode}",
-            _data, compress: false);
+        var dict = $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace {_colorSpace} /BitsPerComponent 8";
+        if (_isJpeg)
+        {
+            var decode = _adobeInverted ? " /Decode [1 0 1 0 1 0 1 0]" : "";
+            writer.WriteStream(id, $"{dict} /Filter /DCTDecode{decode}", _data, compress: false);
+            return;
+        }
+
+        if (_alpha is null)
+        {
+            writer.WriteStream(id, dict, _data);
+            return;
+        }
+        int maskId = writer.Allocate();
+        writer.WriteStream(id, $"{dict} /SMask {maskId} 0 R", _data);
+        writer.WriteStream(maskId,
+            $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace /DeviceGray /BitsPerComponent 8",
+            _alpha);
     }
 }
