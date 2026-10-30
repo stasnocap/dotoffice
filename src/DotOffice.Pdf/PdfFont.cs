@@ -11,13 +11,16 @@ public sealed class PdfFont
 {
     private readonly SortedDictionary<ushort, string> _usedGlyphs = new();
 
-    internal PdfFont(TrueTypeFont font, string resourceName)
+    internal PdfFont(TrueTypeFont font, string resourceName, bool embedded = true)
     {
         Font = font;
         ResourceName = resourceName;
+        IsEmbedded = embedded;
     }
 
     public TrueTypeFont Font { get; }
+
+    public bool IsEmbedded { get; }
 
     internal string ResourceName { get; }
 
@@ -40,10 +43,10 @@ public sealed class PdfFont
     {
         int cidFontId = writer.Allocate();
         int descriptorId = writer.Allocate();
-        int fontFileId = writer.Allocate();
+        int fontFileId = IsEmbedded ? writer.Allocate() : 0;
         int toUnicodeId = writer.Allocate();
 
-        var baseFont = SubsetTag() + "+" + Font.PostScriptName;
+        var baseFont = IsEmbedded ? SubsetTag() + "+" + Font.PostScriptName : Font.PostScriptName;
         double scale = 1000.0 / Font.UnitsPerEm;
 
         writer.WriteObject(type0Id,
@@ -58,16 +61,20 @@ public sealed class PdfFont
 
         var bbox = Font.BoundingBox;
         int flags = 4 | (Font.IsFixedPitch ? 1 : 0) | (Font.IsItalic ? 64 : 0);
+        var fontFile = IsEmbedded ? $" /FontFile2 {fontFileId} 0 R" : "";
         writer.WriteObject(descriptorId,
             $"<< /Type /FontDescriptor /FontName /{baseFont} /Flags {flags} " +
             $"/FontBBox [{PdfFormat.Number(bbox.XMin * scale)} {PdfFormat.Number(bbox.YMin * scale)} " +
             $"{PdfFormat.Number(bbox.XMax * scale)} {PdfFormat.Number(bbox.YMax * scale)}] " +
             $"/ItalicAngle {PdfFormat.Number(Font.ItalicAngle)} /Ascent {PdfFormat.Number(Font.Ascender * scale)} " +
             $"/Descent {PdfFormat.Number(Font.Descender * scale)} /CapHeight {PdfFormat.Number(Font.CapHeight * scale)} " +
-            $"/StemV {(Font.IsBold ? 120 : 80)} /FontFile2 {fontFileId} 0 R >>");
+            $"/StemV {(Font.IsBold ? 120 : 80)}{fontFile} >>");
 
-        var subset = TrueTypeSubsetter.Subset(Font, _usedGlyphs.Keys);
-        writer.WriteStream(fontFileId, $"/Length1 {subset.Length}", subset);
+        if (IsEmbedded)
+        {
+            var subset = TrueTypeSubsetter.Subset(Font, _usedGlyphs.Keys);
+            writer.WriteStream(fontFileId, $"/Length1 {subset.Length}", subset);
+        }
         writer.WriteStream(toUnicodeId, "", Encoding.ASCII.GetBytes(ToUnicodeCMap()));
     }
 

@@ -36,11 +36,15 @@ public sealed class PdfDocument
         return page;
     }
 
-    public PdfFont AddFont(TrueTypeFont font)
+    /// <summary>
+    /// Registers a font. With <paramref name="embed"/> false only metrics are written and viewers must
+    /// supply the font themselves (smaller files, but rendering depends on the reader's machine).
+    /// </summary>
+    public PdfFont AddFont(TrueTypeFont font, bool embed = true)
     {
-        if (font.IsEmbeddingRestricted)
+        if (embed && font.IsEmbeddingRestricted)
             throw new InvalidOperationException($"Font '{font.PostScriptName}' does not permit embedding.");
-        var pdfFont = new PdfFont(font, $"F{_fonts.Count + 1}");
+        var pdfFont = new PdfFont(font, $"F{_fonts.Count + 1}", embed);
         _fonts.Add(pdfFont);
         return pdfFont;
     }
