@@ -22,4 +22,9 @@
     <ProjectReference Include="..\..\src\DotOffice.Converter\DotOffice.Converter.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Assets/**" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\DotOffice.Pdf\DotOffice.Pdf.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -20,3 +20,17 @@ jobs:
             10.0.x
       - run: dotnet build -c Release
       - run: dotnet test -c Release --no-build
+      - name: Validate sample PDF
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y qpdf poppler-utils
+          dotnet run -c Release --project samples/DotOffice.Samples -- \
+            tests/DotOffice.Tests/Assets/NotoSans-Regular.ttf tests/DotOffice.Tests/Assets/gradient.jpg hello.pdf
+          qpdf --check hello.pdf
+          pdffonts hello.pdf
+          pdftotext hello.pdf - | grep -q "Привет, мир!"
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: hello-pdf
+          path: hello.pdf
