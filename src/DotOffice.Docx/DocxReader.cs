@@ -6,6 +6,7 @@ namespace DotOffice.Docx;
 /// <summary>Reads WordprocessingML (.docx) packages into the format-neutral <see cref="Document"/> model.</summary>
 public static class DocxReader
 {
+    /// <summary>Reads a DOCX package. Malformed or oversized input throws <see cref="InvalidDataException"/>.</summary>
     public static Document Read(Stream stream, DocxReaderOptions? options = null)
     {
         options ??= new DocxReaderOptions();
@@ -17,14 +18,19 @@ public static class DocxReader
             stream = buffer;
         }
 
-        using var package = new OpcPackage(stream, options);
-        var main = package.FindRelationship("", "officeDocument")
-                   ?? throw new InvalidDataException("Package has no main document (officeDocument relationship).");
-        if (!package.Exists(main.Target))
-            throw new InvalidDataException($"Main document part '{main.Target}' is missing.");
-
-        var context = new DocxContext(package, options, main.Target);
-        return context.ReadDocument();
+        try
+        {
+            using var package = new OpcPackage(stream, options);
+            var main = package.FindRelationship("", "officeDocument")
+                       ?? throw new InvalidDataException("Package has no main document (officeDocument relationship).");
+            if (!package.Exists(main.Target))
+                throw new InvalidDataException($"Main document part '{main.Target}' is missing.");
+            return new DocxContext(package, options, main.Target).ReadDocument();
+        }
+        catch (XmlException e)
+        {
+            throw new InvalidDataException($"The document contains malformed XML: {e.Message}", e);
+        }
     }
 
     private static void CopyLimited(Stream source, Stream target, long limit)
