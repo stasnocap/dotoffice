@@ -34,7 +34,7 @@ public sealed record TextItem(double X, double Baseline, TrueTypeFont Font, doub
     bool SyntheticBold = false, bool SyntheticItalic = false, double CharacterSpacing = 0) : LayoutItem
 {
     /// <summary>Set for dynamic fields whose text is substituted after pagination.</summary>
-    public FieldKind? Field { get; init; }
+    public FieldRun? Field { get; init; }
 
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Baseline = Baseline + dy };
 }
@@ -53,6 +53,18 @@ public sealed record RectItem(double X, double Y, double Width, double Height, C
 }
 
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+}
+
+/// <summary>A clickable area linking to a URI or to a bookmark (<see cref="AnchorItem"/>).</summary>
+public sealed record LinkItem(double X, double Y, double Width, double Height, Hyperlink Link) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+}
+
+/// <summary>The position of a bookmark (top of its line); paints nothing.</summary>
+public sealed record AnchorItem(string Name, double X, double Y) : LayoutItem
 {
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
 }

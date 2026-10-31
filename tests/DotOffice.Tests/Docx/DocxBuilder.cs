@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security;
 using System.Text;
 
 namespace DotOffice.Tests.Docx;
@@ -18,7 +19,7 @@ internal sealed class DocxBuilder
         "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" " +
         "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" mc:Ignorable=\"w14\"";
 
-    private readonly List<(string Id, string Type, string Target)> _relationships = [];
+    private readonly List<(string Id, string Type, string Target, bool External)> _relationships = [];
     private readonly Dictionary<string, byte[]> _parts = [];
     private int _nextId = 1;
 
@@ -39,7 +40,15 @@ internal sealed class DocxBuilder
     {
         var id = NextId();
         _parts[$"word/media/{fileName}"] = data;
-        _relationships.Add((id, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", $"media/{fileName}"));
+        _relationships.Add((id, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", $"media/{fileName}", false));
+        return id;
+    }
+
+    /// <summary>Adds an external hyperlink relationship and returns its id.</summary>
+    public string AddHyperlink(string url)
+    {
+        var id = NextId();
+        _relationships.Add((id, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", url, true));
         return id;
     }
 
@@ -54,12 +63,12 @@ internal sealed class DocxBuilder
         using var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var rels = new List<(string, string, string)>(_relationships);
+            var rels = new List<(string Id, string Type, string Target, bool External)>(_relationships);
             void Optional(string? xml, string root, string file, string type)
             {
                 if (xml is null) return;
                 Write(zip, $"word/{file}", $"<w:{root} {Namespaces}>{xml}</w:{root}>");
-                rels.Add((NextId(), $"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{type}", file));
+                rels.Add((NextId(), $"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{type}", file, false));
             }
             Optional(Styles, "styles", "styles.xml", "styles");
             Optional(Numbering, "numbering", "numbering.xml", "numbering");
@@ -68,7 +77,7 @@ internal sealed class DocxBuilder
             {
                 Write(zip, "word/theme/theme1.xml",
                     $"<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"T\"><a:themeElements>{Theme}</a:themeElements></a:theme>");
-                rels.Add((NextId(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme", "theme/theme1.xml"));
+                rels.Add((NextId(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme", "theme/theme1.xml", false));
             }
             foreach (var (name, data) in _parts)
             {
@@ -94,7 +103,8 @@ internal sealed class DocxBuilder
             Write(zip, "word/document.xml", $"<w:document {Namespaces}><w:body>{Body}</w:body></w:document>");
             Write(zip, "word/_rels/document.xml.rels",
                 "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
-                string.Concat(rels.Select(r => $"<Relationship Id=\"{r.Item1}\" Type=\"{r.Item2}\" Target=\"{r.Item3}\"/>")) +
+                string.Concat(rels.Select(r => $"<Relationship Id=\"{r.Id}\" Type=\"{r.Type}\" Target=\"{SecurityElement.Escape(r.Target)}\"" +
+                                               (r.External ? " TargetMode=\"External\"/>" : "/>"))) +
                 "</Relationships>");
         }
         return ms.ToArray();
@@ -107,7 +117,7 @@ internal sealed class DocxBuilder
         var id = NextId();
         var file = $"{type}{_nextId}.xml";
         _parts[$"word/{file}"] = Encoding.UTF8.GetBytes($"<w:{root} {Namespaces}>{innerXml}</w:{root}>");
-        _relationships.Add((id, $"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{type}", file));
+        _relationships.Add((id, $"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{type}", file, false));
         return id;
     }
 
@@ -124,7 +134,7 @@ internal sealed class DocxBuilder
     public static string P(string runs, string pPr = "") => $"<w:p>{(pPr.Length > 0 ? $"<w:pPr>{pPr}</w:pPr>" : "")}{runs}</w:p>";
 
     public static string R(string text, string rPr = "") =>
-        $"<w:r>{(rPr.Length > 0 ? $"<w:rPr>{rPr}</w:rPr>" : "")}<w:t xml:space=\"preserve\">{System.Security.SecurityElement.Escape(text)}</w:t></w:r>";
+        $"<w:r>{(rPr.Length > 0 ? $"<w:rPr>{rPr}</w:rPr>" : "")}<w:t xml:space=\"preserve\">{SecurityElement.Escape(text)}</w:t></w:r>";
 
     public static string Section(int widthTwips = 12240, int heightTwips = 15840, string extra = "", int margin = 1440) =>
         $"<w:sectPr>{extra}<w:pgSz w:w=\"{widthTwips}\" w:h=\"{heightTwips}\"{(widthTwips > heightTwips ? " w:orient=\"landscape\"" : "")}/>" +

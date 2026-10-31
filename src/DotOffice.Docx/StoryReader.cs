@@ -19,13 +19,28 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     private StyleSheet Styles => context.Styles;
 
+    private readonly Stack<Hyperlink> _links = new();
+    private readonly Dictionary<string, string> _openBookmarks = new(StringComparer.Ordinal);
+
     private sealed class FieldFrame
     {
         public StringBuilder Instruction { get; } = new();
         public bool Separated { get; set; }
-        public bool Emitted { get; set; }
-        public FieldKind? Kind { get; set; }
+        public FieldInstruction? Field { get; set; }
         public RunProperties? Properties { get; init; }
+
+        /// <summary>The run that replaces the cached result of a field we evaluate ourselves.</summary>
+        public Inline? Emitted { get; set; }
+
+        /// <summary>Some cached result content was shown.</summary>
+        public bool HasResult { get; set; }
+
+        public void Separate()
+        {
+            if (Separated) return;
+            Separated = true;
+            Field = FieldInstruction.Parse(Instruction.ToString());
+        }
     }
 
     private sealed class BlockSink(List<Block> target, Func<SectionData, List<Block>>? onSection)
@@ -235,6 +250,24 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 ReadRun(r, state);
                 break;
             case "hyperlink":
+                var link = HyperlinkTarget(r);
+                if (link is not null) _links.Push(link);
+                if (r.Enter()) ReadInlines(r, depth, state);
+                if (link is not null) _links.Pop();
+                break;
+            case "bookmarkStart":
+                if (r.WAttr("name") is { Length: > 0 } name)
+                {
+                    if (r.WAttr("id") is { } bookmarkId) _openBookmarks[bookmarkId] = name;
+                    context.Bookmarks.TryAdd(name, new StringBuilder());
+                    AddInline(state, new BookmarkStart(name, state.Paragraph.MarkProperties));
+                }
+                r.Skip();
+                break;
+            case "bookmarkEnd":
+                if (r.WAttr("id") is { } endId) _openBookmarks.Remove(endId);
+                r.Skip();
+                break;
             case "smartTag":
             case "customXml":
             case "ins":
@@ -251,7 +284,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 });
                 break;
             case "fldSimple":
-                var frame = new FieldFrame { Separated = true, Kind = ParseField(r.WAttr("instr")), Properties = state.Paragraph.MarkProperties };
+                var frame = new FieldFrame { Properties = state.Paragraph.MarkProperties };
+                frame.Instruction.Append(r.WAttr("instr"));
+                frame.Separate();
                 _fields.Push(frame);
                 if (r.Enter()) ReadInlines(r, depth, state);
                 EndField(state);
@@ -296,7 +331,7 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     continue;
                 case "t":
                     var text = r.ReadText();
-                    if (!Suppressed(Props(), state)) AddText(state, text, Props());
+                    if (!Suppressed(Props(), state, text)) AddText(state, text, Props());
                     continue;
                 case "instrText":
                     var instruction = r.ReadText();
@@ -304,24 +339,24 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     continue;
                 case "tab":
                 case "ptab":
-                    if (!Suppressed(Props(), state)) state.Paragraph.Inlines.Add(new Tab(Props()));
+                    if (!Suppressed(Props(), state)) AddInline(state, new Tab(Props()));
                     break;
                 case "br":
                 case "cr":
                     if (!Suppressed(Props(), state))
                     {
                         var kind = r.WAttr("type") switch { "page" => BreakKind.Page, "column" => BreakKind.Column, _ => BreakKind.Line };
-                        state.Paragraph.Inlines.Add(new Break(r.LocalName == "cr" ? BreakKind.Line : kind, Props()));
+                        AddInline(state, new Break(r.LocalName == "cr" ? BreakKind.Line : kind, Props()));
                     }
                     break;
                 case "noBreakHyphen":
-                    if (!Suppressed(Props(), state)) AddText(state, "‑", Props());
+                    if (!Suppressed(Props(), state, "‑")) AddText(state, "‑", Props());
                     break;
                 case "sym":
                     if (!Suppressed(Props(), state)) AddSymbol(r, state, Props());
                     break;
                 case "pgNum":
-                    if (!Suppressed(Props(), state)) state.Paragraph.Inlines.Add(new FieldRun(FieldKind.Page, Props()));
+                    if (!Suppressed(Props(), state)) AddInline(state, new FieldRun(FieldKind.Page, Props()));
                     break;
                 case "fldChar":
                     HandleFieldChar(r.WAttr("fldCharType"), state, Props());
@@ -348,7 +383,33 @@ internal sealed class StoryReader(DocxContext context, string partName)
         if (text.Length == 0) return;
         if (SymbolFonts.IsSymbolFont(props.FontFamily)) text = SymbolFonts.Map(props.FontFamily, text);
         text = text.Replace("­", ""); // soft hyphens are invisible unless a line breaks there
-        if (text.Length > 0) state.Paragraph.Inlines.Add(new TextRun(text, props));
+        if (text.Length > 0) AddInline(state, new TextRun(text, props));
+    }
+
+    /// <summary>Adds an inline to the paragraph, attaching the current hyperlink and recording bookmark text.</summary>
+    private void AddInline(ParagraphState state, Inline inline)
+    {
+        inline.Link ??= CurrentLink();
+        if (inline is TextRun text && _openBookmarks.Count > 0)
+            foreach (var name in _openBookmarks.Values)
+                if (context.Bookmarks.TryGetValue(name, out var sb) && sb.Length < 4096) sb.Append(text.Text);
+        state.Paragraph.Inlines.Add(inline);
+    }
+
+    private Hyperlink? CurrentLink()
+    {
+        foreach (var f in _fields)
+            if (f.Separated && f.Field?.Link is { } link) return link;
+        return _links.TryPeek(out var current) ? current : null;
+    }
+
+    private Hyperlink? HyperlinkTarget(XmlReader r)
+    {
+        var anchor = r.WAttr("anchor");
+        string? uri = null;
+        if (r.RAttr("id") is { } id && context.Package.GetRelationships(partName).TryGetValue(id, out var rel) && rel.IsExternal)
+            uri = rel.Target;
+        return uri is null && anchor is null ? null : new Hyperlink(uri, anchor);
     }
 
     private void AddSymbol(XmlReader r, ParagraphState state, RunProperties props)
@@ -359,16 +420,16 @@ internal sealed class StoryReader(DocxContext context, string partName)
         var text = ((char)code).ToString();
         if (SymbolFonts.IsSymbolFont(font)) text = SymbolFonts.Map(font!, text, unknown: '□');
         else if (font is not null) props = props with { FontFamily = font };
-        state.Paragraph.Inlines.Add(new TextRun(text, props));
+        AddInline(state, new TextRun(text, props));
     }
 
     private static void MergeAdjacentText(List<Inline> inlines)
     {
         for (int i = inlines.Count - 1; i > 0; i--)
         {
-            if (inlines[i] is TextRun b && inlines[i - 1] is TextRun a && ReferenceEquals(a.Properties, b.Properties))
+            if (inlines[i] is TextRun b && inlines[i - 1] is TextRun a && ReferenceEquals(a.Properties, b.Properties) && a.Link == b.Link)
             {
-                inlines[i - 1] = new TextRun(a.Text + b.Text, a.Properties);
+                inlines[i - 1] = new TextRun(a.Text + b.Text, a.Properties) { Link = a.Link };
                 inlines.RemoveAt(i);
             }
         }
@@ -378,25 +439,39 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     /// <summary>
     /// Decides whether run content is shown. Instructions are always hidden. For fields we evaluate
-    /// ourselves (PAGE, NUMPAGES) the first piece of cached result is replaced by a <see cref="FieldRun"/>
-    /// carrying that run's formatting, and the rest of the cached result is hidden.
+    /// ourselves (PAGE, PAGEREF, REF…) the first piece of cached result is replaced by a <see cref="FieldRun"/>
+    /// (or a REF placeholder) carrying that run's formatting, and the rest of the cached result is hidden.
     /// </summary>
-    private bool Suppressed(RunProperties props, ParagraphState state)
+    private bool Suppressed(RunProperties props, ParagraphState state, string? text = null)
     {
         if (_fields.Count == 0) return false;
         foreach (var f in _fields)
             if (!f.Separated) return true;
         foreach (var f in _fields)
         {
-            if (f.Kind is not { } kind) continue;
-            if (!f.Emitted)
+            if (f.Field is not { IsEvaluated: true } field)
             {
-                f.Emitted = true;
-                state.Paragraph.Inlines.Add(new FieldRun(kind, props));
+                f.HasResult = true;
+                continue;
             }
+            if (f.Emitted is null)
+            {
+                f.Emitted = field.CreateInline(props);
+                AddInline(state, f.Emitted);
+            }
+            if (text is not null) AppendCached(f.Emitted, text);
             return true;
         }
         return false;
+    }
+
+    private static void AppendCached(Inline inline, string text)
+    {
+        switch (inline)
+        {
+            case FieldRun run: run.CachedResult += text; break;
+            case RefPlaceholder placeholder: placeholder.CachedResult += text; break;
+        }
     }
 
     private void HandleFieldChar(string? type, ParagraphState state, RunProperties props)
@@ -407,41 +482,26 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 _fields.Push(new FieldFrame { Properties = props });
                 break;
             case "separate":
-                if (_fields.TryPeek(out var frame) && !frame.Separated)
-                {
-                    frame.Separated = true;
-                    frame.Kind = ParseField(frame.Instruction.ToString());
-                }
+                if (_fields.TryPeek(out var frame)) frame.Separate();
                 break;
             case "end":
-                if (_fields.TryPeek(out var ending) && !ending.Separated)
-                {
-                    ending.Separated = true;
-                    ending.Kind = ParseField(ending.Instruction.ToString());
-                }
+                if (_fields.TryPeek(out var ending)) ending.Separate();
                 EndField(state);
                 break;
         }
     }
 
-    /// <summary>Closes the innermost field; a supported field without cached result is emitted now.</summary>
+    /// <summary>Closes the innermost field; an evaluated field without cached result is emitted now.</summary>
     private void EndField(ParagraphState state)
     {
         if (!_fields.TryPop(out var frame)) return;
-        if (frame.Kind is { } kind && !frame.Emitted && !_fields.Any(f => !f.Separated || f.Emitted))
-            state.Paragraph.Inlines.Add(new FieldRun(kind, frame.Properties ?? state.Paragraph.MarkProperties));
-    }
-
-    private static FieldKind? ParseField(string? instruction)
-    {
-        if (instruction is null) return null;
-        var name = instruction.Trim().Split(' ', 2)[0].ToUpperInvariant();
-        return name switch
-        {
-            "PAGE" => FieldKind.Page,
-            "NUMPAGES" => FieldKind.NumPages,
-            _ => null,
-        };
+        bool hidden = _fields.Any(f => !f.Separated || f.Emitted is not null);
+        if (hidden || frame.Field is not { } field) return;
+        var props = frame.Properties ?? state.Paragraph.MarkProperties;
+        if (field.IsEvaluated && frame.Emitted is null)
+            AddInline(state, field.CreateInline(props));
+        else if (!frame.HasResult && field.Name is "DATE" or "TIME")
+            AddText(state, FieldInstruction.FormatDate(DateTime.Now, field.Picture ?? (field.Name == "TIME" ? "h:mm am/pm" : "M/d/yyyy")), props);
     }
 
     // ---------------------------------------------------------------- drawings

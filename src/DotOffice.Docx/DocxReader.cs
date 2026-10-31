@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml;
 using DotOffice.Core;
 
@@ -113,6 +114,9 @@ internal sealed class DocxContext
     public Numbering Numbering { get; }
     public DocxSettings Settings { get; }
 
+    /// <summary>Bookmark names and the text they enclose (for REF fields), shared by all stories.</summary>
+    public Dictionary<string, StringBuilder> Bookmarks { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public void Warn(string code, string message) => Options.Warnings.Warn(code, message);
 
     /// <summary>Emits a warning once per code (for content that is skipped wholesale).</summary>
@@ -160,7 +164,45 @@ internal sealed class DocxContext
             var section = BuildSection(new SectionData(), previous, blocks);
             document.Sections.Add(section);
         }
+        ResolveReferences(document);
         return document;
+    }
+
+    /// <summary>Replaces REF placeholders by the bookmarked text (forward references are allowed).</summary>
+    private void ResolveReferences(Document document)
+    {
+        var stories = document.Sections.Select(s => s.Blocks)
+            .Concat(_headerFooters.Values.Select(h => h.Blocks));
+        foreach (var blocks in stories)
+            foreach (var paragraph in Paragraphs(blocks))
+            {
+                var inlines = paragraph.Inlines;
+                for (int i = 0; i < inlines.Count; i++)
+                {
+                    if (inlines[i] is not RefPlaceholder placeholder) continue;
+                    var text = Bookmarks.TryGetValue(placeholder.Bookmark, out var sb) && sb.Length > 0
+                        ? sb.ToString()
+                        : placeholder.CachedResult;
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        Warn("docx.ref-missing", $"REF field points to unknown bookmark '{placeholder.Bookmark}'.");
+                        text = "Error! Reference source not found.";
+                    }
+                    inlines[i] = new TextRun(text, placeholder.Properties) { Link = placeholder.Link };
+                }
+            }
+    }
+
+    private static IEnumerable<Paragraph> Paragraphs(IEnumerable<Block> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block is Paragraph p) yield return p;
+            else if (block is Table t)
+                foreach (var cell in t.Rows.SelectMany(r => r.Cells))
+                    foreach (var nested in Paragraphs(cell.Blocks))
+                        yield return nested;
+        }
     }
 
     private Section BuildSection(SectionData d, Section? previous, List<Block> blocks)

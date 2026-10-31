@@ -39,7 +39,7 @@ internal sealed class FlowContext
     public required FontSelector Fonts { get; init; }
     public required Itemizer Itemizer { get; init; }
     public required DocumentSettings Settings { get; init; }
-    public required Func<FieldKind, string> FieldText { get; init; }
+    public required Func<FieldRun, string> FieldText { get; init; }
     public IConversionWarningSink? Warnings { get; init; }
     public int Depth { get; init; }
 
@@ -163,6 +163,7 @@ internal static class ParagraphLayouter
             if (props.Shading is { } shading)
                 slice.Items.Add(new RectItem(areaLeft, areaTop, areaRight - areaLeft, y - areaTop, shading));
             DrawLine(line, x0, lineTop + baseline, slice.Items);
+            AddLinks(line, x0, lineTop, lineTop + height, slice.Items);
             if (first && topBorder.IsVisible)
                 AddBorder(slice.Items, topBorder, areaLeft, areaTop + topBorder.Width / 2, areaRight, areaTop + topBorder.Width / 2);
             if (last && bottomBorder.IsVisible)
@@ -257,6 +258,30 @@ internal static class ParagraphLayouter
         }
 
         DrawDecorations(atoms, visible, x0, baseline, items);
+    }
+
+    /// <summary>Emits bookmark anchors and one link rectangle per run of atoms sharing a hyperlink.</summary>
+    internal static void AddLinks(Line line, double x0, double top, double bottom, List<LayoutItem> items)
+    {
+        LinkItem? pending = null;
+        foreach (var a in line.Atoms)
+        {
+            if (a.Kind == AtomKind.Marker)
+            {
+                items.Add(new AnchorItem(a.Bookmark!, x0 + a.X, top));
+                continue;
+            }
+            if (a.Link is null || a.Kind is AtomKind.LineBreak or AtomKind.PageBreak) continue;
+            double x = x0 + a.X;
+            if (pending is not null && pending.Link == a.Link && Math.Abs(pending.X + pending.Width - x) < 0.5)
+                pending = pending with { Width = x + a.Advance - pending.X };
+            else
+            {
+                if (pending is not null) items.Add(pending);
+                pending = new LinkItem(x, top, a.Advance, bottom - top, a.Link);
+            }
+        }
+        if (pending is not null) items.Add(pending);
     }
 
     private static void DrawDecorations(List<Atom> atoms, int visible, double x0, double baseline, List<LayoutItem> items)

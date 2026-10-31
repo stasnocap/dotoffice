@@ -44,11 +44,42 @@ public sealed class LayoutEngine
         public bool IsRepeated(Slice s) => Repeated.Contains(s);
     }
 
+    /// <summary>Page number and number format of a page, as seen by PAGEREF fields.</summary>
+    private readonly record struct PageLabel(int Number, PageNumberFormat Format);
+
     public LayoutDocument Layout(Document document, CancellationToken cancellationToken = default)
+    {
+        // PAGEREF results are only known after pagination; when the document has any, it is laid out
+        // a second time with the page numbers from the first pass so that their widths are right.
+        var pages = Paginate(document, null, out bool usesPageRefs, cancellationToken);
+        if (usesPageRefs) pages = Paginate(document, Bookmarks(pages), out _, cancellationToken);
+
+        var settings = document.Settings;
+        var fields = new FieldValues(pages.Count, Bookmarks(pages),
+            pages.GroupBy(p => p.Section).ToDictionary(g => g.Key, g => g.Count()));
+        var result = new LayoutDocument { Title = document.Title, Author = document.Author };
+        foreach (var page in pages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result.Pages.Add(Render(page, fields, settings));
+        }
+        return result;
+    }
+
+    private List<Page> Paginate(Document document, Dictionary<string, PageLabel>? bookmarks, out bool usesPageRefs,
+        CancellationToken cancellationToken)
     {
         var pages = new List<Page>();
         var settings = document.Settings;
-        var bodyContext = Context(settings, kind => kind == FieldKind.Page ? "1" : "1");
+        bool pageRefs = false;
+        var bodyContext = Context(settings, field =>
+        {
+            if (field.Kind != FieldKind.PageRef) return "1";
+            pageRefs = true;
+            return bookmarks is not null && field.Bookmark is not null && bookmarks.TryGetValue(field.Bookmark, out var label)
+                ? Format(label.Number, field.NumberFormat ?? label.Format)
+                : field.CachedResult is { Length: > 0 } cached ? cached : "1";
+        });
 
         Page? current = null;
         int pageNumber = 0;
@@ -80,15 +111,34 @@ public sealed class LayoutEngine
             foreach (var slice in slices) paginator.Add(slice);
             current = pages[^1];
         }
+        usesPageRefs = pageRefs;
+        return pages;
+    }
 
-        var result = new LayoutDocument { Title = document.Title, Author = document.Author };
-        int total = pages.Count;
+    /// <summary>The page of every bookmark in the body (first occurrence wins).</summary>
+    private static Dictionary<string, PageLabel> Bookmarks(List<Page> pages)
+    {
+        var result = new Dictionary<string, PageLabel>(StringComparer.OrdinalIgnoreCase);
         foreach (var page in pages)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            result.Pages.Add(Render(page, total, settings));
-        }
+            foreach (var (slice, _) in page.Placed)
+                foreach (var item in slice.Items)
+                    if (item is AnchorItem anchor)
+                        result.TryAdd(anchor.Name, new PageLabel(page.Number, page.Section.PageNumberFormat));
         return result;
+    }
+
+    /// <summary>Values of page-dependent fields once pagination is final.</summary>
+    private sealed class FieldValues(int total, Dictionary<string, PageLabel> bookmarks, Dictionary<Section, int> sectionPages)
+    {
+        public string Text(FieldRun field, Page page) => field.Kind switch
+        {
+            FieldKind.Page => Format(page.Number, field.NumberFormat ?? page.Section.PageNumberFormat),
+            FieldKind.NumPages => Format(total, field.NumberFormat ?? PageNumberFormat.Decimal),
+            FieldKind.SectionPages => Format(sectionPages.GetValueOrDefault(page.Section, 1), field.NumberFormat ?? PageNumberFormat.Decimal),
+            FieldKind.PageRef when field.Bookmark is not null && bookmarks.TryGetValue(field.Bookmark, out var label) =>
+                Format(label.Number, field.NumberFormat ?? label.Format),
+            _ => field.CachedResult is { Length: > 0 } cached ? cached : "Error! Bookmark not defined.",
+        };
     }
 
     private static int NextNumber(Section section, ref Section? numberingSection, ref int number)
@@ -101,7 +151,7 @@ public sealed class LayoutEngine
         return ++number;
     }
 
-    private FlowContext Context(DocumentSettings settings, Func<FieldKind, string> fieldText) => new()
+    private FlowContext Context(DocumentSettings settings, Func<FieldRun, string> fieldText) => new()
     {
         Fonts = _fonts, Itemizer = _itemizer, Settings = settings, FieldText = fieldText, Warnings = _options.Warnings,
     };
@@ -114,7 +164,9 @@ public sealed class LayoutEngine
         var footer = first ? section.FirstFooter : even ? section.EvenFooter : section.DefaultFooter;
 
         double top = section.Margins.Top, bottom = section.PageHeight - section.Margins.Bottom;
-        var placeholder = Context(settings, kind => kind == FieldKind.Page ? Format(number, section.PageNumberFormat) : "99");
+        var placeholder = Context(settings, field => field.Kind == FieldKind.Page
+            ? Format(number, field.NumberFormat ?? section.PageNumberFormat)
+            : field.Kind == FieldKind.PageRef ? field.CachedResult ?? "99" : "99");
         if (header is not null)
         {
             double h = BlockFlow.Stack(BlockFlow.Build(header.Blocks, section.Margins.Left, section.ContentWidth, placeholder), []);
@@ -135,39 +187,37 @@ public sealed class LayoutEngine
         };
     }
 
-    private LayoutPage Render(Page page, int total, DocumentSettings settings)
+    private LayoutPage Render(Page page, FieldValues fields, DocumentSettings settings)
     {
         var output = new LayoutPage(page.Width, page.Height);
         var section = page.Section;
-        string pageText = Format(page.Number, section.PageNumberFormat);
-        string totalText = total.ToString(CultureInfo.InvariantCulture);
-        var context = Context(settings, kind => kind == FieldKind.Page ? pageText : totalText);
+        var context = Context(settings, field => fields.Text(field, page));
 
         if (page.Header is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
             BlockFlow.Stack(BlockFlow.Build(page.Header.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
-            foreach (var (y, slice) in stacked) Emit(output, slice, section.HeaderDistance + y, pageText, totalText);
+            foreach (var (y, slice) in stacked) Emit(output, slice, section.HeaderDistance + y, page, fields);
         }
         if (page.Footer is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
             double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
             double top = page.Height - section.FooterDistance - h;
-            foreach (var (y, slice) in stacked) Emit(output, slice, top + y, pageText, totalText);
+            foreach (var (y, slice) in stacked) Emit(output, slice, top + y, page, fields);
         }
-        foreach (var (slice, y) in page.Placed) Emit(output, slice, y, pageText, totalText);
+        foreach (var (slice, y) in page.Placed) Emit(output, slice, y, page, fields);
         return output;
     }
 
-    private static void Emit(LayoutPage page, Slice slice, double y, string pageText, string totalText)
+    private static void Emit(LayoutPage output, Slice slice, double y, Page page, FieldValues fields)
     {
         foreach (var item in slice.Items)
         {
             var moved = item.Offset(0, y);
             if (moved is TextItem { Field: { } field } text)
-                moved = text with { Text = field == FieldKind.Page ? pageText : totalText };
-            page.Items.Add(moved);
+                moved = text with { Text = fields.Text(field, page) };
+            output.Items.Add(moved);
         }
     }
 

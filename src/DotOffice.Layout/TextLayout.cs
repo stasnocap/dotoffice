@@ -5,7 +5,7 @@ using DotOffice.Layout.LineBreaking;
 
 namespace DotOffice.Layout;
 
-internal enum AtomKind { Text, Space, Tab, Image, LineBreak, PageBreak }
+internal enum AtomKind { Text, Space, Tab, Image, LineBreak, PageBreak, Marker }
 
 /// <summary>
 /// The smallest unit of inline layout: a stretch of text in one font without break opportunities
@@ -25,7 +25,11 @@ internal sealed class Atom
 
     public double Width { get; init; }
     public ImageRun? Image { get; init; }
-    public FieldKind? Field { get; init; }
+    public FieldRun? Field { get; init; }
+    public Hyperlink? Link { get; init; }
+
+    /// <summary>Bookmark name of a <see cref="AtomKind.Marker"/> atom.</summary>
+    public string? Bookmark { get; init; }
     public TabStop? Tab { get; set; }
 
     /// <summary>Part of the list label text (not its suffix).</summary>
@@ -62,7 +66,7 @@ internal sealed class Itemizer(FontSelector fonts)
     private readonly record struct Segment(AtomKind Kind, string Text, RunProperties Props, Inline? Inline, bool IsLabel = false);
 
     /// <summary>Builds atoms for a paragraph; <paramref name="fieldText"/> supplies text for page-number fields.</summary>
-    public List<Atom> Itemize(Paragraph paragraph, Func<FieldKind, string> fieldText)
+    public List<Atom> Itemize(Paragraph paragraph, Func<FieldRun, string> fieldText)
     {
         var segments = new List<Segment>();
         if (paragraph.ListLabel is { } label && !label.Properties.Hidden)
@@ -77,7 +81,7 @@ internal sealed class Itemizer(FontSelector fonts)
             switch (inline)
             {
                 case TextRun t:
-                    AddText(segments, Transform(t.Text, t.Properties), t.Properties);
+                    AddText(segments, Transform(t.Text, t.Properties), t.Properties, t);
                     break;
                 case Tab:
                     segments.Add(new Segment(AtomKind.Tab, "\t", inline.Properties, inline));
@@ -92,7 +96,10 @@ internal sealed class Itemizer(FontSelector fonts)
                     segments.Add(new Segment(AtomKind.PageBreak, "\f", inline.Properties, inline));
                     break;
                 case FieldRun f:
-                    segments.Add(new Segment(AtomKind.Text, fieldText(f.Kind), inline.Properties, inline));
+                    segments.Add(new Segment(AtomKind.Text, fieldText(f), inline.Properties, inline));
+                    break;
+                case BookmarkStart:
+                    segments.Add(new Segment(AtomKind.Marker, "", inline.Properties, inline));
                     break;
             }
         }
@@ -111,11 +118,15 @@ internal sealed class Itemizer(FontSelector fonts)
             switch (s.Kind)
             {
                 case AtomKind.Tab:
-                    atoms.Add(new Atom { Kind = AtomKind.Tab, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before });
+                    atoms.Add(new Atom { Kind = AtomKind.Tab, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before, Link = s.Inline?.Link });
                     break;
                 case AtomKind.Image:
                     var image = (ImageRun)s.Inline!;
-                    atoms.Add(new Atom { Kind = AtomKind.Image, Props = s.Props, Image = image, Width = image.Width, BreakBefore = before });
+                    atoms.Add(new Atom { Kind = AtomKind.Image, Props = s.Props, Image = image, Width = image.Width, BreakBefore = before, Link = image.Link });
+                    break;
+                case AtomKind.Marker:
+                    // Glued to the preceding text so a bookmark never starts a line of its own.
+                    atoms.Add(new Atom { Kind = AtomKind.Marker, Props = s.Props, Bookmark = ((BookmarkStart)s.Inline!).Name, BreakBefore = LineBreakOpportunity.None });
                     break;
                 case AtomKind.LineBreak:
                 case AtomKind.PageBreak:
@@ -130,18 +141,18 @@ internal sealed class Itemizer(FontSelector fonts)
         return atoms;
     }
 
-    private static void AddText(List<Segment> segments, string text, RunProperties props)
+    private static void AddText(List<Segment> segments, string text, RunProperties props, Inline source)
     {
         int start = 0;
         for (int i = 0; i <= text.Length; i++)
         {
             char c = i < text.Length ? text[i] : '\0';
             if (i < text.Length && c is not ('\t' or '\n' or '\r' or '\v' or '\f')) continue;
-            if (i > start) segments.Add(new Segment(AtomKind.Text, text[start..i], props, null));
-            if (c == '\t') segments.Add(new Segment(AtomKind.Tab, "\t", props, null));
+            if (i > start) segments.Add(new Segment(AtomKind.Text, text[start..i], props, source));
+            if (c == '\t') segments.Add(new Segment(AtomKind.Tab, "\t", props, source));
             else if (c is '\n' or '\v' || (c == '\r' && (i + 1 >= text.Length || text[i + 1] != '\n')))
-                segments.Add(new Segment(AtomKind.LineBreak, "\n", props, null));
-            else if (c == '\f') segments.Add(new Segment(AtomKind.PageBreak, "\f", props, null));
+                segments.Add(new Segment(AtomKind.LineBreak, "\n", props, source));
+            else if (c == '\f') segments.Add(new Segment(AtomKind.PageBreak, "\f", props, source));
             start = i + 1;
         }
     }
@@ -152,7 +163,7 @@ internal sealed class Itemizer(FontSelector fonts)
     private void AddTextAtoms(List<Atom> atoms, Segment s, string all, int offset, LineBreakOpportunity[] breaks)
     {
         var props = s.Props;
-        var field = (s.Inline as FieldRun)?.Kind;
+        var field = s.Inline as FieldRun;
         double baseSize = props.FontSize;
         double size = props.VerticalPosition == VerticalPosition.Baseline ? baseSize : baseSize * 2 / 3;
         double rise = props.BaselineShift + props.VerticalPosition switch
@@ -174,11 +185,12 @@ internal sealed class Itemizer(FontSelector fonts)
             i += char.IsSurrogatePair(text, start) ? 2 : 1;
             while (i < text.Length)
             {
+                // A field result stays one atom: its text is substituted after pagination.
                 if (field is null && breaks[offset + i] != LineBreakOpportunity.None) break;
-                if ((text[i] == ' ') != isSpace) break;
+                if (field is null && (text[i] == ' ') != isSpace) break;
                 if (props.SmallCaps && char.IsLower(text[i]) != small) break;
                 int next = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
-                if (!isSpace && !char.IsLowSurrogate(text[i]) && !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)
+                if (field is null && !isSpace && !char.IsLowSurrogate(text[i]) && !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)
                     && !IsCombining(next))
                     break;
                 i += char.IsSurrogatePair(text, i) ? 2 : 1;
@@ -196,6 +208,7 @@ internal sealed class Itemizer(FontSelector fonts)
                 Size = atomSize,
                 Rise = rise,
                 Field = field,
+                Link = s.Inline?.Link,
                 Width = font.Font.MeasureText(piece, atomSize) + props.CharacterSpacing * piece.Length,
                 BreakBefore = offset + start < breaks.Length ? breaks[offset + start] : LineBreakOpportunity.None,
             });
@@ -372,7 +385,7 @@ internal static class LineBuilder
 
     private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore) => new()
     {
-        Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field,
+        Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link,
         Width = Measure(a, text), BreakBefore = breakBefore,
     };
 
@@ -384,7 +397,7 @@ internal static class LineBuilder
         double contentEnd = Position(atoms, 0, atoms.Count, startX, frame);
 
         int visible = atoms.Count;
-        while (visible > 0 && atoms[visible - 1].Kind is AtomKind.Space or AtomKind.LineBreak or AtomKind.PageBreak) visible--;
+        while (visible > 0 && atoms[visible - 1].Kind is AtomKind.Space or AtomKind.LineBreak or AtomKind.PageBreak or AtomKind.Marker) visible--;
         line.VisibleCount = visible;
 
         double extra = maxX - contentEnd;
