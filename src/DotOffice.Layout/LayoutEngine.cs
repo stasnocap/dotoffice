@@ -645,6 +645,7 @@ public sealed class LayoutEngine
                 if (!page.ColumnHasBody && slice.RepeatHeader is { } header && !slice.IsHeaderRow && page.ColumnCount == 0)
                     foreach (var h in header) Put(page, h, builtX, repeated: true);
 
+                if (slice is RowSlice) SkipFloats(page, slice);
                 double available = page.BodyBottom - page.Cursor;
                 if (page.NaturalBreak && page.ColumnCount == 0) available += slice.LeadingSpace;
                 var area = slice.Footnotes.Count > 0 ? page.NoteAreaFor(page.Region.Columns[page.Column]) : null;
@@ -688,6 +689,22 @@ public sealed class LayoutEngine
                     continue;
                 }
                 NextColumn();
+            }
+        }
+
+        /// <summary>Moves the cursor below wrapped floats beside <paramref name="slice"/>: table rows do not wrap, as in Word.</summary>
+        private static void SkipFloats(Page page, Slice slice)
+        {
+            var (x, width) = page.Region.Columns[page.Column];
+            for (bool moved = true; moved;)
+            {
+                moved = false;
+                foreach (var e in page.Exclusions)
+                    if (e.X < x + width && e.Right > x && e.Y < page.Cursor + slice.Height && e.Bottom > page.Cursor)
+                    {
+                        page.Cursor = e.Bottom;
+                        moved = true;
+                    }
             }
         }
 

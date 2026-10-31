@@ -98,4 +98,14 @@ public class FloatTests
         Assert.Equal(500000 / 12700.0, ((ImageItem)items[front]).X, 3);
         Assert.Equal(72, Texts(page).First().X, 2);
     }
+
+    [Fact]
+    public void Tables_go_below_wrapped_images()
+    {
+        var table = "<w:tbl><w:tblGrid><w:gridCol w:w=\"9000\"/></w:tblGrid><w:tr><w:tc>" + P(R("cell")) + "</w:tc></w:tr></w:tbl>";
+        var page = Layout(Read(rel => P(AnchorImage(rel, 150, 60, Position("margin", "right", "paragraph", "0")) + R("a")) + table));
+        var image = Assert.Single(page.Items.OfType<ImageItem>());
+        var cell = Texts(page).Single(t => t.Text == "cell");
+        Assert.True(cell.Baseline > image.Y + image.Height, $"cell at {cell.Baseline}, image ends at {image.Y + image.Height}");
+    }
 }
