@@ -43,6 +43,23 @@ public sealed record RunProperties
 
     /// <summary>Baseline raise (positive) or lowering (negative), independent of super/subscript.</summary>
     public double BaselineShift { get; init; }
+
+    /// <summary>Font for complex-script text (Arabic, Hebrew…); null means <see cref="FontFamily"/>.</summary>
+    public string? ComplexScriptFontFamily { get; init; }
+
+    /// <summary>Size, bold and italic of complex-script text; null means the same as other text.</summary>
+    public double? ComplexScriptFontSize { get; init; }
+    public bool? ComplexScriptBold { get; init; }
+    public bool? ComplexScriptItalic { get; init; }
+
+    /// <summary>The run is right-to-left: its neutral characters and digits read right to left.</summary>
+    public bool RightToLeft { get; init; }
+
+    /// <summary>Format all characters of the run with the complex-script properties.</summary>
+    public bool ComplexScript { get; init; }
+
+    /// <summary>Apply font kerning at this size and above (null: no kerning, as in Word by default).</summary>
+    public double? KerningMinSize { get; init; }
 }
 
 public enum ParagraphAlignment { Left, Center, Right, Justify, Distribute }
@@ -127,4 +144,10 @@ public sealed record ParagraphProperties
 
     public BorderSet Borders { get; init; } = BorderSet.Empty;
     public Color? Shading { get; init; }
+
+    /// <summary>
+    /// Right-to-left paragraph: lines start at the right, and alignment, indents and tab stops are measured
+    /// from the right edge (<see cref="ParagraphAlignment.Left"/> and <see cref="LeftIndent"/> mean the start side).
+    /// </summary>
+    public bool RightToLeft { get; init; }
 }
