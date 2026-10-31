@@ -188,4 +188,18 @@ public class TextShaperTests
         Assert.Equal([(82, 605, 0, 0), (3, 0, 0, 0), (2664, 0, 61, 0)],
             Positions(TextShaper.Shape(Latin, "o\U0001D173\u0300", rightToLeft: false, kerning: true)));
     }
+
+    [Fact]
+    public void Fonts_without_GPOS_place_marks_around_the_base_ink_like_HarfBuzz()
+    {
+        // Noto Sans with its GPOS table renamed so the font has none.
+        var data = File.ReadAllBytes(TestAssets.Path("NotoSans-Regular.ttf"));
+        int numTables = data[4] << 8 | data[5];
+        for (int i = 0; i < numTables; i++)
+            if (System.Text.Encoding.ASCII.GetString(data, 12 + i * 16, 4) == "GPOS") data[12 + i * 16] = (byte)'X';
+        var font = TrueTypeFont.Load(data);
+
+        Assert.Equal([(759, 561, 0, 0), (2665, 0, -56, 1)], Positions(TextShaper.Shape(font, "a\u0301\u0323", false, kerning: true)));
+        Assert.Equal([(1654, 602, 0, 0), (2664, 0, -59, 221)], Positions(TextShaper.Shape(font, "f\u0300i", false, kerning: true)));
+    }
 }

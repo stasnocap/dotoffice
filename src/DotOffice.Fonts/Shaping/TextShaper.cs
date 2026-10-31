@@ -125,6 +125,13 @@ public static class TextShaper
                 ZeroIgnorables(glyphs);
                 ResolveAttachments(glyphs, rightToLeft);
             }
+            else
+            {
+                // No GPOS: marks are placed around their base's ink box, as HarfBuzz does.
+                FallbackPositioning.ZeroMarkWidths(layout, glyphs, rightToLeft);
+                ZeroIgnorables(glyphs);
+                FallbackPositioning.PositionMarks(font, glyphs, rightToLeft);
+            }
         }
         catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
         {
