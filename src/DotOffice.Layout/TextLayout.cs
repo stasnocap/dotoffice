@@ -210,7 +210,8 @@ internal sealed class Itemizer(FontSelector fonts)
     /// <summary>
     /// Bidi embedding levels per UTF-16 index of the paragraph text, or null when everything is at level 0
     /// (a left-to-right paragraph without right-to-left text). Breaks count as whitespace, not paragraph
-    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left.
+    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left unless
+    /// they sit between left-to-right letters (so "two words" keeps its order, as in LibreOffice).
     /// </summary>
     private static byte[]? BidiLevels(List<Segment> segments, string text, byte paragraphLevel)
     {
@@ -223,6 +224,7 @@ internal sealed class Itemizer(FontSelector fonts)
 
         var classes = new BidiClass[text.Length];
         var codePoints = new int[text.Length];
+        var forced = new List<int>();
         int offset = 0;
         foreach (var s in segments)
         {
@@ -231,17 +233,31 @@ internal sealed class Itemizer(FontSelector fonts)
                 int cp = char.IsSurrogatePair(s.Text, i) ? char.ConvertToUtf32(s.Text, i) : s.Text[i];
                 var cls = s.Kind is AtomKind.LineBreak or AtomKind.PageBreak ? BidiClass.WS
                     : char.IsLowSurrogate(s.Text[i]) ? BidiClass.BN : BidiAlgorithm.GetClass(cp);
-                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) cls = BidiClass.R;
+                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) forced.Add(offset + i);
                 classes[offset + i] = cls;
                 codePoints[offset + i] = cp;
             }
             offset += s.Text.Length;
         }
+        foreach (int i in forced.Where(i => StrongNeighbor(classes, i, -1) != BidiClass.L || StrongNeighbor(classes, i, 1) != BidiClass.L).ToList())
+            classes[i] = BidiClass.R;
         var levels = BidiAlgorithm.ResolveLevels(classes, codePoints, paragraphLevel);
         // The low half of a surrogate pair goes with its high half.
         for (int i = 1; i < text.Length; i++)
             if (char.IsLowSurrogate(text[i])) levels[i] = levels[i - 1];
         return levels;
+    }
+
+    /// <summary>Nearest strong direction before (<paramref name="step"/> -1) or after (+1) index <paramref name="i"/>; numbers count as R.</summary>
+    private static BidiClass? StrongNeighbor(BidiClass[] classes, int i, int step)
+    {
+        for (i += step; i >= 0 && i < classes.Length; i += step)
+            switch (classes[i])
+            {
+                case BidiClass.L: return BidiClass.L;
+                case BidiClass.R or BidiClass.AL or BidiClass.EN or BidiClass.AN: return BidiClass.R;
+            }
+        return null;
     }
 
     private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level)
