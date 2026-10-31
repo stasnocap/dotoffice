@@ -128,6 +128,100 @@ internal sealed class OpenTypeLayout
         return -1;
     }
 
+    /// <summary>All glyphs listed in a coverage table.</summary>
+    private static IEnumerable<int> CoveredGlyphs(byte[] t, int offset)
+    {
+        int format = U16(t, offset), count = U16(t, offset + 2);
+        for (int i = 0; i < count; i++)
+        {
+            if (format == 1) yield return U16(t, offset + 4 + i * 2);
+            else if (format == 2)
+                for (int g = U16(t, offset + 4 + i * 6); g <= U16(t, offset + 6 + i * 6); g++) yield return g;
+        }
+    }
+
+    private (HashSet<int> Glyphs, HashSet<(int, int)> Pairs)? _defaultSubstitutionStarts;
+
+    /// <summary>
+    /// True when a lookup of the default GSUB features (ccmp, locl, rlig, calt, clig, liga, rclt) in the default
+    /// language system of any script may start at <paramref name="glyph"/> followed by <paramref name="next"/> (-1
+    /// at the end), so text with them must be shaped (e.g. for "fi" ligatures). Ligatures need their second
+    /// component next; other substitutions only their first glyph.
+    /// </summary>
+    public bool StartsDefaultSubstitution(int glyph, int next)
+    {
+        var (glyphs, pairs) = _defaultSubstitutionStarts ??= DefaultSubstitutionStarts();
+        return glyphs.Contains(glyph) || pairs.Contains((glyph, next));
+    }
+
+    private (HashSet<int>, HashSet<(int, int)>) DefaultSubstitutionStarts()
+    {
+        var glyphs = new HashSet<int>();
+        var pairs = new HashSet<(int, int)>();
+        var t = _gsub;
+        if (t.Length < 10) return (glyphs, pairs);
+        try
+        {
+            int scriptList = U16(t, 4), featureList = U16(t, 6), lookupList = U16(t, 8);
+            var features = new SortedSet<int>();
+            for (int i = 0; i < U16(t, scriptList); i++)
+            {
+                int script = scriptList + U16(t, scriptList + 2 + i * 6 + 4);
+                if (U16(t, script) == 0) continue;
+                int langSys = script + U16(t, script);
+                if (U16(t, langSys + 2) != 0xFFFF) features.Add(U16(t, langSys + 2));
+                for (int k = 0; k < U16(t, langSys + 4); k++) features.Add(U16(t, langSys + 6 + k * 2));
+            }
+            foreach (int f in features)
+            {
+                if (f >= U16(t, featureList)) continue;
+                int rec = featureList + 2 + f * 6;
+                if (Tag(t, rec) is not ("ccmp" or "locl" or "rlig" or "calt" or "clig" or "liga" or "rclt")) continue;
+                int feature = featureList + U16(t, rec + 4);
+                for (int k = 0; k < U16(t, feature + 2); k++)
+                {
+                    int lookup = U16(t, feature + 4 + k * 2);
+                    if (lookup >= U16(t, lookupList)) continue;
+                    int table = lookupList + U16(t, lookupList + 2 + lookup * 2);
+                    int type = U16(t, table);
+                    for (int sIndex = 0; sIndex < U16(t, table + 4); sIndex++)
+                    {
+                        int sub = table + U16(t, table + 6 + sIndex * 2), subType = type;
+                        if (type == 7)
+                        {
+                            subType = U16(t, sub + 2);
+                            sub += U32(t, sub + 4);
+                        }
+                        int coverage = subType is 5 or 6 && U16(t, sub) == 3
+                            ? sub + U16(t, sub + (subType == 5 ? 6 : 4 + U16(t, sub + 2) * 2 + 2))
+                            : sub + U16(t, sub + 2);
+                        if (subType != 4)
+                        {
+                            glyphs.UnionWith(CoveredGlyphs(t, coverage));
+                            continue;
+                        }
+                        int index = 0;
+                        foreach (int first in CoveredGlyphs(t, coverage))
+                        {
+                            int set = sub + U16(t, sub + 6 + index++ * 2);
+                            for (int l = 0; l < U16(t, set); l++)
+                            {
+                                int ligature = set + U16(t, set + 2 + l * 2);
+                                if (U16(t, ligature + 2) < 2) glyphs.Add(first);
+                                else pairs.Add((first, U16(t, ligature + 4)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // malformed table: shape everything it covered so far
+        }
+        return (glyphs, pairs);
+    }
+
     private static int ClassOf(byte[] t, int offset, int glyph)
     {
         if (offset <= 0 || offset >= t.Length) return 0;

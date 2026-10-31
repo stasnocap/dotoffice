@@ -14,7 +14,6 @@ public class TextShaperTests
     private static readonly TrueTypeFont Bengali = TrueTypeFont.Load(TestAssets.Path("NotoSansBengali-Regular.ttf"));
     private static readonly TrueTypeFont Tamil = TrueTypeFont.Load(TestAssets.Path("NotoSansTamil-Regular.ttf"));
 
-
     private static (int, int, int, int)[] Positions(ShapedGlyph[] glyphs) =>
         glyphs.Select(g => ((int)g.GlyphId, g.Advance, g.XOffset, g.YOffset)).ToArray();
 
@@ -64,10 +63,11 @@ public class TextShaperTests
     {
         Assert.Equal([(36, 599, 0, 0), (57, 600, 0, 0)], Positions(TextShaper.Shape(Latin, "AV", false, kerning: true)));
         Assert.Equal([(36, 639, 0, 0), (57, 600, 0, 0)], Positions(TextShaper.Shape(Latin, "AV", false, kerning: false)));
-        Assert.False(TextShaper.NeedsShaping("plain text", kerning: false));
-        Assert.True(TextShaper.NeedsShaping("plain text", kerning: true));
-        Assert.True(TextShaper.NeedsShaping("שלום", kerning: false));
-        Assert.True(TextShaper.NeedsShaping("é", kerning: false));
+        Assert.False(TextShaper.NeedsShaping(Latin, "some words", kerning: false));
+        Assert.True(TextShaper.NeedsShaping(Latin, "some words", kerning: true));
+        Assert.True(TextShaper.NeedsShaping(Latin, "fill", kerning: false)); // the "fi" ligature
+        Assert.True(TextShaper.NeedsShaping(Latin, "שלום", kerning: false));
+        Assert.True(TextShaper.NeedsShaping(Latin, "é", kerning: false));
     }
 
     [Fact]
@@ -93,6 +93,30 @@ public class TextShaperTests
         Assert.Equal([(56, 768, 0, 0), (103, 0, -221, 0), (3, 0, 0, 0), (86, 578, 0, 0)],
             Positions(TextShaper.Shape(Devanagari, "क्\u200cष", false, kerning: true)));
         Assert.Equal([(73, 344, 0, 0), (3, 0, 0, 0), (76, 258, 0, 0)], Positions(TextShaper.Shape(Latin, "f\u200ci", false, kerning: true)));
+    }
+
+    [Fact]
+    public void Default_ligatures_apply_unless_turned_off()
+    {
+        var glyphs = TextShaper.Shape(Latin, "office", false, kerning: true);
+        Assert.Equal([(82, 605, 0, 0), (1656, 946, 0, 0), (70, 480, 0, 0), (72, 564, 0, 0)], Positions(glyphs));
+        Assert.Equal(("ffi", 1), (glyphs[1].Text, glyphs[1].Cluster));
+        Assert.Equal(6, TextShaper.Shape(Latin, "office", false, kerning: true, ligatures: false).Length);
+    }
+
+    [Fact]
+    public void Letters_and_marks_compose_or_decompose_to_the_glyphs_the_font_has()
+    {
+        var composed = TextShaper.Shape(Latin, "e\u0301", false, kerning: true);
+        Assert.Equal([(171, 564, 0, 0)], Positions(composed));
+        Assert.Equal("e\u0301", composed[0].Text);
+        // No glyph for U+2260: equals sign and combining long solidus, positioned by GPOS.
+        var decomposed = TextShaper.Shape(Latin, "\u2260", false, kerning: true);
+        Assert.Equal([(32, 572, 0, 0), (2716, 0, -286, 2)], Positions(decomposed));
+        Assert.Equal(["\u2260", ""], decomposed.Select(g => g.Text));
+        // No precomposed q with marks: canonical order (dot below first), then mark positioning.
+        Assert.Equal([(84, 615, 0, 0), (2696, 0, 169, -240), (2667, 0, -309, 0)],
+            Positions(TextShaper.Shape(Latin, "q\u0302\u0323", false, kerning: true)));
     }
 
     [Fact]
