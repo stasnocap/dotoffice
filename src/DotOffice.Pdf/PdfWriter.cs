@@ -82,6 +82,19 @@ internal static class PdfFormat
         return rounded == 0 ? "0" : rounded.ToString("0.####", CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Encodes a byte string such as a URI: non-ASCII characters are percent-encoded as UTF-8.</summary>
+    public static string AsciiString(string text)
+    {
+        var sb = new StringBuilder("(");
+        foreach (byte b in Encoding.UTF8.GetBytes(text))
+        {
+            if (b is < 32 or >= 127) sb.Append('%').Append(b.ToString("X2"));
+            else if (b is (byte)'(' or (byte)')' or (byte)'\\') sb.Append('\\').Append((char)b);
+            else sb.Append((char)b);
+        }
+        return sb.Append(')').ToString();
+    }
+
     /// <summary>Encodes text as a PDF literal string, using UTF-16BE when it is not plain ASCII.</summary>
     public static string TextString(string text)
     {

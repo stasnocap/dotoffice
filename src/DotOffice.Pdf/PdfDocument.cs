@@ -15,7 +15,19 @@ public sealed class PdfPage
 
     public PageSize Size { get; }
     public PdfCanvas Canvas { get; } = new();
+
+    internal List<PdfLink> Links { get; } = [];
+
+    /// <summary>Adds a clickable rectangle (PDF space) opening <paramref name="uri"/>.</summary>
+    public void AddLink(double x, double y, double width, double height, string uri) =>
+        Links.Add(new PdfLink(x, y, width, height, uri, null, 0));
+
+    /// <summary>Adds a clickable rectangle (PDF space) jumping to <paramref name="target"/> at height <paramref name="targetY"/>.</summary>
+    public void AddLink(double x, double y, double width, double height, PdfPage target, double targetY) =>
+        Links.Add(new PdfLink(x, y, width, height, null, target, targetY));
 }
+
+internal sealed record PdfLink(double X, double Y, double Width, double Height, string? Uri, PdfPage? Target, double TargetY);
 
 public sealed class PdfDocument
 {
@@ -67,6 +79,7 @@ public sealed class PdfDocument
         var fontIds = _fonts.ToDictionary(f => f, _ => writer.Allocate());
         var imageIds = _images.ToDictionary(i => i, _ => writer.Allocate());
         var pageIds = _pages.Select(_ => (Page: writer.Allocate(), Content: writer.Allocate())).ToList();
+        var pageIndex = _pages.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => x.i);
 
         writer.WriteObject(catalogId, $"<< /Type /Catalog /Pages {pagesId} 0 R >>");
         writer.WriteObject(pagesId,
@@ -86,10 +99,23 @@ public sealed class PdfDocument
                          .Append(" >>");
             resources.Append(" >>");
 
+            var links = page.Links.Where(l => l.Target is null || pageIndex.ContainsKey(l.Target)).ToList();
+            var linkIds = links.Select(_ => writer.Allocate()).ToList();
+            var annots = linkIds.Count > 0 ? $" /Annots [{string.Join(" ", linkIds.Select(id => $"{id} 0 R"))}]" : "";
             writer.WriteObject(pageIds[i].Page,
                 $"<< /Type /Page /Parent {pagesId} 0 R /MediaBox [0 0 {PdfFormat.Number(page.Size.Width)} " +
-                $"{PdfFormat.Number(page.Size.Height)}] /Resources {resources} /Contents {pageIds[i].Content} 0 R >>");
+                $"{PdfFormat.Number(page.Size.Height)}] /Resources {resources} /Contents {pageIds[i].Content} 0 R{annots} >>");
             writer.WriteStream(pageIds[i].Content, "", page.Canvas.ToBytes());
+            for (int k = 0; k < links.Count; k++)
+            {
+                var link = links[k];
+                var action = link.Target is { } target
+                    ? $"/Dest [{pageIds[pageIndex[target]].Page} 0 R /XYZ null {PdfFormat.Number(link.TargetY)} null]"
+                    : $"/A << /S /URI /URI {PdfFormat.AsciiString(link.Uri!)} >>";
+                writer.WriteObject(linkIds[k],
+                    $"<< /Type /Annot /Subtype /Link /Rect [{PdfFormat.Number(link.X)} {PdfFormat.Number(link.Y)} " +
+                    $"{PdfFormat.Number(link.X + link.Width)} {PdfFormat.Number(link.Y + link.Height)}] /Border [0 0 0] {action} >>");
+            }
         }
 
         foreach (var (image, id) in imageIds) image.Write(writer, id);
