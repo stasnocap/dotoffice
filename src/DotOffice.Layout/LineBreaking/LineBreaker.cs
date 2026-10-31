@@ -50,17 +50,17 @@ public static class LineBreaker
                 decision = LineBreakOpportunity.None;                                        // LB5, LB6, LB7
             else if (beforeSpaces == LineBreakClass.ZW && prev is LineBreakClass.ZW or LineBreakClass.SP)
                 decision = LineBreakOpportunity.Allowed;                                     // LB8
-            else if (prevRaw == LineBreakClass.ZWJ)
-                decision = LineBreakOpportunity.None;                                        // LB8a
             else if (cur is LineBreakClass.CM or LineBreakClass.ZWJ
                      && prev is not (LineBreakClass.BK or LineBreakClass.CR or LineBreakClass.LF or LineBreakClass.NL
                          or LineBreakClass.SP or LineBreakClass.ZW))
             {
-                // LB9: combining marks take the class of their base; nothing else changes.
+                // LB9: combining marks (also after a ZWJ) take the class of their base; nothing else changes.
                 breaks[position] = LineBreakOpportunity.None;
                 prevRaw = raw;
                 continue;
             }
+            else if (prevRaw == LineBreakClass.ZWJ)
+                decision = LineBreakOpportunity.None;                                        // LB8a
             else
             {
                 if (cur is LineBreakClass.CM or LineBreakClass.ZWJ) cur = LineBreakClass.AL; // LB10

@@ -58,6 +58,7 @@ public class LineBreakerTests
         Assert.Equal("é |x", Segments("é x"));
         Assert.Equal("😀|😀", Segments("😀😀"));             // emoji are ID: breakable, but never inside a pair
         Assert.Equal("👍🏽", Segments("👍🏽"));                 // EB × EM
+        Assert.Equal("র\u200d্য |ক", Segments("র\u200d্য ক"));  // a mark after ZWJ still takes the letter's class
     }
 
     [Fact]
