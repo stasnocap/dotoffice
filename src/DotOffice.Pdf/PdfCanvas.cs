@@ -9,6 +9,12 @@ public readonly record struct TextStyle(bool FakeBold = false, bool FakeItalic =
 public readonly record struct TextSegment(double X, string Text);
 
 /// <summary>
+/// A glyph drawn at absolute position (<see cref="X"/>, baseline + <see cref="Rise"/>); <see cref="Text"/> is
+/// what it stands for in the extracted text (may be empty).
+/// </summary>
+public readonly record struct PositionedGlyph(ushort GlyphId, string Text, double X, double Rise);
+
+/// <summary>
 /// Builds a page content stream. Coordinates are in points with the origin at the
 /// bottom-left corner of the page (native PDF space).
 /// </summary>
@@ -90,6 +96,44 @@ public sealed class PdfCanvas
             x = segment.X + font.MeasureText(segment.Text, fontSize) + style.CharacterSpacing * CountRunes(segment.Text);
         }
         sb.Append("] TJ ET");
+        Op(sb.ToString());
+        return wrap ? RestoreState() : this;
+    }
+
+    /// <summary>
+    /// Draws shaped glyphs (already in visual order) on the baseline <paramref name="y"/>. Consecutive glyphs on
+    /// the same rise share one TJ array whose adjustments place each glyph exactly.
+    /// </summary>
+    public PdfCanvas DrawGlyphs(PdfFont font, double fontSize, double y, IReadOnlyList<PositionedGlyph> glyphs, TextStyle style = default)
+    {
+        if (glyphs.Count == 0) return this;
+        Fonts.Add(font);
+        if (_charSpacing != 0)
+        {
+            Op("0 Tc"); // glyph positions already include any character spacing
+            _charSpacing = 0;
+        }
+        bool wrap = style.FakeBold;
+        if (wrap) SaveState();
+        var sb = new StringBuilder("BT /").Append(font.ResourceName).Append(' ').Append(N(fontSize)).Append(" Tf ");
+        if (style.FakeBold) sb.Append("2 Tr ").Append(N(fontSize * 0.03)).Append(" w ");
+        string matrix = style.FakeItalic ? "1 0 0.2126 1 " : "1 0 0 1 ";
+        double scale = fontSize / font.Font.UnitsPerEm;
+        for (int i = 0; i < glyphs.Count;)
+        {
+            double rise = glyphs[i].Rise, x = glyphs[i].X;
+            sb.Append(matrix).Append(N(x)).Append(' ').Append(N(y + rise)).Append(" Tm [");
+            for (; i < glyphs.Count && glyphs[i].Rise == rise; i++)
+            {
+                var g = glyphs[i];
+                double gap = g.X - x;
+                if (Math.Abs(gap) > 0.001) sb.Append(N(-gap * 1000 / fontSize)).Append(' ');
+                sb.Append('<').Append(font.EncodeGlyph(g.GlyphId, g.Text)).Append("> ");
+                x = g.X + font.Font.GetAdvanceWidth(g.GlyphId) * scale;
+            }
+            sb.Append("] TJ ");
+        }
+        sb.Append("ET");
         Op(sb.ToString());
         return wrap ? RestoreState() : this;
     }
