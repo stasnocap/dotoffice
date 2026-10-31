@@ -1,5 +1,6 @@
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
 using DotOffice.Layout;
 using DotOffice.Pdf;
 
@@ -75,6 +76,12 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
         {
             switch (items[i])
             {
+                case TextItem { Glyphs: { } shaped } text:
+                    Fill(text.Color);
+                    if (text.SyntheticBold) Stroke(text.Color);
+                    canvas.DrawGlyphs(Font(text.Font), text.FontSize, h - text.Baseline, Positions(text, shaped),
+                        new TextStyle(text.SyntheticBold, text.SyntheticItalic));
+                    break;
                 case TextItem text:
                     // Coalesce following runs that share font, size, style and baseline into one text object.
                     var segments = new List<TextSegment> { new(text.X, text.Text) };
@@ -114,10 +121,25 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
         }
     }
 
+    /// <summary>Absolute glyph positions in visual order: right-to-left runs are drawn last glyph first.</summary>
+    private static List<PositionedGlyph> Positions(TextItem text, IReadOnlyList<ShapedGlyph> glyphs)
+    {
+        double scale = text.FontSize / text.Font.UnitsPerEm;
+        var result = new List<PositionedGlyph>(glyphs.Count);
+        double x = text.X;
+        for (int k = 0; k < glyphs.Count; k++)
+        {
+            var g = glyphs[text.RightToLeft ? glyphs.Count - 1 - k : k];
+            result.Add(new PositionedGlyph(g.GlyphId, g.Text, x + g.XOffset * scale, g.YOffset * scale));
+            x += g.Advance * scale + (g.Advance != 0 ? text.CharacterSpacing : 0);
+        }
+        return result;
+    }
+
     private static bool SameRun(TextItem a, TextItem b) =>
         ReferenceEquals(a.Font, b.Font) && a.FontSize == b.FontSize && a.Color == b.Color && Math.Abs(a.Baseline - b.Baseline) < 0.001
         && a.SyntheticBold == b.SyntheticBold && a.SyntheticItalic == b.SyntheticItalic && a.CharacterSpacing == b.CharacterSpacing
-        && b.X >= a.X;
+        && b.X >= a.X && b.Glyphs is null;
 
     private PdfFont Font(TrueTypeFont font)
     {

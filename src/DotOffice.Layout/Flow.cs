@@ -198,7 +198,7 @@ internal static class ParagraphLayouter
             _ => 0,
         };
         var frame = new LineFrame(width, props.LeftIndent, props.RightIndent, props.FirstLineIndent - labelShift, props.TabStops,
-            ctx.Settings.DefaultTabStop);
+            ctx.Settings.DefaultTabStop, props.RightToLeft);
         bool sameStylePrev = prev is not null && prev.Properties.StyleId == props.StyleId;
         bool sameStyleNext = next is not null && next.Properties.StyleId == props.StyleId;
         double spaceBefore = props.ContextualSpacing && sameStylePrev ? 0 : props.SpaceBefore;
@@ -331,7 +331,10 @@ internal static class ParagraphLayouter
                 case AtomKind.Text:
                 case AtomKind.Space:
                     items.Add(new TextItem(x0 + a.X, baseline - a.Rise, a.Font!.Font, a.Size, a.Text, color,
-                        a.Font.SyntheticBold, a.Font.SyntheticItalic, a.Props.CharacterSpacing) { Field = a.Field });
+                        a.Font.SyntheticBold, a.Font.SyntheticItalic, a.Props.CharacterSpacing)
+                    {
+                        Field = a.Field, Glyphs = a.Glyphs, RightToLeft = a.RightToLeft,
+                    });
                     break;
                 case AtomKind.Image:
                     items.Add(new ImageItem(x0 + a.X, baseline - a.Image!.Height, a.Image.Width, a.Image.Height, a.Image.Image));

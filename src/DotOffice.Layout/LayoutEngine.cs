@@ -399,7 +399,7 @@ public sealed class LayoutEngine
         {
             var moved = item.Offset(dx, y);
             if (moved is TextItem { Field: { } field } text)
-                moved = text with { Text = fields.Text(field, page) };
+                moved = text with { Text = fields.Text(field, page), Glyphs = null };
             output.Items.Add(moved);
         }
     }

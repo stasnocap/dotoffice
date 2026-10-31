@@ -39,18 +39,38 @@ internal sealed class FontSelector(FontResolver resolver, IConversionWarningSink
     /// <summary>The font a run uses for a character, before glyph-coverage fallback.</summary>
     public ResolvedFont ForCharacter(RunProperties p, int codePoint)
     {
+        if (UsesComplexScript(p, codePoint))
+            return Resolve(p.ComplexScriptFontFamily ?? p.FontFamily, p.ComplexScriptBold ?? p.Bold, p.ComplexScriptItalic ?? p.Italic);
         string family = codePoint < 0x80
             ? p.FontFamily
             : IsEastAsian(codePoint) ? p.EastAsianFontFamily ?? p.HighAnsiFontFamily ?? p.FontFamily : p.HighAnsiFontFamily ?? p.FontFamily;
         return Resolve(family, p.Bold, p.Italic);
     }
 
+    /// <summary>Font size of a character: complex-script text uses its own size (w:szCs).</summary>
+    public static double SizeFor(RunProperties p, int codePoint) =>
+        UsesComplexScript(p, codePoint) ? p.ComplexScriptFontSize ?? p.FontSize : p.FontSize;
+
+    /// <summary>
+    /// Whether a character takes the complex-script formatting (font, size, bold, italic): complex-script
+    /// letters always do, and every character of a run marked right-to-left (w:rtl) or complex (w:cs).
+    /// </summary>
+    public static bool UsesComplexScript(RunProperties p, int codePoint) => p.ComplexScript || p.RightToLeft || IsComplexScript(codePoint);
+
+    public static bool IsComplexScript(int cp) =>
+        cp is >= 0x0590 and <= 0x08FF         // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan…
+            or >= 0x0900 and <= 0x0DFF        // Indic
+            or >= 0x0E00 and <= 0x0EFF        // Thai, Lao
+            or >= 0xFB1D and <= 0xFDFF        // Hebrew and Arabic presentation forms
+            or >= 0xFE70 and <= 0xFEFF;
+
     /// <summary>Like <see cref="ForCharacter"/>, then falls back to another font if the glyph is missing.</summary>
     public ResolvedFont ForCharacterWithFallback(RunProperties p, int codePoint)
     {
         var font = ForCharacter(p, codePoint);
         if (font.Font.HasGlyph(codePoint) || codePoint < 0x20 || IsInvisible(codePoint)) return font;
-        var fallback = resolver.ResolveFallback(codePoint, p.Bold, p.Italic);
+        bool cs = UsesComplexScript(p, codePoint);
+        var fallback = resolver.ResolveFallback(codePoint, cs ? p.ComplexScriptBold ?? p.Bold : p.Bold, cs ? p.ComplexScriptItalic ?? p.Italic : p.Italic);
         if (fallback is null)
         {
             if (_reported.Add($"U+{codePoint:X4}"))
@@ -58,6 +78,12 @@ internal sealed class FontSelector(FontResolver resolver, IConversionWarningSink
             return font;
         }
         return fallback;
+    }
+
+    /// <summary>Reports a problem once per <paramref name="code"/>.</summary>
+    public void WarnOnce(string code, string message)
+    {
+        if (_reported.Add(code)) warnings.Warn(code, message);
     }
 
     public static bool IsInvisible(int cp) => cp is 0x200B or 0x200C or 0x200D or 0x2060 or 0xFEFF or 0x00AD;

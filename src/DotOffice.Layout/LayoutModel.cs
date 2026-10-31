@@ -1,5 +1,6 @@
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
 
 namespace DotOffice.Layout;
 
@@ -35,6 +36,14 @@ public sealed record TextItem(double X, double Baseline, TrueTypeFont Font, doub
 {
     /// <summary>Set for dynamic fields whose text is substituted after pagination.</summary>
     public FieldRun? Field { get; init; }
+
+    /// <summary>
+    /// Shaped glyphs in logical order (positions in font units). When set they are drawn instead of mapping
+    /// <see cref="Text"/> through the cmap; right-to-left glyphs are drawn in reverse order.
+    /// </summary>
+    public IReadOnlyList<ShapedGlyph>? Glyphs { get; init; }
+
+    public bool RightToLeft { get; init; }
 
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Baseline = Baseline + dy };
 }
