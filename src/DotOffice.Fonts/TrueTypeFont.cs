@@ -14,6 +14,7 @@ public sealed class TrueTypeFont
     private readonly Dictionary<int, ushort> _cmap;
     private readonly ushort[] _advanceWidths;
     private readonly int[] _loca;
+    private Shaping.OpenTypeLayout? _layout;
 
     public string PostScriptName { get; }
     public string FamilyName { get; }
@@ -181,6 +182,9 @@ public sealed class TrueTypeFont
         _tables.TryGetValue(tag, out var t) ? _data.AsSpan(t.Offset, t.Length) : default;
 
     internal bool HasTable(string tag) => _tables.ContainsKey(tag);
+
+    /// <summary>GSUB/GPOS/GDEF interpreter for this font (created on first use).</summary>
+    internal Shaping.OpenTypeLayout OpenTypeLayout => _layout ??= new Shaping.OpenTypeLayout(this);
 
     internal ReadOnlySpan<byte> GetGlyphData(ushort glyphId)
     {
