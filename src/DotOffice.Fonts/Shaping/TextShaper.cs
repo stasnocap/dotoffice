@@ -75,7 +75,8 @@ public static class TextShaper
                     if (layout.GlyphClass(glyphs[i].Glyph) == 3) glyphs[i] = glyphs[i] with { XAdvance = 0 };
                 if (kerning || complex)
                     layout.Apply(true, glyphs, layout.Lookups(true, script, joining ? [("kern", Kern), ("dist", Kern), ("curs", Common)] : [("kern", Kern)]), rightToLeft);
-                layout.Apply(true, glyphs, layout.Lookups(true, script, [("mark", Marks), ("mkmk", Marks)]));
+                layout.Apply(true, glyphs, layout.Lookups(true, script,
+                    [("mark", Marks | OpenTypeLayout.ManualJoiners), ("mkmk", Marks | OpenTypeLayout.ManualJoiners)]));
                 ResolveAttachments(glyphs, rightToLeft);
             }
         }
@@ -83,6 +84,7 @@ public static class TextShaper
         {
             glyphs = Nominal(font, codePoints, 0); // malformed layout tables: fall back to nominal glyphs
         }
+        HideIgnorables(font, glyphs);
         return glyphs.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
     }
 
@@ -93,7 +95,8 @@ public static class TextShaper
             return new GlyphInfo
             {
                 Glyph = gid, Cluster = c.Cluster, Text = char.ConvertFromUtf32(c.CodePoint), Mask = mask,
-                XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1,
+                XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1, CodePoint = c.CodePoint,
+                Ignorable = IsDefaultIgnorable(c.CodePoint),
             };
         }).ToList();
 
@@ -118,10 +121,22 @@ public static class TextShaper
         }
     }
 
+    /// <summary>
+    /// HarfBuzz's modified combining classes: Hebrew and Arabic points in a typographic order (shin/sin dot and
+    /// shadda first), Telugu length marks before the virama, and a few Thai, Lao and Tibetan vowels moved.
+    /// </summary>
+    private static readonly Dictionary<int, int> ModifiedClasses = new()
+    {
+        [10] = 22, [11] = 15, [12] = 16, [13] = 17, [14] = 23, [15] = 18, [16] = 19, [17] = 20, [18] = 21, [19] = 14,
+        [20] = 24, [21] = 12, [22] = 25, [23] = 13, [24] = 10, [25] = 11, [26] = 26,
+        [27] = 28, [28] = 29, [29] = 30, [30] = 31, [31] = 32, [32] = 33, [33] = 27, [34] = 34, [35] = 35, [36] = 36,
+        [84] = 4, [91] = 5, [103] = 3, [130] = 132, [132] = 131,
+    };
+
     private static int CombiningClass(int cp)
     {
-        if (cp is 0x05C1 or 0x05C2) return 1; // shin dot, sin dot
-        if (cp == 0x0651) return 27; // shadda
+        if (cp is 0x1A60 or 0x0FC6) return 254;
+        if (cp == 0x0F39) return 127;
         var starts = CombiningClassData.RangeStarts;
         int lo = 0, hi = starts.Length - 1;
         while (lo < hi)
@@ -129,7 +144,8 @@ public static class TextShaper
             int mid = (lo + hi + 1) >> 1;
             if (starts[mid] <= cp) lo = mid; else hi = mid - 1;
         }
-        return CombiningClassData.RangeValues[lo];
+        int ccc = CombiningClassData.RangeValues[lo];
+        return ModifiedClasses.GetValueOrDefault(ccc, ccc);
     }
 
     private static (string, uint) Feature(string tag) => tag switch
@@ -140,6 +156,23 @@ public static class TextShaper
         "init" => (tag, Init),
         _ => (tag, Common),
     };
+
+    /// <summary>ZWJ, ZWNJ and other default ignorables become invisible: the space glyph without advance (or nothing).</summary>
+    private static void HideIgnorables(TrueTypeFont font, List<GlyphInfo> glyphs)
+    {
+        int space = font.GetGlyphId(' ');
+        for (int i = glyphs.Count - 1; i >= 0; i--)
+        {
+            if (!glyphs[i].Ignorable) continue;
+            if (space == 0) glyphs.RemoveAt(i);
+            else glyphs[i] = glyphs[i] with { Glyph = (ushort)space, XAdvance = 0, XOffset = 0, YOffset = 0 };
+        }
+    }
+
+    private static bool IsDefaultIgnorable(int cp) =>
+        cp is 0x00AD or 0x034F or 0x061C or >= 0x115F and <= 0x1160 or >= 0x17B4 and <= 0x17B5 or >= 0x180B and <= 0x180F
+            or >= 0x200B and <= 0x200F or >= 0x202A and <= 0x202E or >= 0x2060 and <= 0x206F or 0x3164
+            or >= 0xFE00 and <= 0xFE0F or 0xFEFF or 0xFFA0 or >= 0xFFF0 and <= 0xFFF8;
 
     /// <summary>Turns cursive and mark attachments into offsets relative to each glyph's own pen position.</summary>
     private static void ResolveAttachments(List<GlyphInfo> glyphs, bool rightToLeft)
@@ -158,8 +191,7 @@ public static class TextShaper
                 for (int j = parent + 1; j <= i; j++) g.XOffset += glyphs[j].XAdvance;
             else
                 for (int j = parent; j < i; j++) g.XOffset -= glyphs[j].XAdvance;
-            g.XOffset += glyphs[parent].XOffset;
-            g.YOffset += glyphs[parent].YOffset;
+            g.XOffset += glyphs[parent].XOffset; // the vertical offset already includes the base's (see OpenTypeLayout)
             g.AttachTo = -1;
             glyphs[i] = g;
         }
