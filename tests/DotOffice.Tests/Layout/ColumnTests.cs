@@ -48,6 +48,23 @@ public class ColumnTests
     }
 
     [Fact]
+    public void Footnotes_go_below_the_column_of_their_reference()
+    {
+        var note = new Note(NoteKind.Footnote) { Mark = "1", Blocks = { Para(Words(30)) } };
+        var p = new Paragraph { MarkProperties = Text };
+        p.Inlines.AddRange([new TextRun("b", Text), new NoteReference(note, Text)]);
+        var page = Assert.Single(Render(Doc(Section(20, Two()), Lines(25, "L"), p)).Pages);
+
+        var noteWords = Texts(page).Where(t => t.Text.StartsWith('w')).ToList();
+        Assert.All(noteWords, t => Assert.True(t.X >= 324 - 0.01 && Right(t) <= 540 + 0.01, $"{t.Text} at {t.X}"));
+        var separator = Assert.Single(page.Items.OfType<LineItem>());
+        Assert.Equal(324, separator.X1, 1);
+        // The first column is not shortened by the second column's footnote.
+        double noteTop = noteWords.Min(t => t.Baseline);
+        Assert.Contains(Texts(page), t => t.X < 300 && t.Baseline > noteTop);
+    }
+
+    [Fact]
     public void Paragraphs_wrap_at_the_column_width()
     {
         var layout = Render(Doc(Section(40, Two()), Para(Words(60))));
