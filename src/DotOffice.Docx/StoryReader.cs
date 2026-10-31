@@ -19,8 +19,8 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     private StyleSheet Styles => context.Styles;
 
-    /// <summary>Text of w:footnoteRef/w:endnoteRef when reading a note.</summary>
-    public string? NoteMark { get; init; }
+    /// <summary>The note being read, whose number w:footnoteRef/w:endnoteRef shows.</summary>
+    public Note? NoteOwner { get; init; }
 
     private readonly Stack<Hyperlink> _links = new();
     private readonly Dictionary<string, string> _openBookmarks = new(StringComparer.Ordinal);
@@ -377,12 +377,12 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     var noteKind = r.LocalName == "footnoteReference" ? NoteKind.Footnote : NoteKind.Endnote;
                     bool customMark = r.WAttr("customMarkFollows") is not null && r.OnOff("customMarkFollows");
                     if (!Suppressed(Props(), state) && r.WAttr("id") is { } noteId
-                        && context.ReadNote(noteKind, noteId, customMark) is var (note, mark))
-                        AddInline(state, new NoteReference(note, mark, Props()));
+                        && context.ReadNote(noteKind, noteId, customMark) is { } note)
+                        AddInline(state, new NoteReference(note, Props()));
                     break;
                 case "footnoteRef":
                 case "endnoteRef":
-                    if (NoteMark is { Length: > 0 } && !Suppressed(Props(), state)) AddText(state, NoteMark, Props());
+                    if (NoteOwner is { Mark.Length: > 0 } && !Suppressed(Props(), state)) AddInline(state, new NoteMark(NoteOwner, Props()));
                     break;
             }
             r.Skip();
@@ -721,6 +721,12 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 case "cols":
                     d.Columns = ReadColumns(r);
                     continue;
+                case "footnotePr" or "endnotePr":
+                    bool footnotes = r.LocalName == "footnotePr";
+                    var restart = ReadNoteRestart(r);
+                    if (footnotes) d.FootnoteRestart = restart;
+                    else d.EndnoteRestart = restart;
+                    continue;
                 case "headerReference":
                     if (r.RAttr("id") is { } hid) d.Headers[r.WAttr("type") ?? "default"] = hid;
                     break;
@@ -731,6 +737,20 @@ internal sealed class StoryReader(DocxContext context, string partName)
             r.Skip();
         }
         return d;
+    }
+
+    /// <summary>The w:numRestart value inside a w:footnotePr/w:endnotePr; leaves the reader after the element.</summary>
+    private static string? ReadNoteRestart(XmlReader r)
+    {
+        string? restart = null;
+        int depth = r.Depth;
+        if (!r.Enter()) return null;
+        while (r.NextChild(depth))
+        {
+            if (r.IsW() && r.LocalName == "numRestart") restart = r.WAttr("val");
+            r.Skip();
+        }
+        return restart;
     }
 
     private static SectionColumns ReadColumns(XmlReader r)

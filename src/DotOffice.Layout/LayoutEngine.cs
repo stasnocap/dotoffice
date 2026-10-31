@@ -106,7 +106,8 @@ public sealed class LayoutEngine
         // PAGEREF results are only known after pagination; when the document has any, it is laid out
         // a second time with the page numbers from the first pass so that their widths are right.
         var pages = Paginate(document, null, out bool usesPageRefs, cancellationToken);
-        if (usesPageRefs) pages = Paginate(document, Bookmarks(pages), out _, cancellationToken);
+        bool renumbered = NumberFootnotesPerPage(pages);
+        if (usesPageRefs || renumbered) pages = Paginate(document, Bookmarks(pages), out _, cancellationToken);
 
         var settings = document.Settings;
         var fields = new FieldValues(pages.Count, Bookmarks(pages),
@@ -219,6 +220,27 @@ public sealed class LayoutEngine
         last?.FlushNotes();
         usesPageRefs = pageRefs;
         return pages;
+    }
+
+    /// <summary>
+    /// Gives footnotes numbered per page (<see cref="Note.PageMark"/>) their number on the page they were
+    /// placed on; returns true when a mark changed, so the document must be laid out again.
+    /// </summary>
+    private static bool NumberFootnotesPerPage(List<Page> pages)
+    {
+        bool changed = false;
+        foreach (var page in pages)
+        {
+            int n = 0;
+            var seen = new HashSet<Note>(ReferenceEqualityComparer.Instance);
+            foreach (var note in page.Placed.SelectMany(p => p.Slice.Footnotes))
+            {
+                if (note.PageMark is null || !seen.Add(note)) continue;
+                var mark = note.PageMark(++n);
+                if (mark != note.Mark) (note.Mark, changed) = (mark, true);
+            }
+        }
+        return changed;
     }
 
     /// <summary>The page of every bookmark in the body (first occurrence wins).</summary>
