@@ -13,8 +13,8 @@ internal enum JoiningType : byte { NotListed, U, R, L, D, C, T }
 
 /// <summary>
 /// Basic OpenType shaping: Arabic-style joining forms (isol/fina/medi/init), required and contextual
-/// ligatures, kerning and mark positioning from the font's GSUB/GPOS tables. Indic and other scripts
-/// needing reordering are not handled (their glyphs are mapped one to one).
+/// ligatures, kerning and mark positioning from the font's GSUB/GPOS tables. Indic scripts go to the
+/// <see cref="IndicShaper"/>; Sinhala, Tibetan, Myanmar and Khmer are not handled (their glyphs are mapped one to one).
 /// </summary>
 public static class TextShaper
 {
@@ -28,14 +28,14 @@ public static class TextShaper
     {
         if (kerning) return true;
         foreach (var rune in text.EnumerateRunes())
-            if (ScriptOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value)) return true;
+            if (ScriptOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value))
+                return true;
         return false;
     }
 
-    /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented, e.g. Indic.</summary>
+    /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented: Sinhala, Tibetan, Myanmar, Khmer.</summary>
     public static bool IsUnsupportedComplexScript(int codePoint) =>
-        codePoint is >= 0x0900 and <= 0x0DFF or >= 0x0F00 and <= 0x0FFF or >= 0x1000 and <= 0x109F
-            or >= 0x1780 and <= 0x17FF or >= 0xA8E0 and <= 0xA8FF;
+        codePoint is >= 0x0D80 and <= 0x0DFF or >= 0x0F00 and <= 0x0FFF or >= 0x1000 and <= 0x109F or >= 0x1780 and <= 0x17FF;
 
     /// <summary>
     /// Shapes one run of text in one font. <paramref name="rightToLeft"/> only affects how mark offsets are
@@ -43,6 +43,18 @@ public static class TextShaper
     /// </summary>
     public static ShapedGlyph[] Shape(TrueTypeFont font, string text, bool rightToLeft, bool kerning)
     {
+        if (!rightToLeft && text.EnumerateRunes().Any(r => IndicShaper.IsIndic(r.Value)))
+        {
+            try
+            {
+                if (IndicShaper.Shape(font, text) is { } indic)
+                    return indic.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
+            }
+            catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
+            {
+                // malformed layout tables: fall through to nominal shaping
+            }
+        }
         var codePoints = new List<(int CodePoint, int Cluster)>(text.Length);
         for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
             codePoints.Add((char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i], i));
@@ -105,7 +117,7 @@ public static class TextShaper
     /// stacking does not depend on typing order. Like HarfBuzz, Hebrew shin/sin dots sort right after the base
     /// and the Arabic shadda before the vowel marks.
     /// </summary>
-    private static void ReorderMarks(List<(int CodePoint, int Cluster)> codePoints)
+    internal static void ReorderMarks(List<(int CodePoint, int Cluster)> codePoints)
     {
         for (int i = 0; i < codePoints.Count; i++)
         {
@@ -158,7 +170,7 @@ public static class TextShaper
     };
 
     /// <summary>ZWJ, ZWNJ and other default ignorables become invisible: the space glyph without advance (or nothing).</summary>
-    private static void HideIgnorables(TrueTypeFont font, List<GlyphInfo> glyphs)
+    internal static void HideIgnorables(TrueTypeFont font, List<GlyphInfo> glyphs)
     {
         int space = font.GetGlyphId(' ');
         for (int i = glyphs.Count - 1; i >= 0; i--)
@@ -169,13 +181,13 @@ public static class TextShaper
         }
     }
 
-    private static bool IsDefaultIgnorable(int cp) =>
+    internal static bool IsDefaultIgnorable(int cp) =>
         cp is 0x00AD or 0x034F or 0x061C or >= 0x115F and <= 0x1160 or >= 0x17B4 and <= 0x17B5 or >= 0x180B and <= 0x180F
             or >= 0x200B and <= 0x200F or >= 0x202A and <= 0x202E or >= 0x2060 and <= 0x206F or 0x3164
             or >= 0xFE00 and <= 0xFE0F or 0xFEFF or 0xFFA0 or >= 0xFFF0 and <= 0xFFF8;
 
     /// <summary>Turns cursive and mark attachments into offsets relative to each glyph's own pen position.</summary>
-    private static void ResolveAttachments(List<GlyphInfo> glyphs, bool rightToLeft)
+    internal static void ResolveAttachments(List<GlyphInfo> glyphs, bool rightToLeft)
     {
         // Cursive chains run forward or (with the RightToLeft lookup flag) backward: resolve parents first.
         for (int i = 0; i < glyphs.Count; i++) ResolveCursive(glyphs, i, forward: true);
@@ -242,7 +254,7 @@ public static class TextShaper
             or UnicodeCategory.Format ? JoiningType.T : JoiningType.U;
     }
 
-    private static bool IsMark(int cp) =>
+    internal static bool IsMark(int cp) =>
         CharUnicodeInfo.GetUnicodeCategory(cp) is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark
             or UnicodeCategory.SpacingCombiningMark;
 

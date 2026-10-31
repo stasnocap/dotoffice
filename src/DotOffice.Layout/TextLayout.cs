@@ -277,7 +277,7 @@ internal sealed class Itemizer(FontSelector fonts)
             byte atomLevel = level(offset + start);
             var font = isSpace ? fonts.ForCharacter(props, ' ') : fonts.ForCharacterWithFallback(props, cp);
             if (TextShaper.IsUnsupportedComplexScript(cp))
-                fonts.WarnOnce("layout.complex-script", "Indic and similar scripts need reordering that is not implemented; their text may render incorrectly.");
+                fonts.WarnOnce("layout.complex-script", "Sinhala, Tibetan, Myanmar and Khmer need reordering that is not implemented; their text may render incorrectly.");
             i += char.IsSurrogatePair(text, start) ? 2 : 1;
             while (i < text.Length)
             {

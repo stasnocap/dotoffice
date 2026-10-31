@@ -29,7 +29,7 @@ await DocumentConverter.ConvertAsync("invoice.docx", "invoice.pdf");
 
 1. PDF writer + font embedding/subsetting ✓
 2. DOCX → PDF: paragraphs, styles, lists, tables, headers/footers, images ✓
-3. DOCX polish: fields, floats, columns, footnotes, complex scripts ✓ (Indic shaping not yet supported)
+3. DOCX polish: fields, floats, columns, footnotes, complex scripts including Indic ✓ (Sinhala, Tibetan, Myanmar and Khmer shaping not yet supported)
 4. XLSX → PDF
 5. PPTX → PDF / PNG
 6. ODF readers, legacy DOC/XLS

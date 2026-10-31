@@ -10,6 +10,10 @@ public class TextShaperTests
     private static readonly TrueTypeFont Hebrew = TrueTypeFont.Load(TestAssets.Path("NotoSansHebrew-Regular.ttf"));
     private static readonly TrueTypeFont Latin = TrueTypeFont.Load(TestAssets.Path("NotoSans-Regular.ttf"));
     private static readonly TrueTypeFont Nastaliq = TrueTypeFont.Load(TestAssets.Path("NotoNastaliqUrdu-Regular.ttf"));
+    private static readonly TrueTypeFont Devanagari = TrueTypeFont.Load(TestAssets.Path("NotoSansDevanagari-Regular.ttf"));
+    private static readonly TrueTypeFont Bengali = TrueTypeFont.Load(TestAssets.Path("NotoSansBengali-Regular.ttf"));
+    private static readonly TrueTypeFont Tamil = TrueTypeFont.Load(TestAssets.Path("NotoSansTamil-Regular.ttf"));
+
 
     private static (int, int, int, int)[] Positions(ShapedGlyph[] glyphs) =>
         glyphs.Select(g => ((int)g.GlyphId, g.Advance, g.XOffset, g.YOffset)).ToArray();
@@ -64,6 +68,31 @@ public class TextShaperTests
         Assert.True(TextShaper.NeedsShaping("plain text", kerning: true));
         Assert.True(TextShaper.NeedsShaping("שלום", kerning: false));
         Assert.True(TextShaper.NeedsShaping("é", kerning: false));
+    }
+
+    [Fact]
+    public void Indic_syllables_are_reordered_and_form_conjuncts()
+    {
+        // Pre-base matra i moved before its consonant, half forms, reph, split matras and Tamil's shri ligature.
+        Assert.Equal([(544, 259, 0, 0), (88, 531, 0, 0), (245, 309, 0, 0), (73, 531, 0, 0), (33, 259, 0, 0)],
+            Positions(TextShaper.Shape(Devanagari, "हिन्दी", false, kerning: true)));
+        Assert.Equal([(56, 768, 0, 0), (506, 0, -221, 0)], Positions(TextShaper.Shape(Devanagari, "र्क", false, kerning: true)));
+        Assert.Equal([(398, 361, 0, 0), (25, 807, 0, 0), (59, 266, 0, 0), (55, 623, 0, 0), (132, 0, -137, 0)],
+            Positions(TextShaper.Shape(Bengali, "কোর্স", false, kerning: true)));
+        Assert.Equal([(135, 859, 0, 0)], Positions(TextShaper.Shape(Bengali, "ক্ষ", false, kerning: true)));
+        Assert.Equal([(46, 901, 0, 0), (18, 825, 0, 0), (41, 640, 0, 0)], Positions(TextShaper.Shape(Tamil, "கொ", false, kerning: true)));
+        Assert.Equal([(163, 1514, 0, 0)], Positions(TextShaper.Shape(Tamil, "ஸ்ரீ", false, kerning: true)));
+    }
+
+    [Fact]
+    public void Joiners_select_half_forms_or_break_conjuncts_and_are_hidden()
+    {
+        // ZWJ asks for the half form, ZWNJ for the explicit virama; both become an invisible space glyph.
+        Assert.Equal([(232, 550, 0, 0), (3, 0, 0, 0), (86, 578, 0, 0)],
+            Positions(TextShaper.Shape(Devanagari, "क्\u200dष", false, kerning: true)));
+        Assert.Equal([(56, 768, 0, 0), (103, 0, -221, 0), (3, 0, 0, 0), (86, 578, 0, 0)],
+            Positions(TextShaper.Shape(Devanagari, "क्\u200cष", false, kerning: true)));
+        Assert.Equal([(73, 344, 0, 0), (3, 0, 0, 0), (76, 258, 0, 0)], Positions(TextShaper.Shape(Latin, "f\u200ci", false, kerning: true)));
     }
 
     [Fact]
