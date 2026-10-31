@@ -73,7 +73,8 @@ public static class TextShaper
                 // Marks do not advance the pen; GPOS positions them relative to their base.
                 for (int i = 0; i < glyphs.Count; i++)
                     if (layout.GlyphClass(glyphs[i].Glyph) == 3) glyphs[i] = glyphs[i] with { XAdvance = 0 };
-                if (kerning || complex) layout.Apply(true, glyphs, layout.Lookups(true, script, [("kern", Kern)]));
+                if (kerning || complex)
+                    layout.Apply(true, glyphs, layout.Lookups(true, script, joining ? [("kern", Kern), ("dist", Kern), ("curs", Common)] : [("kern", Kern)]), rightToLeft);
                 layout.Apply(true, glyphs, layout.Lookups(true, script, [("mark", Marks), ("mkmk", Marks)]));
                 ResolveAttachments(glyphs, rightToLeft);
             }
@@ -92,7 +93,7 @@ public static class TextShaper
             return new GlyphInfo
             {
                 Glyph = gid, Cluster = c.Cluster, Text = char.ConvertFromUtf32(c.CodePoint), Mask = mask,
-                XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1,
+                XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1,
             };
         }).ToList();
 
@@ -140,9 +141,13 @@ public static class TextShaper
         _ => (tag, Common),
     };
 
-    /// <summary>Turns mark attachments into offsets relative to each mark's own pen position.</summary>
+    /// <summary>Turns cursive and mark attachments into offsets relative to each glyph's own pen position.</summary>
     private static void ResolveAttachments(List<GlyphInfo> glyphs, bool rightToLeft)
     {
+        // Cursive chains run forward or (with the RightToLeft lookup flag) backward: resolve parents first.
+        for (int i = 0; i < glyphs.Count; i++) ResolveCursive(glyphs, i, forward: true);
+        for (int i = glyphs.Count - 1; i >= 0; i--) ResolveCursive(glyphs, i, forward: false);
+
         for (int i = 0; i < glyphs.Count; i++)
         {
             var g = glyphs[i];
@@ -158,6 +163,16 @@ public static class TextShaper
             g.AttachTo = -1;
             glyphs[i] = g;
         }
+    }
+
+    private static void ResolveCursive(List<GlyphInfo> glyphs, int i, bool forward)
+    {
+        var g = glyphs[i];
+        int parent = g.CursiveTo;
+        if (parent < 0 || (forward ? parent >= i : parent <= i)) return;
+        g.YOffset += glyphs[parent].YOffset;
+        g.CursiveTo = -1;
+        glyphs[i] = g;
     }
 
     /// <summary>Arabic joining: picks the isolated, final, medial or initial form of each letter.</summary>
