@@ -43,6 +43,26 @@ public sealed class LayoutEngine
         public double Bottom { get; set; } = top;
     }
 
+    /// <summary>A footnote line waiting to be placed, built for the note area at <see cref="X"/> of <see cref="Width"/>.</summary>
+    private readonly record struct NoteLine(Slice Line, Note Note, double X, double Width);
+
+    /// <summary>Footnote lines at the bottom of one column (the whole text width in single-column text).</summary>
+    private sealed class NoteArea(double x, double width)
+    {
+        public double X { get; } = x;
+        public double Width { get; } = width;
+
+        /// <summary>Footnote lines with the body slice that referenced them (null when carried over).</summary>
+        public List<(Slice Slice, Slice? Owner)> Lines { get; } = [];
+
+        /// <summary>The first lines continue a footnote from the previous page.</summary>
+        public bool Continued { get; set; }
+
+        public double Height => Lines.Count == 0 ? 0 : NoteSeparatorHeight + Lines.Sum(n => n.Slice.Height + n.Slice.TrailingSpace);
+
+        public bool Overlaps((double X, double Width) column) => X < column.X + column.Width - Epsilon && column.X < X + Width - Epsilon;
+    }
+
     private sealed class Page
     {
         public required Section Section { get; init; }
@@ -70,16 +90,30 @@ public sealed class LayoutEngine
         public HashSet<Slice> Repeated { get; } = [];
         public bool IsRepeated(Slice s) => Repeated.Contains(s);
 
-        /// <summary>Footnote lines at the page bottom, with the body slice that referenced them (null when carried over).</summary>
-        public List<(Slice Slice, Slice? Owner)> Notes { get; } = [];
+        /// <summary>Footnote areas at the page bottom, one per column that has footnotes.</summary>
+        public List<NoteArea> NoteAreas { get; } = [];
 
-        /// <summary>The first footnote lines continue a footnote from the previous page.</summary>
-        public bool NotesContinued { get; set; }
+        /// <summary>
+        /// The footnote area for <paramref name="column"/>: one already holding lines below it (when the page
+        /// mixes column layouts) or else one of the column's own width.
+        /// </summary>
+        public NoteArea NoteAreaFor((double X, double Width) column)
+        {
+            var area = NoteAreas.Find(a => a.Lines.Count > 0 && a.Overlaps(column))
+                       ?? NoteAreas.Find(a => Math.Abs(a.X - column.X) < 0.5 && Math.Abs(a.Width - column.Width) < 0.5);
+            if (area is null) NoteAreas.Add(area = new NoteArea(column.X, column.Width));
+            return area;
+        }
 
-        public double NotesHeight => Notes.Count == 0 ? 0 : NoteSeparatorHeight + Notes.Sum(n => n.Slice.Height + n.Slice.TrailingSpace);
+        /// <summary>Bottom of the body text in <paramref name="column"/>: the content area minus the footnotes below it.</summary>
+        public double BodyBottomAt((double X, double Width) column) =>
+            ContentBottom - NoteAreas.Where(a => a.Overlaps(column)).Select(a => a.Height).DefaultIfEmpty(0).Max();
 
-        /// <summary>Bottom of the body text: the content area minus footnotes.</summary>
-        public double BodyBottom => ContentBottom - NotesHeight;
+        /// <summary>Bottom of the body text in the current column.</summary>
+        public double BodyBottom => BodyBottomAt(Region.Columns[Column]);
+
+        /// <summary>Bottom of the body text in the column with the most footnotes.</summary>
+        public double LowestBodyBottom => ContentBottom - NoteAreas.Select(a => a.Height).DefaultIfEmpty(0).Max();
 
         /// <summary>Floating images, painted below (<c>Behind</c>) or above the text.</summary>
         public List<(ImageItem Item, bool Behind)> Floats { get; } = [];
@@ -139,7 +173,7 @@ public sealed class LayoutEngine
 
         Page? current = null;
         Paginator? last = null;
-        var carry = new List<Slice>(); // footnote lines continued on the next page
+        var carry = new List<NoteLine>(); // footnote lines continued on the next page
         int pageNumber = 0;
         Section? numberingSection = null;
         foreach (var section in document.Sections)
@@ -159,16 +193,16 @@ public sealed class LayoutEngine
                 pages.Add(current);
             }
 
-            var notes = new Dictionary<Note, List<Slice>>(ReferenceEqualityComparer.Instance);
+            var notes = new Dictionary<(Note, double, double), List<Slice>>();
             var paginator = new Paginator(pages, () =>
             {
                 var page = NewPage(section, NextNumber(section, ref numberingSection, ref pageNumber), false, settings);
                 current = page;
                 return page;
-            }, note =>
+            }, (note, x, width) =>
             {
-                if (!notes.TryGetValue(note, out var lines))
-                    notes[note] = lines = BlockFlow.Build(note.Blocks, section.Margins.Left, section.ContentWidth, bodyContext);
+                if (!notes.TryGetValue((note, x, width), out var lines))
+                    notes[(note, x, width)] = lines = BlockFlow.Build(note.Blocks, x, width, bodyContext);
                 return lines;
             }, carry);
             last = paginator;
@@ -352,15 +386,16 @@ public sealed class LayoutEngine
             Story(stacked, page.Height - section.FooterDistance - h);
         }
         foreach (var placement in page.Placed) Emit(output, placement.Slice, placement.Dx, placement.Y, page, fields);
-        if (page.Notes.Count > 0)
+        foreach (var area in page.NoteAreas)
         {
-            double y = page.ContentBottom - page.NotesHeight;
-            double x = section.Margins.Left;
+            if (area.Lines.Count == 0) continue;
+            double y = page.ContentBottom - area.Height;
+            double x = area.X;
             // A continued footnote gets a full-width separator, as in Word.
-            double length = page.NotesContinued ? section.ContentWidth : Math.Min(144, section.ContentWidth / 3);
+            double length = area.Continued ? area.Width : Math.Min(144, area.Width / 3);
             output.Items.Add(new LineItem(x, y + NoteSeparatorHeight / 2, x + length, y + NoteSeparatorHeight / 2, 0.5, Color.Black));
             y += NoteSeparatorHeight;
-            foreach (var (slice, _) in page.Notes)
+            foreach (var (slice, _) in area.Lines)
             {
                 Emit(output, slice, y, page, fields);
                 y += slice.Height + slice.TrailingSpace;
@@ -454,7 +489,7 @@ public sealed class LayoutEngine
     /// Places slices into the columns of pages, moving keep-chains and splitting rows as needed. Slices
     /// carry absolute x coordinates for the column they were built for; placement records the shift.
     /// </summary>
-    private sealed class Paginator(List<Page> pages, Func<Page> newPage, Func<Note, List<Slice>> noteLines, List<Slice> carry)
+    private sealed class Paginator(List<Page> pages, Func<Page> newPage, Func<Note, double, double, List<Slice>> noteLines, List<NoteLine> carry)
     {
         private readonly HashSet<Note> _placedNotes = new(ReferenceEqualityComparer.Instance);
 
@@ -491,7 +526,7 @@ public sealed class LayoutEngine
         {
             var page = Current;
             if (ReferenceEquals(page.Region.Section, section) && page.Placed.Count == 0) return;
-            if (page.Region.Bottom > page.BodyBottom - 36)
+            if (page.Region.Bottom > page.LowestBodyBottom - 36)
             {
                 NextPage(natural: false); // no useful room left; the new page starts with this section's columns
                 return;
@@ -530,12 +565,14 @@ public sealed class LayoutEngine
             var page = newPage();
             page.NaturalBreak = natural;
             pages.Add(page);
-            if (carry.Count == 0) return;
             // Continued footnote lines come first, leaving room for some body text.
-            page.NotesContinued = true;
-            while (carry.Count > 0 && (page.Notes.Count == 0 || page.BodyBottom - carry[0].Height - page.ContentTop > 72))
+            while (carry.Count > 0)
             {
-                page.Notes.Add((carry[0], null));
+                var (line, _, x, width) = carry[0];
+                var area = page.NoteAreaFor((x, width));
+                if (area.Lines.Count > 0 && page.BodyBottomAt((x, width)) - line.Height - page.ContentTop <= 72) break;
+                if (area.Lines.Count == 0) area.Continued = true;
+                area.Lines.Add((line, null));
                 carry.RemoveAt(0);
             }
         }
@@ -546,17 +583,20 @@ public sealed class LayoutEngine
             for (int guard = 0; carry.Count > 0 && guard < 1000; guard++) NextPage(natural: false);
         }
 
-        /// <summary>Lines of the footnotes first referenced by <paramref name="slice"/>.</summary>
-        private List<(Slice Line, Note Note)> NewNotes(Slice slice) =>
+        /// <summary>Lines of the footnotes first referenced by <paramref name="slice"/>, built for <paramref name="area"/>.</summary>
+        private List<NoteLine> NewNotes(Slice slice, NoteArea area) =>
             slice.Footnotes.Where(n => !_placedNotes.Contains(n)).Distinct(ReferenceEqualityComparer.Instance).Cast<Note>()
-                 .SelectMany(n => noteLines(n).Select(line => (line, n))).ToList();
+                 .SelectMany(n => noteLines(n, area.X, area.Width).Select(line => new NoteLine(line, n, area.X, area.Width))).ToList();
 
-        /// <summary>Lowest content of the page outside the current column (it must stay above the footnotes).</summary>
-        private static double OtherColumnsBottom(Page page)
+        /// <summary>Lowest content outside the current column above <paramref name="area"/> (it must stay above the footnotes).</summary>
+        private static double OtherColumnsBottom(Page page, NoteArea area)
         {
             double bottom = 0;
             for (int i = 0; i < page.ColumnStart; i++)
-                bottom = Math.Max(bottom, page.Placed[i].Y + page.Placed[i].Slice.Height);
+            {
+                var p = page.Placed[i];
+                if (area.Overlaps(p.Region.Columns[p.Column])) bottom = Math.Max(bottom, p.Y + p.Slice.Height);
+            }
             return bottom;
         }
 
@@ -565,20 +605,20 @@ public sealed class LayoutEngine
         /// (or unconditionally with <paramref name="force"/>); footnote lines that do not fit continue on the
         /// next page. Returns false when nothing was placed.
         /// </summary>
-        private bool TryPutWithNotes(Page page, Slice slice, double builtX, List<(Slice Line, Note Note)> notes, bool force)
+        private bool TryPutWithNotes(Page page, Slice slice, double builtX, NoteArea area, List<NoteLine> notes, bool force)
         {
             double skip = page.NaturalBreak && page.ColumnCount == 0 ? slice.LeadingSpace : 0;
-            double limit = Math.Max(page.Cursor + slice.Height - skip, OtherColumnsBottom(page));
-            bool Fits(Slice line) => limit <= page.BodyBottom - (page.Notes.Count == 0 ? NoteSeparatorHeight : 0) - line.Height + Epsilon;
+            double limit = Math.Max(page.Cursor + slice.Height - skip, OtherColumnsBottom(page, area));
+            bool Fits(Slice line) => limit <= page.ContentBottom - area.Height - (area.Lines.Count == 0 ? NoteSeparatorHeight : 0) - line.Height + Epsilon;
             // Lines still waiting from earlier footnotes go first, so new ones can only follow them.
             bool fits = carry.Count > 0 ? limit <= page.BodyBottom + Epsilon : Fits(notes[0].Line);
             if (!fits && !force) return false;
 
             Put(page, slice, builtX);
-            foreach (var (_, note) in notes) _placedNotes.Add(note);
-            foreach (var (line, _) in notes)
+            foreach (var line in notes) _placedNotes.Add(line.Note);
+            foreach (var line in notes)
             {
-                if (carry.Count == 0 && Fits(line)) page.Notes.Add((line, slice));
+                if (carry.Count == 0 && Fits(line.Line)) area.Lines.Add((line.Line, slice));
                 else carry.Add(line);
             }
             return true;
@@ -594,13 +634,14 @@ public sealed class LayoutEngine
 
                 double available = page.BodyBottom - page.Cursor;
                 if (page.NaturalBreak && page.ColumnCount == 0) available += slice.LeadingSpace;
-                var notes = slice.Footnotes.Count > 0 ? NewNotes(slice) : [];
+                var area = slice.Footnotes.Count > 0 ? page.NoteAreaFor(page.Region.Columns[page.Column]) : null;
+                var notes = area is not null ? NewNotes(slice, area) : [];
                 if (notes.Count > 0)
                 {
-                    if (TryPutWithNotes(page, slice, builtX, notes, force: false)) return;
-                    if (!page.ColumnHasBody && page.Notes.Count == 0)
+                    if (TryPutWithNotes(page, slice, builtX, area!, notes, force: false)) return;
+                    if (!page.ColumnHasBody && area!.Lines.Count == 0)
                     {
-                        TryPutWithNotes(page, slice, builtX, notes, force: true); // nothing else can be done
+                        TryPutWithNotes(page, slice, builtX, area, notes, force: true); // nothing else can be done
                         return;
                     }
                 }
@@ -651,14 +692,12 @@ public sealed class LayoutEngine
             page.Placed.RemoveRange(start, page.Placed.Count - start);
             // Their footnotes move with them.
             var owners = moved.Select(m => m.Slice).ToHashSet();
-            if (page.Notes.Exists(n => n.Owner is not null && owners.Contains(n.Owner)) || moved.Any(m => m.Slice.Footnotes.Count > 0))
+            if (moved.Any(m => m.Slice.Footnotes.Count > 0))
             {
-                foreach (var note in moved.SelectMany(m => m.Slice.Footnotes))
-                {
-                    _placedNotes.Remove(note);
-                    foreach (var line in noteLines(note)) carry.Remove(line);
-                }
-                page.Notes.RemoveAll(n => n.Owner is not null && owners.Contains(n.Owner));
+                var notes = moved.SelectMany(m => m.Slice.Footnotes).ToHashSet<Note>(ReferenceEqualityComparer.Instance);
+                foreach (var note in notes) _placedNotes.Remove(note);
+                carry.RemoveAll(line => notes.Contains(line.Note));
+                foreach (var area in page.NoteAreas) area.Lines.RemoveAll(n => n.Owner is not null && owners.Contains(n.Owner));
             }
             var last = page.Placed[^1];
             page.Cursor = last.Y + last.Slice.Height + last.Slice.TrailingSpace;
@@ -695,7 +734,7 @@ public sealed class LayoutEngine
             var items = page.Placed.GetRange(first, page.Placed.Count - first);
             if (items.Any(p => page.IsRepeated(p.Slice))) return; // keep repeated table headers where they are
 
-            double limit = page.BodyBottom - region.Top;
+            double limit = region.Columns.Min(page.BodyBottomAt) - region.Top;
             List<(int Column, double Y)>? Fill(double height)
             {
                 var result = new List<(int, double)>(items.Count);
@@ -734,7 +773,7 @@ public sealed class LayoutEngine
                 page.Placed[first + i] = item with { Column = column, Y = region.Top + y, Dx = region.Columns[column].X - built };
                 bottom = Math.Max(bottom, region.Top + y + item.Slice.Height + item.Slice.TrailingSpace);
             }
-            region.Bottom = Math.Min(bottom, page.BodyBottom);
+            region.Bottom = Math.Min(bottom, region.Columns.Min(page.BodyBottomAt));
             page.Column = layout[^1].Column;
             page.ColumnStart = first + layout.FindIndex(l => l.Column == page.Column);
             page.Cursor = region.Bottom;
