@@ -524,12 +524,8 @@ internal sealed class StoryReader(DocxContext context, string partName)
         while (r.NextChild(depth))
         {
             if (r.IsWP() && r.LocalName == "inline") ReadInlineDrawing(r, state, props);
-            else
-            {
-                if (r.IsWP() && r.LocalName == "anchor")
-                    context.WarnOnce("docx.floating", "Floating (anchored) drawings are not supported yet and were skipped.");
-                r.Skip();
-            }
+            else if (r.IsWP() && r.LocalName == "anchor") ReadAnchorDrawing(r, state, props);
+            else r.Skip();
         }
     }
 
@@ -557,14 +553,110 @@ internal sealed class StoryReader(DocxContext context, string partName)
         }
         if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
 
+        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+            AddInline(state, new ImageRun(image, width, height, props));
+    }
+
+    /// <summary>Reads a wp:anchor picture: position, wrapping and z-order.</summary>
+    private void ReadAnchorDrawing(XmlReader r, ParagraphState state, RunProperties props)
+    {
+        static double Emu(XmlReader r, string name) =>
+            long.TryParse(r.GetAttribute(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? Math.Clamp(Units.FromEmu(v), 0, 1584) : 0;
+
+        bool behind = r.GetAttribute("behindDoc") is "1" or "true";
+        var distance = new Thickness(Emu(r, "distT"), Emu(r, "distR"), Emu(r, "distB"), Emu(r, "distL"));
+        var horizontal = new FloatPosition(FloatReference.Column, FloatAlignment.Offset, 0);
+        var vertical = new FloatPosition(FloatReference.Paragraph, FloatAlignment.Offset, 0);
+        bool inHorizontal = true;
+        var wrap = TextWrap.None;
+        long cx = 0, cy = 0;
+        string? embed = null, graphicType = null;
+        int depth = r.Depth;
+        if (r.IsEmptyElement) { r.Read(); return; }
+        r.Read();
+        while (!r.EOF && r.Depth > depth)
+        {
+            if (r.NodeType == XmlNodeType.Element && r.IsWP())
+            {
+                switch (r.LocalName)
+                {
+                    case "positionH" or "positionV":
+                        inHorizontal = r.LocalName == "positionH";
+                        var reference = ParseReference(r.GetAttribute("relativeFrom"), inHorizontal);
+                        if (inHorizontal) horizontal = horizontal with { RelativeTo = reference };
+                        else vertical = vertical with { RelativeTo = reference };
+                        break;
+                    case "posOffset":
+                        double offset = long.TryParse(r.ReadElementContentAsString().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var emu)
+                            ? Math.Clamp(Units.FromEmu(emu), -context.Options.MaxDimension, context.Options.MaxDimension) : 0;
+                        if (inHorizontal) horizontal = horizontal with { Alignment = FloatAlignment.Offset, Offset = offset };
+                        else vertical = vertical with { Alignment = FloatAlignment.Offset, Offset = offset };
+                        continue;
+                    case "align":
+                        var alignment = r.ReadElementContentAsString().Trim() switch
+                        {
+                            "left" or "top" or "inside" => FloatAlignment.Start,
+                            "center" => FloatAlignment.Center,
+                            "right" or "bottom" or "outside" => FloatAlignment.End,
+                            _ => FloatAlignment.Offset,
+                        };
+                        if (inHorizontal) horizontal = horizontal with { Alignment = alignment };
+                        else vertical = vertical with { Alignment = alignment };
+                        continue;
+                    case "extent":
+                        long.TryParse(r.GetAttribute("cx"), NumberStyles.Integer, CultureInfo.InvariantCulture, out cx);
+                        long.TryParse(r.GetAttribute("cy"), NumberStyles.Integer, CultureInfo.InvariantCulture, out cy);
+                        break;
+                    case "wrapTopAndBottom": wrap = TextWrap.TopAndBottom; break;
+                    // Tight/through wrapping follows the outline; the bounding rectangle is a close approximation.
+                    case "wrapSquare" or "wrapTight" or "wrapThrough": wrap = TextWrap.Square; break;
+                    case "wrapNone": wrap = TextWrap.None; break;
+                }
+            }
+            else if (r.NodeType == XmlNodeType.Element && r.IsA())
+            {
+                if (r.LocalName == "blip") embed ??= r.RAttr("embed");
+                else if (r.LocalName == "graphicData") graphicType = r.GetAttribute("uri");
+            }
+            r.Read();
+        }
+        if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
+
+        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+            AddInline(state, new FloatingImage(image, width, height, props)
+            {
+                Horizontal = horizontal, Vertical = vertical, Wrap = behind ? TextWrap.None : wrap, BehindText = behind, Distance = distance,
+            });
+    }
+
+    private static FloatReference ParseReference(string? value, bool horizontal) => value switch
+    {
+        "page" => FloatReference.Page,
+        "margin" => FloatReference.Margin,
+        "column" => FloatReference.Column,
+        "character" => FloatReference.Character,
+        "leftMargin" => FloatReference.LeftMargin,
+        "rightMargin" => FloatReference.RightMargin,
+        "insideMargin" => FloatReference.InsideMargin,
+        "outsideMargin" => FloatReference.OutsideMargin,
+        "paragraph" => FloatReference.Paragraph,
+        "line" => FloatReference.Line,
+        "topMargin" => FloatReference.TopMargin,
+        "bottomMargin" => FloatReference.BottomMargin,
+        _ => horizontal ? FloatReference.Column : FloatReference.Paragraph,
+    };
+
+    /// <summary>Resolves a picture's image part and size; null (with a warning) for non-pictures and broken links.</summary>
+    private (ImageData Image, double Width, double Height)? LoadPicture(string? embed, string? graphicType, long cx, long cy)
+    {
         if (embed is null)
         {
             var kind = graphicType?[(graphicType.LastIndexOf('/') + 1)..] ?? "unknown";
-            context.WarnOnce("docx.graphic." + kind, $"Inline graphic of type '{kind}' (charts, shapes, diagrams) is not supported.");
-            return;
+            context.WarnOnce("docx.graphic." + kind, $"Graphic of type '{kind}' (charts, shapes, diagrams) is not supported.");
+            return null;
         }
         double width = Units.FromEmu(cx), height = Units.FromEmu(cy);
-        if (width <= 0 || height <= 0) return;
+        if (width <= 0 || height <= 0) return null;
         double max = context.Options.MaxDimension;
         if (width > max || height > max)
         {
@@ -575,10 +667,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
         if (!context.Package.GetRelationships(partName).TryGetValue(embed, out var rel) || rel.IsExternal)
         {
             context.Warn("docx.image-link", $"Image relationship '{embed}' is missing or external.");
-            return;
+            return null;
         }
-        if (context.GetImage(rel.Target) is { } image)
-            state.Paragraph.Inlines.Add(new ImageRun(image, width, height, props));
+        return context.GetImage(rel.Target) is { } image ? (image, width, height) : null;
     }
 
     // ---------------------------------------------------------------- sections

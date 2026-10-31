@@ -30,6 +30,46 @@ public sealed class ImageRun(ImageData image, double width, double height, RunPr
     public double Height { get; } = height;
 }
 
+/// <summary>What a floating object's position is measured from.</summary>
+public enum FloatReference
+{
+    Page, Margin, Column, Character, LeftMargin, RightMargin, InsideMargin, OutsideMargin,
+    Paragraph, Line, TopMargin, BottomMargin,
+}
+
+/// <summary>Alignment within the reference area; <see cref="Offset"/> uses <see cref="FloatPosition.Offset"/>.</summary>
+public enum FloatAlignment { Offset, Start, Center, End }
+
+/// <summary>One axis of a floating object's position; <see cref="Offset"/> is in points from the reference's start.</summary>
+public readonly record struct FloatPosition(FloatReference RelativeTo, FloatAlignment Alignment, double Offset);
+
+public enum TextWrap
+{
+    /// <summary>Text ignores the object (it is drawn in front of or behind the text).</summary>
+    None,
+    /// <summary>No text beside the object: lines continue below it.</summary>
+    TopAndBottom,
+    /// <summary>Text flows around the object's bounding rectangle.</summary>
+    Square,
+}
+
+/// <summary>An image anchored to its paragraph and positioned independently of the text flow; size in points.</summary>
+public sealed class FloatingImage(ImageData image, double width, double height, RunProperties properties) : Inline(properties)
+{
+    public ImageData Image { get; } = image;
+    public double Width { get; } = width;
+    public double Height { get; } = height;
+    public FloatPosition Horizontal { get; init; } = new(FloatReference.Column, FloatAlignment.Offset, 0);
+    public FloatPosition Vertical { get; init; } = new(FloatReference.Paragraph, FloatAlignment.Offset, 0);
+    public TextWrap Wrap { get; init; }
+
+    /// <summary>Drawn below the text (otherwise above it).</summary>
+    public bool BehindText { get; init; }
+
+    /// <summary>Minimum distance between the image and wrapped text.</summary>
+    public Thickness Distance { get; init; }
+}
+
 public enum BreakKind { Line, Page, Column }
 
 public sealed class Break(BreakKind kind, RunProperties properties) : Inline(properties)

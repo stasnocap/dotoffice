@@ -63,6 +63,9 @@ internal sealed class Line
     public bool EndsWithLineBreak { get; init; }
     public bool IsLast { get; set; }
 
+    /// <summary>Extra space above the line, pushing it below an obstacle such as a floating image.</summary>
+    public double Gap { get; init; }
+
     /// <summary>Atoms that are drawn (trailing spaces and breaks excluded).</summary>
     public int VisibleCount { get; set; }
 }
@@ -245,32 +248,46 @@ internal sealed class Itemizer(FontSelector fonts)
 internal readonly record struct LineFrame(double Width, double LeftIndent, double RightIndent, double FirstLineIndent,
     IReadOnlyList<TabStop> TabStops, double DefaultTabStop);
 
+/// <summary>
+/// Supplies per-line geometry while a paragraph is broken into lines (text wrapping around floats):
+/// <see cref="Next"/> is asked before each line, <see cref="Done"/> is told about each finished line.
+/// </summary>
+internal interface ILineSpace
+{
+    /// <summary>Frame for the next line and the gap to leave above it.</summary>
+    (LineFrame Frame, double Gap) Next(LineFrame frame, bool first);
+
+    void Done(Line line);
+}
+
 /// <summary>Greedy line filling over break opportunities, with tab stops, alignment and justification.</summary>
 internal static class LineBuilder
 {
     private const double Epsilon = 0.01;
 
-    public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks)
+    public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks,
+        ILineSpace? space = null)
     {
         var lines = new List<Line>();
         int i = 0;
         while (i < atoms.Count)
         {
             bool first = lines.Count == 0;
-            double startX = frame.LeftIndent + (first ? frame.FirstLineIndent : 0);
-            double maxX = frame.Width - frame.RightIndent;
+            var (f, gap) = space?.Next(frame, first) ?? (frame, 0);
+            double startX = f.LeftIndent + (first ? f.FirstLineIndent : 0);
+            double maxX = f.Width - f.RightIndent;
             int end = i;
             while (end < atoms.Count)
             {
                 int wordEnd = end + 1;
                 while (wordEnd < atoms.Count && atoms[wordEnd].BreakBefore == LineBreakOpportunity.None && !atoms[wordEnd - 1].IsBreak)
                     wordEnd++;
-                double contentEnd = Position(atoms, i, wordEnd, startX, frame);
+                double contentEnd = Position(atoms, i, wordEnd, startX, f);
                 if (contentEnd > maxX + Epsilon && end > i) break; // word does not fit: line ends before it
                 if (contentEnd > maxX + Epsilon && end == i)
                 {
                     // A single word wider than the line: break it between characters.
-                    if (SplitToFit(atoms, i, wordEnd, startX, maxX, frame)) continue;
+                    if (SplitToFit(atoms, i, wordEnd, startX, maxX, f)) continue;
                 }
                 end = wordEnd;
                 if (atoms[end - 1].IsBreak) break;
@@ -280,23 +297,29 @@ internal static class LineBuilder
 
             var lineAtoms = atoms.GetRange(i, end - i);
             var last = lineAtoms[^1];
-            lines.Add(new Line
+            var line = new Line
             {
                 Atoms = lineAtoms,
                 EndsWithPageBreak = last.Kind == AtomKind.PageBreak,
                 EndsWithColumnBreak = last.IsColumnBreak,
-                EndsWithLineBreak = last.Kind == AtomKind.LineBreak,
-            });
+                Gap = gap,
+                IsLast = end == atoms.Count && !last.IsBreak,
+            };
+            lines.Add(line);
             i = end;
+            Finish(line, f, alignment, first, justifyBeforeBreaks);
+            space?.Done(line);
         }
 
         // A trailing break leaves an empty line holding the paragraph mark.
         if (lines.Count == 0 || lines[^1].Atoms[^1].IsBreak)
-            lines.Add(new Line { Atoms = [] });
-        lines[^1].IsLast = true;
-
-        for (int l = 0; l < lines.Count; l++)
-            Finish(lines[l], frame, alignment, l == 0, justifyBeforeBreaks);
+        {
+            var (f, gap) = space?.Next(frame, lines.Count == 0) ?? (frame, 0);
+            var line = new Line { Atoms = [], Gap = gap, IsLast = true };
+            lines.Add(line);
+            Finish(line, f, alignment, lines.Count == 1, justifyBeforeBreaks);
+            space?.Done(line);
+        }
         return lines;
     }
 

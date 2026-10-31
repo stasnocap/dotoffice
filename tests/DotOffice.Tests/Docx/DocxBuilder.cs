@@ -62,6 +62,21 @@ internal sealed class DocxBuilder
         "<wp:docPr id=\"1\" name=\"Picture\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
         $"<pic:pic><pic:blipFill><a:blip r:embed=\"{relId}\"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>";
 
+    /// <summary>Floating picture markup (wp:anchor); <paramref name="position"/> holds wp:positionH/V, <paramref name="wrap"/> a wrap element.</summary>
+    public static string AnchorImage(string relId, double widthPt, double heightPt, string position, string wrap = "<wp:wrapSquare wrapText=\"bothSides\"/>",
+        bool behind = false, int distance = 0) =>
+        $"<w:r><w:drawing><wp:anchor distT=\"{distance}\" distB=\"{distance}\" distL=\"{distance}\" distR=\"{distance}\" simplePos=\"0\" relativeHeight=\"1\" " +
+        $"behindDoc=\"{(behind ? 1 : 0)}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\"><wp:simplePos x=\"0\" y=\"0\"/>{position}" +
+        $"<wp:extent cx=\"{(long)(widthPt * 12700)}\" cy=\"{(long)(heightPt * 12700)}\"/>{wrap}<wp:docPr id=\"2\" name=\"Float\"/>" +
+        "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+        $"<pic:pic><pic:blipFill><a:blip r:embed=\"{relId}\"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>";
+
+    public static string Position(string relativeFromH, string h, string relativeFromV, string v)
+    {
+        static string Value(string s) => s.StartsWith('-') || char.IsDigit(s[0]) ? $"<wp:posOffset>{s}</wp:posOffset>" : $"<wp:align>{s}</wp:align>";
+        return $"<wp:positionH relativeFrom=\"{relativeFromH}\">{Value(h)}</wp:positionH><wp:positionV relativeFrom=\"{relativeFromV}\">{Value(v)}</wp:positionV>";
+    }
+
     public byte[] Build()
     {
         using var ms = new MemoryStream();

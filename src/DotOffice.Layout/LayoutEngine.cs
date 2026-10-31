@@ -81,6 +81,12 @@ public sealed class LayoutEngine
         /// <summary>Bottom of the body text: the content area minus footnotes.</summary>
         public double BodyBottom => ContentBottom - NotesHeight;
 
+        /// <summary>Floating images, painted below (<c>Behind</c>) or above the text.</summary>
+        public List<(ImageItem Item, bool Behind)> Floats { get; } = [];
+
+        /// <summary>Areas wrapped text avoids.</summary>
+        public List<Exclusion> Exclusions { get; } = [];
+
         public void StartRegion(Section section, double top)
         {
             var columns = section.Columns.Resolve(section.ContentWidth).Select(c => (section.Margins.Left + c.X, c.Width)).ToList();
@@ -171,13 +177,20 @@ public sealed class LayoutEngine
                 // Blocks are built for the column they start in, so columns of different widths work.
                 var (x, width) = paginator.Column;
                 bool keep = keepWithNext;
-                var slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext);
-                if (section.Columns.Definitions.Count > 1 && slices.Count > 0 && paginator.StartsInNextColumn(slices[0]))
-                {
+                var floats = section.Blocks[i] is Paragraph p ? p.Inlines.OfType<FloatingImage>().Where(f => !f.Properties.Hidden).ToList() : [];
+                var slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
+                if ((floats.Count > 0 || section.Columns.Definitions.Count > 1) && slices.Count > 0 && paginator.StartsInNextColumn(slices[0]))
                     paginator.NextColumn();
+                if (floats.Count > 0)
+                {
+                    // The anchor paragraph wraps around its own floats, so they are positioned before it is laid out.
+                    paginator.PlaceFloats(floats);
+                }
+                if (floats.Count > 0 || paginator.Column.X != x)
+                {
                     (x, width) = paginator.Column;
                     keepWithNext = keep;
-                    slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext);
+                    slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
                 }
                 foreach (var slice in slices) paginator.Add(slice, x);
             }
@@ -286,19 +299,34 @@ public sealed class LayoutEngine
         var output = new LayoutPage(page.Width, page.Height);
         var section = page.Section;
         var context = Context(settings, field => fields.Text(field, page));
+        var front = page.Floats.Where(f => !f.Behind).Select(f => f.Item).ToList();
+        output.Items.AddRange(page.Floats.Where(f => f.Behind).Select(f => f.Item));
+
+        void Story(List<(double Y, Slice Slice)> stacked, double top)
+        {
+            foreach (var (y, slice) in stacked)
+            {
+                Emit(output, slice, top + y, page, fields);
+                // Floats in headers and footers are drawn but do not push text aside.
+                foreach (var f in slice.Floats)
+                {
+                    var item = FloatItem(f, page, section, (section.Margins.Left, section.ContentWidth), top + y);
+                    if (f.BehindText) output.Items.Insert(0, item); else front.Add(item);
+                }
+            }
+        }
 
         if (page.Header is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
             BlockFlow.Stack(BlockFlow.Build(page.Header.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
-            foreach (var (y, slice) in stacked) Emit(output, slice, section.HeaderDistance + y, page, fields);
+            Story(stacked, section.HeaderDistance);
         }
         if (page.Footer is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
             double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
-            double top = page.Height - section.FooterDistance - h;
-            foreach (var (y, slice) in stacked) Emit(output, slice, top + y, page, fields);
+            Story(stacked, page.Height - section.FooterDistance - h);
         }
         foreach (var placement in page.Placed) Emit(output, placement.Slice, placement.Dx, placement.Y, page, fields);
         if (page.Notes.Count > 0)
@@ -324,7 +352,42 @@ public sealed class LayoutEngine
                 output.Items.Add(new LineItem(x, region.Top, x, region.Bottom, 0.5, Color.Black));
             }
         }
+        output.Items.AddRange(front);
         return output;
+    }
+
+    /// <summary>Positions a floating image on <paramref name="page"/>; <paramref name="anchorY"/> is the top of its paragraph.</summary>
+    private static ImageItem FloatItem(FloatingImage f, Page page, Section section, (double X, double Width) column, double anchorY)
+    {
+        var m = section.Margins;
+        var (hx, hw) = f.Horizontal.RelativeTo switch
+        {
+            FloatReference.Page => (0, page.Width),
+            FloatReference.Column or FloatReference.Character => column,
+            FloatReference.LeftMargin or FloatReference.InsideMargin => (0, m.Left),
+            FloatReference.RightMargin or FloatReference.OutsideMargin => (page.Width - m.Right, m.Right),
+            _ => (m.Left, page.Width - m.Left - m.Right),
+        };
+        var (vy, vh) = f.Vertical.RelativeTo switch
+        {
+            FloatReference.Page => (0, page.Height),
+            FloatReference.Margin => (m.Top, page.Height - m.Top - m.Bottom),
+            FloatReference.TopMargin => (0, m.Top),
+            FloatReference.BottomMargin => (page.Height - m.Bottom, m.Bottom),
+            _ => (anchorY, 0.0),
+        };
+        static double Place(FloatPosition p, double start, double size, double extent) => p.Alignment switch
+        {
+            FloatAlignment.Start => start,
+            FloatAlignment.Center => start + (size - extent) / 2,
+            FloatAlignment.End => start + size - extent,
+            _ => start + p.Offset,
+        };
+        double x = Place(f.Horizontal, hx, hw, f.Width);
+        double y = Place(f.Vertical, vy, vh, f.Height);
+        // Keep the image on the page, as Word does for objects anchored to text.
+        y = Math.Clamp(y, 0, Math.Max(0, page.Height - f.Height));
+        return new ImageItem(x, y, f.Width, f.Height, f.Image);
     }
 
     private static void Emit(LayoutPage output, Slice slice, double y, Page page, FieldValues fields) =>
@@ -372,10 +435,33 @@ public sealed class LayoutEngine
     {
         private readonly HashSet<Note> _placedNotes = new(ReferenceEqualityComparer.Instance);
 
+        private readonly HashSet<FloatingImage> _placedFloats = new(ReferenceEqualityComparer.Instance);
+
         private Page Current => pages[^1];
 
         /// <summary>Absolute x and width of the column that receives the next slice.</summary>
         public (double X, double Width) Column => Current.Region.Columns[Current.Column];
+
+        /// <summary>Floats the next block must wrap around, or null when there are none on the page.</summary>
+        public Obstacles? Obstacles => Current.Exclusions.Count == 0 ? null
+            : new Obstacles(Current.Exclusions, Column.X, Column.Width, Current.Cursor);
+
+        /// <summary>Positions floats anchored at the current position and makes text wrap around them.</summary>
+        public void PlaceFloats(IEnumerable<FloatingImage> floats) => PlaceFloats(Current, floats, Current.Cursor);
+
+        private void PlaceFloats(Page page, IEnumerable<FloatingImage> floats, double anchorY)
+        {
+            foreach (var f in floats)
+            {
+                if (!_placedFloats.Add(f)) continue;
+                var item = FloatItem(f, page, page.Region.Section, page.Region.Columns[page.Column], anchorY);
+                page.Floats.Add((item, f.BehindText));
+                if (f.Wrap == TextWrap.None) continue;
+                var d = f.Distance;
+                page.Exclusions.Add(new Exclusion(item.X - d.Left, item.Y - d.Top, item.Width + d.Left + d.Right, item.Height + d.Top + d.Bottom,
+                    FullWidth: f.Wrap == TextWrap.TopAndBottom));
+            }
+        }
 
         /// <summary>Starts a section's columns: below earlier content on the current page, or on a fresh page.</summary>
         public void StartSection(Section section)
@@ -561,10 +647,11 @@ public sealed class LayoutEngine
 
         private static double BuiltX(Placement p) => p.Region.Columns[p.Column].X - p.Dx;
 
-        private static void Put(Page page, Slice slice, double builtX, bool repeated = false)
+        private void Put(Page page, Slice slice, double builtX, bool repeated = false)
         {
             double skip = page.NaturalBreak && page.ColumnCount == 0 ? slice.LeadingSpace : 0;
             var region = page.Region;
+            if (slice.Floats.Count > 0) PlaceFloats(page, slice.Floats, page.Cursor - skip);
             page.Placed.Add(new Placement(slice, region.Columns[page.Column].X - builtX, page.Cursor - skip, region, page.Column));
             if (repeated) page.Repeated.Add(slice);
             page.Cursor += slice.Height + slice.TrailingSpace - skip;
