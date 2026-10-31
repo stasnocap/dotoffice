@@ -20,20 +20,67 @@ internal struct GlyphInfo
 
     /// <summary>Index of the glyph a mark is attached to (relative position resolved at the end), or -1.</summary>
     public int AttachTo;
+
+    /// <summary>
+    /// Index of the glyph this one is cursively attached to, or -1. <see cref="YOffset"/> is then relative to
+    /// that glyph's (resolved at the end, along the chain).
+    /// </summary>
+    public int CursiveTo;
+
+    /// <summary>What GSUB did to this glyph (HarfBuzz's glyph props), used by the Indic shaper.</summary>
+    public GlyphFlags Flags;
+
+    /// <summary>Syllable number (non-zero for complex scripts); lookups of per-syllable features do not cross syllables.</summary>
+    public int Syllable;
+
+    /// <summary>The character the glyph was made from (the first one for ligatures; 0 for inserted glyphs).</summary>
+    public int CodePoint;
+
+    /// <summary>Shaper-specific character category and position (Indic shaping).</summary>
+    public byte ShaperCategory, ShaperPosition;
+
+    /// <summary>Made from a default-ignorable character (ZWJ, ZWNJ…), hidden after shaping.</summary>
+    public bool Ignorable;
+
+    /// <summary>A default ignorable GSUB must not skip (see <see cref="NormalizedChar.Hidden"/>).</summary>
+    public bool Hidden;
+
+    /// <summary>
+    /// Ligature membership (HarfBuzz's lig_props): a ligature and the marks inside it share a non-zero id; a mark's
+    /// component is the 1-based ligature component it belongs to (0 for the ligature itself).
+    /// </summary>
+    public int LigatureId, LigatureComponent;
+}
+
+[Flags]
+internal enum GlyphFlags : byte
+{
+    None = 0,
+    Substituted = 1,
+    Ligated = 2,
+    Multiplied = 4,
 }
 
 /// <summary>
 /// GSUB/GPOS/GDEF interpreter: selects the lookups of a script's features and applies them to a glyph
-/// buffer. Supports GSUB types 1, 2, 4, 5, 6, 7 and GPOS types 1, 2, 4, 5, 6, 7, 8, 9; anything else
+/// buffer. Supports GSUB types 1–7 and GPOS types 1–9; anything else
 /// (and malformed data, by throwing, which the shaper catches) leaves the glyphs unchanged.
 /// </summary>
 internal sealed class OpenTypeLayout
 {
+    /// <summary>Mask bit marking lookups of features that apply per syllable (never set on glyphs).</summary>
+    public const uint PerSyllable = 0x8000_0000;
+
+    /// <summary>
+    /// Mask bit marking lookups of features that handle ZWJ/ZWNJ themselves (HarfBuzz's manual joiners) instead of
+    /// skipping them; never set on glyphs.
+    /// </summary>
+    public const uint ManualJoiners = 0x4000_0000;
+
     private const int MaxNesting = 6;
     private const int MaxOperations = 100_000;
 
     private readonly byte[] _gsub, _gpos, _gdef;
-    private int _operations;
 
     public OpenTypeLayout(TrueTypeFont font)
     {
@@ -84,6 +131,100 @@ internal sealed class OpenTypeLayout
         return -1;
     }
 
+    /// <summary>All glyphs listed in a coverage table.</summary>
+    private static IEnumerable<int> CoveredGlyphs(byte[] t, int offset)
+    {
+        int format = U16(t, offset), count = U16(t, offset + 2);
+        for (int i = 0; i < count; i++)
+        {
+            if (format == 1) yield return U16(t, offset + 4 + i * 2);
+            else if (format == 2)
+                for (int g = U16(t, offset + 4 + i * 6); g <= U16(t, offset + 6 + i * 6); g++) yield return g;
+        }
+    }
+
+    private (HashSet<int> Glyphs, HashSet<(int, int)> Pairs)? _defaultSubstitutionStarts;
+
+    /// <summary>
+    /// True when a lookup of the default GSUB features (ccmp, locl, rlig, calt, clig, liga, rclt) in the default
+    /// language system of any script may start at <paramref name="glyph"/> followed by <paramref name="next"/> (-1
+    /// at the end), so text with them must be shaped (e.g. for "fi" ligatures). Ligatures need their second
+    /// component next; other substitutions only their first glyph.
+    /// </summary>
+    public bool StartsDefaultSubstitution(int glyph, int next)
+    {
+        var (glyphs, pairs) = _defaultSubstitutionStarts ??= DefaultSubstitutionStarts();
+        return glyphs.Contains(glyph) || pairs.Contains((glyph, next));
+    }
+
+    private (HashSet<int>, HashSet<(int, int)>) DefaultSubstitutionStarts()
+    {
+        var glyphs = new HashSet<int>();
+        var pairs = new HashSet<(int, int)>();
+        var t = _gsub;
+        if (t.Length < 10) return (glyphs, pairs);
+        try
+        {
+            int scriptList = U16(t, 4), featureList = U16(t, 6), lookupList = U16(t, 8);
+            var features = new SortedSet<int>();
+            for (int i = 0; i < U16(t, scriptList); i++)
+            {
+                int script = scriptList + U16(t, scriptList + 2 + i * 6 + 4);
+                if (U16(t, script) == 0) continue;
+                int langSys = script + U16(t, script);
+                if (U16(t, langSys + 2) != 0xFFFF) features.Add(U16(t, langSys + 2));
+                for (int k = 0; k < U16(t, langSys + 4); k++) features.Add(U16(t, langSys + 6 + k * 2));
+            }
+            foreach (int f in features)
+            {
+                if (f >= U16(t, featureList)) continue;
+                int rec = featureList + 2 + f * 6;
+                if (Tag(t, rec) is not ("ccmp" or "locl" or "rlig" or "calt" or "clig" or "liga" or "rclt")) continue;
+                int feature = featureList + U16(t, rec + 4);
+                for (int k = 0; k < U16(t, feature + 2); k++)
+                {
+                    int lookup = U16(t, feature + 4 + k * 2);
+                    if (lookup >= U16(t, lookupList)) continue;
+                    int table = lookupList + U16(t, lookupList + 2 + lookup * 2);
+                    int type = U16(t, table);
+                    for (int sIndex = 0; sIndex < U16(t, table + 4); sIndex++)
+                    {
+                        int sub = table + U16(t, table + 6 + sIndex * 2), subType = type;
+                        if (type == 7)
+                        {
+                            subType = U16(t, sub + 2);
+                            sub += U32(t, sub + 4);
+                        }
+                        int coverage = subType is 5 or 6 && U16(t, sub) == 3
+                            ? sub + U16(t, sub + (subType == 5 ? 6 : 4 + U16(t, sub + 2) * 2 + 2))
+                            : sub + U16(t, sub + 2);
+                        if (subType != 4)
+                        {
+                            glyphs.UnionWith(CoveredGlyphs(t, coverage));
+                            continue;
+                        }
+                        int index = 0;
+                        foreach (int first in CoveredGlyphs(t, coverage))
+                        {
+                            int set = sub + U16(t, sub + 6 + index++ * 2);
+                            for (int l = 0; l < U16(t, set); l++)
+                            {
+                                int ligature = set + U16(t, set + 2 + l * 2);
+                                if (U16(t, ligature + 2) < 2) glyphs.Add(first);
+                                else pairs.Add((first, U16(t, ligature + 4)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // malformed table: shape everything it covered so far
+        }
+        return (glyphs, pairs);
+    }
+
     private static int ClassOf(byte[] t, int offset, int glyph)
     {
         if (offset <= 0 || offset >= t.Length) return 0;
@@ -111,6 +252,9 @@ internal sealed class OpenTypeLayout
     }
 
     /// <summary>GDEF glyph class: 1 base, 2 ligature, 3 mark, 4 component, 0 unknown.</summary>
+    /// <summary>True when GDEF has a glyph class definition.</summary>
+    public bool HasGlyphClasses => _gdef.Length >= 12 && U16(_gdef, 4) != 0;
+
     public int GlyphClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 4), glyph) : 0;
 
     private int MarkAttachClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 10), glyph) : 0;
@@ -176,32 +320,168 @@ internal sealed class OpenTypeLayout
         return result;
     }
 
+    /// <summary>True when the GSUB (or GPOS) table has the script <paramref name="tag"/> (e.g. "dev2").</summary>
+    public bool HasScript(string tag, bool gpos = false)
+    {
+        var t = gpos ? _gpos : _gsub;
+        if (t.Length < 10) return false;
+        int scriptList = U16(t, 4);
+        for (int i = 0; i < U16(t, scriptList); i++)
+            if (Tag(t, scriptList + 2 + i * 6) == tag) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a GSUB lookup would substitute exactly the glyph sequence <paramref name="glyphs"/> (HarfBuzz's
+    /// would_substitute). With <paramref name="zeroContext"/>, chained rules that need backtrack or lookahead
+    /// glyphs do not count.
+    /// </summary>
+    public bool WouldSubstitute(int lookup, ReadOnlySpan<int> glyphs, bool zeroContext)
+    {
+        var t = _gsub;
+        if (t.Length < 10 || glyphs.Length == 0) return false;
+        int list = U16(t, 8);
+        if (lookup >= U16(t, list)) return false;
+        int table = list + U16(t, list + 2 + lookup * 2);
+        int type = U16(t, table);
+        for (int s = 0; s < U16(t, table + 4); s++)
+        {
+            int sub = table + U16(t, table + 6 + s * 2);
+            int subType = type;
+            if (type == 7)
+            {
+                subType = U16(t, sub + 2);
+                sub += U32(t, sub + 4);
+            }
+            if (WouldSubstitute(t, subType, sub, glyphs, zeroContext)) return true;
+        }
+        return false;
+    }
+
+    private static bool WouldSubstitute(byte[] t, int type, int sub, ReadOnlySpan<int> glyphs, bool zeroContext)
+    {
+        int format = U16(t, sub);
+        int coverage = Coverage(t, sub + U16(t, sub + 2), glyphs[0]);
+        switch (type)
+        {
+            case 1 or 2 or 3:
+                return glyphs.Length == 1 && coverage >= 0;
+            case 4:
+            {
+                if (coverage < 0) return false;
+                int set = sub + U16(t, sub + 6 + coverage * 2);
+                for (int l = 0; l < U16(t, set); l++)
+                {
+                    int lig = set + U16(t, set + 2 + l * 2);
+                    int components = U16(t, lig + 2);
+                    if (components != glyphs.Length) continue;
+                    bool all = true;
+                    for (int c = 1; c < components && all; c++) all = U16(t, lig + 4 + (c - 1) * 2) == glyphs[c];
+                    if (all) return true;
+                }
+                return false;
+            }
+            case 5 or 6:
+                return WouldSubstituteContext(t, type == 6, format, sub, glyphs, zeroContext);
+        }
+        return false;
+    }
+
+    private static bool WouldSubstituteContext(byte[] t, bool chained, int format, int sub, ReadOnlySpan<int> glyphs, bool zeroContext)
+    {
+        if (format == 3)
+        {
+            int p = sub + 2;
+            int backtrack = 0;
+            if (chained)
+            {
+                backtrack = U16(t, p);
+                p += 2 + backtrack * 2;
+            }
+            int inputCount = U16(t, p);
+            int inputs = chained ? p + 2 : sub + 6;
+            if (!chained) inputCount = U16(t, sub + 2);
+            if (inputCount != glyphs.Length) return false;
+            for (int k = 0; k < inputCount; k++)
+                if (Coverage(t, sub + U16(t, inputs + k * 2), glyphs[k]) < 0) return false;
+            if (!chained || !zeroContext) return true;
+            int lookahead = U16(t, inputs + inputCount * 2);
+            return backtrack == 0 && lookahead == 0;
+        }
+
+        int coverage = Coverage(t, sub + U16(t, sub + 2), glyphs[0]);
+        if (coverage < 0 || format is not (1 or 2)) return false;
+        int inputClasses = 0, sets;
+        if (format == 2)
+        {
+            inputClasses = sub + U16(t, sub + (chained ? 6 : 4));
+            sets = sub + (chained ? 10 : 6);
+        }
+        else sets = sub + 4;
+        int setIndex = format == 2 ? ClassOf(t, inputClasses, glyphs[0]) : coverage;
+        if (setIndex >= U16(t, sets) || U16(t, sets + 2 + setIndex * 2) == 0) return false;
+        int set = sub + U16(t, sets + 2 + setIndex * 2);
+        for (int r = 0; r < U16(t, set); r++)
+        {
+            int rule = set + U16(t, set + 2 + r * 2), q = rule;
+            int backtrack = 0;
+            if (chained)
+            {
+                backtrack = U16(t, q);
+                q += 2 + backtrack * 2;
+            }
+            int inputCount = U16(t, q);
+            int inputStart = chained ? q + 2 : q + 4;
+            if (inputCount != glyphs.Length) continue;
+            bool all = true;
+            for (int k = 1; k < inputCount && all; k++)
+            {
+                int value = U16(t, inputStart + (k - 1) * 2);
+                all = format == 1 ? glyphs[k] == value : ClassOf(t, inputClasses, glyphs[k]) == value;
+            }
+            if (!all) continue;
+            if (!chained || !zeroContext) return true;
+            int lookahead = U16(t, inputStart + (inputCount - 1) * 2);
+            if (backtrack == 0 && lookahead == 0) return true;
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------ lookup application
 
-    private sealed class Context(byte[] table, List<GlyphInfo> glyphs, bool gpos)
+    private sealed class Context(byte[] table, List<GlyphInfo> glyphs, bool gpos, bool rightToLeft)
     {
         public byte[] Table { get; } = table;
         public List<GlyphInfo> Glyphs { get; } = glyphs;
         public bool Gpos { get; } = gpos;
+        public bool RightToLeft { get; } = rightToLeft;
         public int Flags { get; set; }
         public int MarkSet { get; set; }
         public uint Mask { get; set; }
+        public bool PerSyllable { get; set; }
+        public bool ManualJoiners { get; set; }
         public int Nesting { get; set; }
+
+        /// <summary>Lookup applications so far; bounds the work on malicious fonts.</summary>
+        public int Operations { get; set; }
     }
 
-    public void Apply(bool gpos, List<GlyphInfo> glyphs, List<(int Lookup, uint Mask)> lookups)
+    /// <summary>Applies <paramref name="lookups"/>; <paramref name="rightToLeft"/> is the text direction (for cursive attachment).</summary>
+    public void Apply(bool gpos, List<GlyphInfo> glyphs, List<(int Lookup, uint Mask)> lookups, bool rightToLeft = false)
     {
         var t = gpos ? _gpos : _gsub;
         if (t.Length < 10) return;
-        var ctx = new Context(t, glyphs, gpos);
+        var ctx = new Context(t, glyphs, gpos, rightToLeft);
         foreach (var (lookup, mask) in lookups)
         {
-            ctx.Mask = mask;
+            ctx.Mask = mask & ~(PerSyllable | ManualJoiners);
+            ctx.PerSyllable = (mask & PerSyllable) != 0;
+            ctx.ManualJoiners = (mask & ManualJoiners) != 0;
             if (!SetLookup(ctx, lookup)) continue;
             for (int i = 0; i < glyphs.Count;)
             {
-                if (++_operations > MaxOperations) return;
-                if ((glyphs[i].Mask & mask) == 0 || Ignored(ctx, glyphs[i].Glyph)) { i++; continue; }
+                if (++ctx.Operations > MaxOperations) return;
+                if ((glyphs[i].Mask & ctx.Mask) == 0 || Ignored(ctx, glyphs[i].Glyph)) { i++; continue; }
                 i = ApplyLookup(ctx, lookup, i) is { } next && next > i ? next : i + 1;
             }
         }
@@ -233,18 +513,59 @@ internal sealed class OpenTypeLayout
         return false;
     }
 
-    private int Next(Context ctx, int i)
+    private enum Step { Match, NoMatch, Skip }
+
+    /// <summary>
+    /// The next glyph after <paramref name="i"/> that matches, or -1, following HarfBuzz's skippy iterator: glyphs
+    /// the lookup flags ignore are skipped; an <paramref name="input"/> glyph (ligature component, context input)
+    /// must carry the lookup's feature mask; per-syllable lookups stay in the syllable; default ignorables such as
+    /// ZWJ are matched when <paramref name="matches"/> accepts them and skipped otherwise.
+    /// </summary>
+    private int Next(Context ctx, int i, bool input = false, Func<int, bool>? matches = null)
     {
+        int start = i;
         for (i++; i < ctx.Glyphs.Count; i++)
-            if (!Ignored(ctx, ctx.Glyphs[i].Glyph)) return i;
+        {
+            var step = Test(ctx, start, i, input, matches);
+            if (step != Step.Skip) return step == Step.Match ? i : -1;
+        }
         return -1;
     }
 
-    private int Prev(Context ctx, int i)
+    /// <summary>The previous glyph that matches, or -1; <paramref name="input"/> as for <see cref="Next"/> (false for backtrack context).</summary>
+    private int Prev(Context ctx, int i, Func<int, bool>? matches = null, bool input = false)
     {
+        int start = i;
         for (i--; i >= 0; i--)
-            if (!Ignored(ctx, ctx.Glyphs[i].Glyph)) return i;
+        {
+            var step = Test(ctx, start, i, input, matches);
+            if (step != Step.Skip) return step == Step.Match ? i : -1;
+        }
         return -1;
+    }
+
+    private Step Test(Context ctx, int from, int i, bool input, Func<int, bool>? matches)
+    {
+        var g = ctx.Glyphs[i];
+        if (Ignored(ctx, g.Glyph)) return Step.Skip;
+        bool maybeSkip = MaySkip(ctx, g, context: !input);
+        bool? match = (input && (g.Mask & ctx.Mask) == 0) || (ctx.PerSyllable && !ctx.Gpos && g.Syllable != ctx.Glyphs[from].Syllable)
+            ? false
+            : matches?.Invoke(i);
+        if (match == true || (match is null && !maybeSkip)) return Step.Match;
+        return maybeSkip ? Step.Skip : Step.NoMatch;
+    }
+
+    /// <summary>
+    /// Whether a default-ignorable glyph may be skipped: ZWNJ in GPOS (or in GSUB context with automatic joiners),
+    /// ZWJ in context or with automatic joiners, hidden ones in GPOS, others always (HarfBuzz's may_skip).
+    /// </summary>
+    private static bool MaySkip(Context ctx, in GlyphInfo g, bool context)
+    {
+        if (!g.Ignorable || g.Hidden && !ctx.Gpos) return false;
+        bool autoJoiners = !ctx.ManualJoiners;
+        bool ignoreZwnj = ctx.Gpos || (context && autoJoiners), ignoreZwj = context || autoJoiners;
+        return (ignoreZwnj || g.CodePoint != 0x200C) && (ignoreZwj || g.CodePoint != 0x200D);
     }
 
     /// <summary>Applies one lookup at position <paramref name="i"/>; returns where to continue, or null when nothing applied.</summary>
@@ -284,7 +605,7 @@ internal sealed class OpenTypeLayout
                 int index = Coverage(t, sub + U16(t, sub + 2), glyph);
                 if (index < 0) return null;
                 int replacement = format == 1 ? (glyph + S16(t, sub + 4)) & 0xFFFF : U16(t, sub + 6 + index * 2);
-                Replace(glyphs, i, (ushort)replacement);
+                Replace(glyphs, i, (ushort)replacement, GlyphFlags.None);
                 return i + 1;
             }
             case 2:
@@ -295,10 +616,21 @@ internal sealed class OpenTypeLayout
                 int count = U16(t, sequence);
                 if (count == 0) { glyphs.RemoveAt(i); return i; }
                 var info = glyphs[i];
-                Replace(glyphs, i, (ushort)U16(t, sequence + 2));
+                var added = count > 1 ? GlyphFlags.Multiplied : GlyphFlags.None;
+                Replace(glyphs, i, (ushort)U16(t, sequence + 2), added);
                 for (int k = 1; k < count; k++)
-                    glyphs.Insert(i + k, info with { Glyph = (ushort)U16(t, sequence + 2 + k * 2), Text = "" });
+                    glyphs.Insert(i + k, glyphs[i] with { Glyph = (ushort)U16(t, sequence + 2 + k * 2), Text = "" });
                 return i + count;
+            }
+            case 3:
+            {
+                // An enabled feature (value 1) selects the first alternate, as in HarfBuzz.
+                int index = Coverage(t, sub + U16(t, sub + 2), glyph);
+                if (index < 0) return null;
+                int set = sub + U16(t, sub + 6 + index * 2);
+                if (U16(t, set) == 0) return null;
+                Replace(glyphs, i, (ushort)U16(t, set + 2), GlyphFlags.None);
+                return i + 1;
             }
             case 4:
             {
@@ -314,13 +646,23 @@ internal sealed class OpenTypeLayout
                     int pos = i;
                     for (int c = 1; c < components; c++)
                     {
-                        pos = Next(ctx, pos);
-                        if (pos < 0 || glyphs[pos].Glyph != U16(t, lig + 4 + (c - 1) * 2)) { matched = null; break; }
+                        int component = U16(t, lig + 4 + (c - 1) * 2);
+                        pos = Next(ctx, pos, input: true, j => glyphs[j].Glyph == component);
+                        if (pos < 0) { matched = null; break; }
                         matched.Add(pos);
                     }
                     if (matched is null) continue;
+                    // Marks skipped inside the match belong to the component before them.
+                    int ligatureId = glyphs.Max(g => g.LigatureId) + 1;
+                    for (int c = 1; c < matched.Count; c++)
+                        for (int k = matched[c - 1] + 1; k < matched[c]; k++)
+                            if (GlyphClass(glyphs[k].Glyph) == 3)
+                                glyphs[k] = glyphs[k] with { LigatureId = ligatureId, LigatureComponent = c };
                     var ligature = glyphs[i];
+                    ligature.LigatureId = ligatureId;
+                    ligature.LigatureComponent = 0;
                     ligature.Glyph = (ushort)U16(t, lig);
+                    ligature.Flags = (ligature.Flags | GlyphFlags.Substituted | GlyphFlags.Ligated) & ~GlyphFlags.Multiplied;
                     ligature.Text = string.Concat(matched.Select(k => glyphs[k].Text));
                     glyphs[i] = ligature;
                     for (int k = matched.Count - 1; k > 0; k--) glyphs.RemoveAt(matched[k]);
@@ -335,10 +677,11 @@ internal sealed class OpenTypeLayout
         return null;
     }
 
-    private static void Replace(List<GlyphInfo> glyphs, int i, ushort glyph)
+    private static void Replace(List<GlyphInfo> glyphs, int i, ushort glyph, GlyphFlags added)
     {
         var info = glyphs[i];
         info.Glyph = glyph;
+        info.Flags |= GlyphFlags.Substituted | added;
         glyphs[i] = info;
     }
 
@@ -393,20 +736,75 @@ internal sealed class OpenTypeLayout
                 glyphs[second] = Adjust(glyphs[second], t, record + size1, vf2);
                 return vf2 != 0 ? second + 1 : second;
             }
+            case 3:
+            {
+                // Cursive attachment: this glyph's entry anchor meets the previous glyph's exit anchor (as in HarfBuzz).
+                if (format != 1) return null;
+                int coverage = sub + U16(t, sub + 2);
+                int index = Coverage(t, coverage, glyph);
+                if (index < 0) return null;
+                int entry = U16(t, sub + 6 + index * 4);
+                int prev = Prev(ctx, i, input: true);
+                if (entry == 0 || prev < 0) return null;
+                int prevIndex = Coverage(t, coverage, glyphs[prev].Glyph);
+                if (prevIndex < 0) return null;
+                int exit = U16(t, sub + 6 + prevIndex * 4 + 2);
+                if (exit == 0) return null;
+                int exitX = S16(t, sub + exit + 2), exitY = S16(t, sub + exit + 4);
+                int entryX = S16(t, sub + entry + 2), entryY = S16(t, sub + entry + 4);
+
+                GlyphInfo a = glyphs[prev], b = glyphs[i];
+                if (ctx.RightToLeft)
+                {
+                    int d = exitX + a.XOffset;
+                    a.XAdvance -= d;
+                    a.XOffset -= d;
+                    b.XAdvance = entryX + b.XOffset;
+                }
+                else
+                {
+                    a.XAdvance = exitX + a.XOffset;
+                    int d = entryX + b.XOffset;
+                    b.XAdvance -= d;
+                    b.XOffset -= d;
+                }
+                // The RightToLeft lookup flag makes the last glyph of a chain sit on the baseline instead of the first.
+                if ((ctx.Flags & 0x1) != 0) (a.CursiveTo, a.YOffset) = (i, entryY - exitY);
+                else (b.CursiveTo, b.YOffset) = (prev, exitY - entryY);
+                glyphs[prev] = a;
+                glyphs[i] = b;
+                return i + 1;
+            }
             case 4:
             case 5:
             case 6:
             {
                 int markIndex = Coverage(t, sub + U16(t, sub + 2), glyph);
                 if (markIndex < 0) return null;
-                // The attachment target: the previous base (4), ligature (5) or mark (6), skipping marks for 4/5.
-                int target = i - 1;
-                if (type != 6)
-                    while (target >= 0 && GlyphClass(glyphs[target].Glyph) == 3) target--;
-                else
-                    target = Prev(ctx, i);
+                // The attachment target: the previous base (4), ligature (5) or mark (6). As in HarfBuzz, the search
+                // ignores all marks for 4/5 and only the lookup's mark filtering for 6; default ignorables are skipped.
+                int flags = ctx.Flags;
+                ctx.Flags = type != 6 ? 0x8 : flags & ~0x0E;
+                int target;
+                try
+                {
+                    target = Prev(ctx, i, input: true);
+                }
+                finally
+                {
+                    ctx.Flags = flags;
+                }
                 if (target < 0) return null;
-                if (type == 6 && GlyphClass(glyphs[target].Glyph) != 3) return null;
+                if (type == 6)
+                {
+                    if (GlyphClass(glyphs[target].Glyph) != 3) return null;
+                    // Only marks on the same base, or the same ligature component, attach to each other.
+                    var (a, b) = (glyphs[i], glyphs[target]);
+                    bool good = a.LigatureId == b.LigatureId
+                        ? a.LigatureId == 0 || a.LigatureComponent == b.LigatureComponent
+                        : (a.LigatureId > 0 && a.LigatureComponent == 0) || (b.LigatureId > 0 && b.LigatureComponent == 0);
+                    if (!good) return null;
+                }
                 int baseIndex = Coverage(t, sub + U16(t, sub + 4), glyphs[target].Glyph);
                 if (baseIndex < 0) return null;
                 int classCount = U16(t, sub + 6);
@@ -418,11 +816,15 @@ internal sealed class OpenTypeLayout
                 int baseAnchor;
                 if (type == 5)
                 {
-                    // Attach to the last component of the ligature.
+                    // Attach to the mark's own component, or else the last one.
                     int attach = baseArray + U16(t, baseArray + 2 + baseIndex * 2);
                     int components = U16(t, attach);
                     if (components == 0) return null;
-                    int offset = U16(t, attach + 2 + ((components - 1) * classCount + markClass) * 2);
+                    var mark = glyphs[i];
+                    int component = mark.LigatureId != 0 && mark.LigatureId == glyphs[target].LigatureId && mark.LigatureComponent > 0
+                        ? Math.Min(components, mark.LigatureComponent) - 1
+                        : components - 1;
+                    int offset = U16(t, attach + 2 + (component * classCount + markClass) * 2);
                     if (offset == 0) return null;
                     baseAnchor = attach + offset;
                 }
@@ -434,7 +836,15 @@ internal sealed class OpenTypeLayout
                 }
                 var info = glyphs[i];
                 info.XOffset = S16(t, baseAnchor + 2) - S16(t, markAnchor + 2);
-                info.YOffset = S16(t, baseAnchor + 4) - S16(t, markAnchor + 4);
+                // The base's own vertical offset (along its cursive chain) is taken now, as in HarfBuzz; only the
+                // horizontal offset is propagated when attachments are resolved.
+                int baseOffset = glyphs[target].YOffset;
+                for (int b = target, n = 1; glyphs[b].CursiveTo >= 0 && n < glyphs.Count; n++)
+                {
+                    b = glyphs[b].CursiveTo;
+                    baseOffset += glyphs[b].YOffset;
+                }
+                info.YOffset = S16(t, baseAnchor + 4) - S16(t, markAnchor + 4) + baseOffset;
                 info.AttachTo = target;
                 glyphs[i] = info;
                 return i + 1;
@@ -508,8 +918,9 @@ internal sealed class OpenTypeLayout
                 bool ok = true;
                 for (int k = 0; k < backtrack && ok; k++)
                 {
-                    pos = Prev(ctx, pos);
-                    ok = pos >= 0 && Match(pos, U16(t, p + 2 + k * 2), backtrackClasses);
+                    int value = U16(t, p + 2 + k * 2);
+                    pos = Prev(ctx, pos, j => Match(j, value, backtrackClasses));
+                    ok = pos >= 0;
                 }
                 if (!ok) continue;
                 p += 2 + backtrack * 2;
@@ -527,8 +938,9 @@ internal sealed class OpenTypeLayout
                 bool ok = true;
                 for (int k = 0; k < lookahead && ok; k++)
                 {
-                    pos = Next(ctx, pos);
-                    ok = pos >= 0 && Match(pos, U16(t, p + 2 + k * 2), lookaheadClasses);
+                    int value = U16(t, p + 2 + k * 2);
+                    pos = Next(ctx, pos, matches: j => Match(j, value, lookaheadClasses));
+                    ok = pos >= 0;
                 }
                 if (!ok) continue;
                 p += 2 + lookahead * 2;
@@ -557,8 +969,9 @@ internal sealed class OpenTypeLayout
         int pos = i;
         for (int k = 0; k < backtrack; k++)
         {
-            pos = Prev(ctx, pos);
-            if (pos < 0 || Coverage(t, sub + U16(t, p + 2 + k * 2), ctx.Glyphs[pos].Glyph) < 0) return null;
+            int coverage = sub + U16(t, p + 2 + k * 2);
+            pos = Prev(ctx, pos, j => Coverage(t, coverage, ctx.Glyphs[j].Glyph) >= 0);
+            if (pos < 0) return null;
         }
         p += 2 + backtrack * 2;
         int inputCount = U16(t, p);
@@ -570,8 +983,9 @@ internal sealed class OpenTypeLayout
         pos = matched[^1];
         for (int k = 0; k < lookahead; k++)
         {
-            pos = Next(ctx, pos);
-            if (pos < 0 || Coverage(t, sub + U16(t, p + 2 + k * 2), ctx.Glyphs[pos].Glyph) < 0) return null;
+            int coverage = sub + U16(t, p + 2 + k * 2);
+            pos = Next(ctx, pos, matches: j => Coverage(t, coverage, ctx.Glyphs[j].Glyph) >= 0);
+            if (pos < 0) return null;
         }
         p += 2 + lookahead * 2;
         return ApplyRecords(ctx, t, p + 2, U16(t, p), matched);
@@ -589,8 +1003,9 @@ internal sealed class OpenTypeLayout
         int pos = i;
         for (int k = 1; k < count; k++)
         {
-            pos = Next(ctx, pos);
-            if (pos < 0 || !matches(pos, k)) return null;
+            int index = k;
+            pos = Next(ctx, pos, input: true, j => matches(j, index));
+            if (pos < 0) return null;
             matched.Add(pos);
         }
         return matched;
@@ -611,13 +1026,21 @@ internal sealed class OpenTypeLayout
                 if (sequenceIndex >= matched.Count || !SetLookup(ctx, lookup)) continue;
                 int before = ctx.Glyphs.Count;
                 ApplyLookup(ctx, lookup, matched[sequenceIndex]);
-                // Substitutions may change the glyph count; shift later positions accordingly.
                 int delta = ctx.Glyphs.Count - before;
-                if (delta != 0)
+                if (delta == 0) continue;
+                // The glyph count changed (as in HarfBuzz's apply_lookup): glyphs added by a multiple substitution
+                // become matched positions right after it, glyphs consumed by a ligature drop out, later ones shift.
+                end += delta;
+                int next = sequenceIndex + 1;
+                if (delta > 0)
+                    matched.InsertRange(next, Enumerable.Range(matched[sequenceIndex] + 1, delta));
+                else
                 {
-                    for (int k = sequenceIndex + 1; k < matched.Count; k++) matched[k] += delta;
-                    end += delta;
+                    int removed = Math.Min(-delta, matched.Count - next);
+                    matched.RemoveRange(next, removed);
+                    delta = -removed;
                 }
+                for (int k = next + Math.Max(delta, 0); k < matched.Count; k++) matched[k] += delta;
             }
         }
         finally

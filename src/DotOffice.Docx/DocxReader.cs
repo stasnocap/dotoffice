@@ -49,7 +49,7 @@ public static class DocxReader
 }
 
 /// <summary>Numbering of footnotes or endnotes (w:footnotePr/w:endnotePr).</summary>
-internal sealed record NoteNumbering(string Format, int Start);
+internal sealed record NoteNumbering(string Format, int Start, string Restart = "continuous");
 
 internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeaders, int CompatibilityMode, bool DoNotExpandShiftReturn)
 {
@@ -80,11 +80,14 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                 case "footnotePr" or "endnotePr":
                     (notes, notesDepth) = (r.LocalName, r.Depth);
                     break;
-                case "numFmt" or "numStart" when notes is not null:
+                case "numFmt" or "numStart" or "numRestart" when notes is not null:
                     var numbering = notes == "footnotePr" ? s.Footnotes : s.Endnotes;
-                    numbering = r.LocalName == "numFmt"
-                        ? numbering with { Format = r.WAttr("val") ?? numbering.Format }
-                        : numbering with { Start = Math.Clamp(r.IntAttr("val") ?? 1, 0, 100_000) };
+                    numbering = r.LocalName switch
+                    {
+                        "numFmt" => numbering with { Format = r.WAttr("val") ?? numbering.Format },
+                        "numStart" => numbering with { Start = Math.Clamp(r.IntAttr("val") ?? 1, 0, 100_000) },
+                        _ => numbering with { Restart = r.WAttr("val") ?? numbering.Restart },
+                    };
                     s = notes == "footnotePr" ? s with { Footnotes = numbering } : s with { Endnotes = numbering };
                     break;
             }
@@ -102,6 +105,9 @@ internal sealed class SectionData
     public int? PageNumberStart;
     public PageNumberFormat PageNumberFormat;
     public SectionColumns Columns = SectionColumns.Single;
+
+    /// <summary>w:numRestart of the section's w:footnotePr/w:endnotePr, overriding the document settings.</summary>
+    public string? FootnoteRestart, EndnoteRestart;
     public Dictionary<string, string> Headers { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> Footers { get; } = new(StringComparer.Ordinal);
 }
@@ -144,7 +150,7 @@ internal sealed class DocxContext
     /// Reads the note <paramref name="id"/> for a new reference and numbers it. Returns null when the
     /// note does not exist (or notes nest too deeply).
     /// </summary>
-    public (Note Note, string Mark)? ReadNote(NoteKind kind, string id, bool customMark)
+    public Note? ReadNote(NoteKind kind, string id, bool customMark)
     {
         var part = kind == NoteKind.Footnote ? "footnotes" : "endnotes";
         if (!_noteParts.TryGetValue(kind, out var notes)) _noteParts[kind] = notes = LoadNotes(part);
@@ -157,7 +163,13 @@ internal sealed class DocxContext
         var numbering = kind == NoteKind.Footnote ? Settings.Footnotes : Settings.Endnotes;
         int number = numbering.Start + (kind == NoteKind.Footnote ? _footnoteCount++ : _endnoteCount++);
         var mark = customMark ? "" : Numbering.FormatNumber(number, numbering.Format);
-        var note = new Note(kind);
+        var note = new Note(kind)
+        {
+            Mark = mark,
+            PageMark = kind == NoteKind.Footnote && numbering.Restart == "eachPage" && !customMark
+                ? n => Numbering.FormatNumber(numbering.Start + n - 1, numbering.Format)
+                : null,
+        };
         _notes.Add(note);
         if (kind == NoteKind.Endnote) Endnotes.Add(note);
 
@@ -167,13 +179,13 @@ internal sealed class DocxContext
             var partName = Package.FindRelationship(MainPart, part)!.Target;
             using var r = XmlReader.Create(new StringReader(xml), WordXml.Settings(xml.Length + 1));
             r.MoveToContent();
-            new StoryReader(this, partName) { NoteMark = mark }.ReadBlocks(r, note.Blocks, cell: null, nesting: 0, onSection: null);
+            new StoryReader(this, partName) { NoteOwner = note }.ReadBlocks(r, note.Blocks, cell: null, nesting: 0, onSection: null);
         }
         finally
         {
             _noteDepth--;
         }
-        return (note, mark);
+        return note;
     }
 
     /// <summary>Note bodies by id; separator notes are skipped because layout draws its own separator.</summary>
@@ -234,6 +246,7 @@ internal sealed class DocxContext
         var story = new StoryReader(this, MainPart);
         var blocks = new List<Block>();
         Section? previous = null;
+        var sectionData = new List<SectionData>();
         using (var r = Package.OpenXml(MainPart))
         {
             r.MoveToContent();
@@ -242,6 +255,7 @@ internal sealed class DocxContext
                 if (r.NodeType != XmlNodeType.Element || !r.IsW() || r.LocalName != "body") continue;
                 story.ReadBlocks(r, blocks, cell: null, nesting: 0, onSection: data =>
                 {
+                    sectionData.Add(data);
                     previous = BuildSection(data, previous, blocks);
                     document.Sections.Add(previous);
                     blocks = [];
@@ -253,12 +267,34 @@ internal sealed class DocxContext
         if (blocks.Count > 0 || document.Sections.Count == 0)
         {
             // No trailing sectPr: the remaining content uses the previous (or default) section settings.
-            var section = BuildSection(new SectionData(), previous, blocks);
+            sectionData.Add(new SectionData());
+            var section = BuildSection(sectionData[^1], previous, blocks);
             document.Sections.Add(section);
         }
         document.Endnotes.AddRange(Endnotes);
         ResolveReferences(document);
+        RestartNoteNumbers(document, sectionData);
         return document;
+    }
+
+    /// <summary>Renumbers notes whose numbering restarts in each section (notes are numbered continuously while reading).</summary>
+    private void RestartNoteNumbers(Document document, List<SectionData> sections)
+    {
+        foreach (var kind in new[] { NoteKind.Footnote, NoteKind.Endnote })
+        {
+            var numbering = kind == NoteKind.Footnote ? Settings.Footnotes : Settings.Endnotes;
+            string Restart(int i) => (kind == NoteKind.Footnote ? sections[i].FootnoteRestart : sections[i].EndnoteRestart) ?? numbering.Restart;
+            if (!Enumerable.Range(0, sections.Count).Any(i => Restart(i) == "eachSect")) continue;
+
+            int count = 0;
+            for (int i = 0; i < document.Sections.Count; i++)
+            {
+                if (i == 0 || Restart(i) == "eachSect") count = 0;
+                foreach (var reference in Paragraphs(document.Sections[i].Blocks).SelectMany(p => p.Inlines).OfType<NoteReference>())
+                    if (reference.Note.Kind == kind && reference.Mark.Length > 0)
+                        reference.Note.Mark = Numbering.FormatNumber(numbering.Start + count++, numbering.Format);
+            }
+        }
     }
 
     /// <summary>Replaces REF placeholders by the bookmarked text (forward references are allowed).</summary>

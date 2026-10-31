@@ -9,7 +9,7 @@ namespace DotOffice.Tests.Layout;
 public class ColumnTests
 {
     private static readonly double LineHeight =
-        Math.Max(Noto.WinAscent + Noto.WinDescent, Noto.Ascender - Noto.Descender + Noto.LineGap) * 10.0 / Noto.UnitsPerEm;
+        NotoLineHeight();
 
     /// <summary>A section whose columns hold exactly <paramref name="lines"/> lines; content area is 468pt wide.</summary>
     private static Section Section(int lines, SectionColumns columns, SectionStart start = SectionStart.NextPage) => new()
@@ -45,6 +45,23 @@ public class ColumnTests
         Assert.Equal(["L1", "L2", "L3", "L4", "L5"], first[72]);
         Assert.Equal(["L6", "L7", "L8", "L9", "L10"], first[324]);
         Assert.Equal(["L11", "L12", "L13"], Columns(layout.Pages[1])[72]);
+    }
+
+    [Fact]
+    public void Footnotes_go_below_the_column_of_their_reference()
+    {
+        var note = new Note(NoteKind.Footnote) { Mark = "1", Blocks = { Para(Words(30)) } };
+        var p = new Paragraph { MarkProperties = Text };
+        p.Inlines.AddRange([new TextRun("b", Text), new NoteReference(note, Text)]);
+        var page = Assert.Single(Render(Doc(Section(20, Two()), Lines(25, "L"), p)).Pages);
+
+        var noteWords = Texts(page).Where(t => t.Text.StartsWith('w')).ToList();
+        Assert.All(noteWords, t => Assert.True(t.X >= 324 - 0.01 && Right(t) <= 540 + 0.01, $"{t.Text} at {t.X}"));
+        var separator = Assert.Single(page.Items.OfType<LineItem>());
+        Assert.Equal(324, separator.X1, 1);
+        // The first column is not shortened by the second column's footnote.
+        double noteTop = noteWords.Min(t => t.Baseline);
+        Assert.Contains(Texts(page), t => t.X < 300 && t.Baseline > noteTop);
     }
 
     [Fact]
@@ -103,6 +120,32 @@ public class ColumnTests
         Assert.Contains(wide, t => Right(t) > 72 + 120 + 200); // second paragraph uses the wide column
         var separator = Assert.Single(page.Items.OfType<LineItem>());
         Assert.Equal(72 + 110, separator.X1, 2);
+    }
+
+    [Fact]
+    public void A_paragraph_continuing_in_a_column_of_another_width_is_broken_for_that_width()
+    {
+        var columns = new SectionColumns { Count = 2, Definitions = [new ColumnDefinition(100, 20), new ColumnDefinition(348, 0)] };
+        var page = Assert.Single(Render(Doc(Section(4, columns), Para(Words(25)))).Pages);
+        var narrow = Texts(page).Where(t => t.Text.StartsWith("word") && t.X < 192).ToList();
+        var wide = Texts(page).Where(t => t.Text.StartsWith("word") && t.X >= 192).ToList();
+        Assert.All(narrow, t => Assert.True(Right(t) <= 172 + 0.01));
+        Assert.Contains(wide, t => Right(t) > 192 + 200); // wide lines, not narrow ones moved across
+        Assert.Equal(25, narrow.Count + wide.Count); // no word lost or repeated
+        Assert.True(wide.Select(t => t.Baseline).Distinct().Count() < 4);
+    }
+
+    [Fact]
+    public void A_paragraph_moved_on_by_widow_control_is_broken_for_the_new_column()
+    {
+        // Three lines fill the narrow column but one: widow control moves the paragraph's first line on with the second.
+        var columns = new SectionColumns { Count = 2, Definitions = [new ColumnDefinition(100, 20), new ColumnDefinition(348, 0)] };
+        var p = Para(Words(25));
+        p = new Paragraph { Properties = p.Properties with { WidowControl = true }, MarkProperties = Text, Inlines = { p.Inlines[0] } };
+        var page = Assert.Single(Render(Doc(Section(4, columns), Lines(3, "A"), p)).Pages);
+        var words = Texts(page).Where(t => t.Text.StartsWith("word")).ToList();
+        Assert.All(words, t => Assert.True(t.X >= 192 - 0.01, $"{t.Text} at {t.X}"));
+        Assert.Contains(words, t => Right(t) > 192 + 200); // laid out at the wide column's width
     }
 
     [Fact]

@@ -67,6 +67,18 @@ public class ComplexScriptTests
     }
 
     [Fact]
+    public void Latin_words_in_an_rtl_run_keep_their_order()
+    {
+        var p = new Paragraph { Properties = RtlParagraph, MarkProperties = Text };
+        p.Inlines.AddRange([new TextRun("عربي ", Rtl), new TextRun("English words.", Rtl)]);
+        var items = Texts(Layout(p)).ToList();
+        double X(string text) => items.Single(t => t.Text.Trim() == text).X;
+        // The space between the English words stays left-to-right; the full stop still follows the RTL run.
+        Assert.True(X("English") < X("words") && X("words") < X("عربي"));
+        Assert.True(X(".") < X("English"));
+    }
+
+    [Fact]
     public void Numbers_and_mirrored_brackets_in_rtl_text()
     {
         var page = Layout(Para("(שלום) 123", RtlParagraph, Text with { ComplexScriptFontFamily = "Noto Sans Hebrew", RightToLeft = true }));

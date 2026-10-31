@@ -126,6 +126,9 @@ internal sealed class Itemizer(FontSelector fonts)
                         ? new Segment(AtomKind.Text, Transform(note.Mark, note.Properties), note.Properties, note)
                         : new Segment(AtomKind.Marker, "", note.Properties, note));
                     break;
+                case NoteMark { Note.Mark.Length: > 0 } mark:
+                    segments.Add(new Segment(AtomKind.Text, Transform(mark.Note.Mark, mark.Properties), mark.Properties, mark));
+                    break;
             }
         }
 
@@ -207,7 +210,8 @@ internal sealed class Itemizer(FontSelector fonts)
     /// <summary>
     /// Bidi embedding levels per UTF-16 index of the paragraph text, or null when everything is at level 0
     /// (a left-to-right paragraph without right-to-left text). Breaks count as whitespace, not paragraph
-    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left.
+    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left unless
+    /// they sit between left-to-right letters (so "two words" keeps its order, as in LibreOffice).
     /// </summary>
     private static byte[]? BidiLevels(List<Segment> segments, string text, byte paragraphLevel)
     {
@@ -220,6 +224,7 @@ internal sealed class Itemizer(FontSelector fonts)
 
         var classes = new BidiClass[text.Length];
         var codePoints = new int[text.Length];
+        var forced = new List<int>();
         int offset = 0;
         foreach (var s in segments)
         {
@@ -228,17 +233,31 @@ internal sealed class Itemizer(FontSelector fonts)
                 int cp = char.IsSurrogatePair(s.Text, i) ? char.ConvertToUtf32(s.Text, i) : s.Text[i];
                 var cls = s.Kind is AtomKind.LineBreak or AtomKind.PageBreak ? BidiClass.WS
                     : char.IsLowSurrogate(s.Text[i]) ? BidiClass.BN : BidiAlgorithm.GetClass(cp);
-                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) cls = BidiClass.R;
+                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) forced.Add(offset + i);
                 classes[offset + i] = cls;
                 codePoints[offset + i] = cp;
             }
             offset += s.Text.Length;
         }
+        foreach (int i in forced.Where(i => StrongNeighbor(classes, i, -1) != BidiClass.L || StrongNeighbor(classes, i, 1) != BidiClass.L).ToList())
+            classes[i] = BidiClass.R;
         var levels = BidiAlgorithm.ResolveLevels(classes, codePoints, paragraphLevel);
         // The low half of a surrogate pair goes with its high half.
         for (int i = 1; i < text.Length; i++)
             if (char.IsLowSurrogate(text[i])) levels[i] = levels[i - 1];
         return levels;
+    }
+
+    /// <summary>Nearest strong direction before (<paramref name="step"/> -1) or after (+1) index <paramref name="i"/>; numbers count as R.</summary>
+    private static BidiClass? StrongNeighbor(BidiClass[] classes, int i, int step)
+    {
+        for (i += step; i >= 0 && i < classes.Length; i += step)
+            switch (classes[i])
+            {
+                case BidiClass.L: return BidiClass.L;
+                case BidiClass.R or BidiClass.AL or BidiClass.EN or BidiClass.AN: return BidiClass.R;
+            }
+        return null;
     }
 
     private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level)
@@ -258,7 +277,7 @@ internal sealed class Itemizer(FontSelector fonts)
             byte atomLevel = level(offset + start);
             var font = isSpace ? fonts.ForCharacter(props, ' ') : fonts.ForCharacterWithFallback(props, cp);
             if (TextShaper.IsUnsupportedComplexScript(cp))
-                fonts.WarnOnce("layout.complex-script", "Indic and similar scripts need reordering that is not implemented; their text may render incorrectly.");
+                fonts.WarnOnce("layout.complex-script", "Sinhala, Tibetan, Myanmar and Khmer need reordering that is not implemented; their text may render incorrectly.");
             i += char.IsSurrogatePair(text, start) ? 2 : 1;
             while (i < text.Length)
             {
@@ -269,7 +288,8 @@ internal sealed class Itemizer(FontSelector fonts)
                 if (char.IsLowSurrogate(text[i])) { i++; continue; }
                 int next = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
                 if (field is null && level(offset + i) != atomLevel) break;
-                if (field is null && !isSpace && !IsCombining(next)
+                // Marks and joiners stay with their letter (in its font), as in LibreOffice's grapheme clusters.
+                if (field is null && !isSpace && !IsCombining(next) && next is not (0x200C or 0x200D)
                     && (FontSelector.UsesComplexScript(props, next) != complex || !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)))
                     break;
                 i += char.IsSurrogatePair(text, i) ? 2 : 1;
@@ -317,8 +337,9 @@ internal sealed class Itemizer(FontSelector fonts)
     internal static (double Width, ShapedGlyph[]? Glyphs) Shape(ResolvedFont font, string text, double size, RunProperties props, bool rtl)
     {
         bool kerning = props.KerningMinSize is { } min && size >= min;
-        if (!rtl && !TextShaper.NeedsShaping(text, kerning)) return (Measure(font, text, size, props, rtl, shape: false), null);
-        var glyphs = TextShaper.Shape(font.Font, rtl ? Mirror(text) : text, rtl, kerning);
+        if (!rtl && !TextShaper.NeedsShaping(font.Font, text, kerning)) return (Measure(font, text, size, props, rtl, shape: false), null);
+        // Like LibreOffice, text with character spacing has no optional ligatures.
+        var glyphs = TextShaper.Shape(font.Font, rtl ? Mirror(text) : text, rtl, kerning, ligatures: props.CharacterSpacing == 0);
         // Mirrored glyphs still stand for the logical character in extracted text.
         if (rtl)
             for (int i = 0; i < glyphs.Length; i++) glyphs[i] = glyphs[i] with { Text = Mirror(glyphs[i].Text) };

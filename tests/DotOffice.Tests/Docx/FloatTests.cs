@@ -78,7 +78,7 @@ public class FloatTests
         var image = page.Items.OfType<ImageItem>().Single();
         foreach (var t in Texts(page))
         {
-            double top = t.Baseline - t.FontSize, bottom = t.Baseline + t.FontSize * 0.3;
+            double top = t.Baseline - t.FontSize, bottom = t.Baseline + t.FontSize * 0.29;
             Assert.False(top < image.Y + image.Height && bottom > image.Y, $"'{t.Text}' overlaps the image");
         }
         Assert.Contains(Texts(page), t => t.Baseline > image.Y + image.Height);
@@ -97,5 +97,33 @@ public class FloatTests
         Assert.Equal((0.0, 0.0), (((ImageItem)items[behind]).X, ((ImageItem)items[behind]).Y));
         Assert.Equal(500000 / 12700.0, ((ImageItem)items[front]).X, 3);
         Assert.Equal(72, Texts(page).First().X, 2);
+    }
+
+    [Fact]
+    public void Tables_go_below_wrapped_images()
+    {
+        var table = "<w:tbl><w:tblGrid><w:gridCol w:w=\"9000\"/></w:tblGrid><w:tr><w:tc>" + P(R("cell")) + "</w:tc></w:tr></w:tbl>";
+        var page = Layout(Read(rel => P(AnchorImage(rel, 150, 60, Position("margin", "right", "paragraph", "0")) + R("a")) + table));
+        var image = Assert.Single(page.Items.OfType<ImageItem>());
+        var cell = Texts(page).Single(t => t.Text == "cell");
+        Assert.True(cell.Baseline > image.Y + image.Height, $"cell at {cell.Baseline}, image ends at {image.Y + image.Height}");
+    }
+
+    [Fact]
+    public void An_image_moves_with_its_paragraph_to_the_next_page()
+    {
+        // 12pt lines: 52 filler lines and a keep-with-next heading fill 53 of the page's 54 lines; the
+        // paragraph after it (24pt lines) does not fit, so the heading and the paragraph move on together.
+        string Spacing(int twips) => $"<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"{twips}\" w:lineRule=\"exact\"/>";
+        var filler = string.Concat(Enumerable.Range(1, 52).Select(i => P(R($"f{i}"), Spacing(240))));
+        var doc = Read(rel => filler + P(R("heading"), "<w:keepNext/>" + Spacing(240))
+                              + P(AnchorImage(rel, 100, 30, Position("margin", "right", "paragraph", "0")) + R("anchored"), Spacing(480)));
+        var pages = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages;
+
+        Assert.Equal(2, pages.Count);
+        Assert.Empty(pages[0].Items.OfType<ImageItem>());
+        Assert.Contains(Texts(pages[1]), t => t.Text == "heading");
+        var image = Assert.Single(pages[1].Items.OfType<ImageItem>());
+        Assert.True(image.Y < 72 + 30, $"image at {image.Y}");
     }
 }

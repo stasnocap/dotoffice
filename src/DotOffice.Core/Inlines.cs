@@ -107,18 +107,32 @@ public sealed class FieldRun(FieldKind kind, RunProperties properties) : Inline(
 }
 public enum NoteKind { Footnote, Endnote }
 
-/// <summary>Footnote or endnote content; its first paragraph normally starts with the note mark.</summary>
+/// <summary>Footnote or endnote content; its first paragraph normally starts with a <see cref="NoteMark"/>.</summary>
 public sealed class Note(NoteKind kind)
 {
     public NoteKind Kind { get; } = kind;
     public List<Block> Blocks { get; } = [];
+
+    /// <summary>The mark shown at the reference and in the note, e.g. "1" or "iv"; empty when the author typed a custom mark.</summary>
+    public string Mark { get; set; } = "";
+
+    /// <summary>
+    /// Set when footnote numbers restart on every page: gives the mark of the n-th (1-based) numbered
+    /// footnote on a page. Layout then replaces <see cref="Mark"/> once pages are known.
+    /// </summary>
+    public Func<int, string>? PageMark { get; init; }
 }
 
 /// <summary>A footnote/endnote reference mark in the text (formatted by its run properties, usually superscript).</summary>
-public sealed class NoteReference(Note note, string mark, RunProperties properties) : Inline(properties)
+public sealed class NoteReference(Note note, RunProperties properties) : Inline(properties)
 {
     public Note Note { get; } = note;
 
-    /// <summary>The mark shown in the text, e.g. "1" or "iv"; empty when the author typed a custom mark.</summary>
-    public string Mark { get; } = mark;
+    public string Mark => Note.Mark;
+}
+
+/// <summary>The number of the note being read, at the start of its text (w:footnoteRef/w:endnoteRef).</summary>
+public sealed class NoteMark(Note note, RunProperties properties) : Inline(properties)
+{
+    public Note Note { get; } = note;
 }

@@ -1,25 +1,31 @@
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
 
 namespace DotOffice.Layout;
 
-/// <summary>Vertical metrics of a font at a size, following Office's line-height model.</summary>
+/// <summary>Vertical metrics of a font at a size, following LibreOffice's line-height model.</summary>
 internal readonly record struct FontMetrics(double Ascent, double Descent)
 {
     public double Height => Ascent + Descent;
 
     /// <summary>
-    /// Ascent/descent from OS/2 win metrics, plus any hhea line gap not already covered by them
-    /// ("external leading", added below the baseline). This matches Word's single line spacing.
+    /// Ascent/descent as LibreOffice computes them (vcl FontMetricData::ImplCalcLineSpacing): the hhea
+    /// metrics, the OS/2 win metrics when hhea has none, and the OS/2 typo metrics when the font sets
+    /// USE_TYPO_METRICS, each rounded to twips. The line gap ("external leading", which Writer adds for Word
+    /// documents) goes below the baseline.
     /// </summary>
     public static FontMetrics Of(TrueTypeFont font, double size)
     {
         double scale = size / font.UnitsPerEm;
-        double hhea = font.Ascender - font.Descender + Math.Max((short)0, font.LineGap);
-        if (font.WinAscent + font.WinDescent == 0)
-            return new FontMetrics(font.Ascender * scale, (-font.Descender + Math.Max((short)0, font.LineGap)) * scale);
-        double win = font.WinAscent + font.WinDescent;
-        return new FontMetrics(font.WinAscent * scale, (font.WinDescent + Math.Max(0, hhea - win)) * scale);
+        double ascent = 0, descent = 0, gap = 0;
+        if (font.Ascender >= 0 && font.Descender <= 0) (ascent, descent, gap) = (font.Ascender, -font.Descender, font.LineGap);
+        if (ascent == 0 && descent == 0) (ascent, descent, gap) = (font.WinAscent, font.WinDescent, 0);
+        if (font.UseTypoMetrics && font.TypoAscender >= 0 && font.TypoDescender <= 0)
+            (ascent, descent, gap) = (font.TypoAscender, -font.TypoDescender, font.TypoLineGap);
+        // Writer lays out in twips and rounds each metric (mnAscent = round(fAscent)...).
+        static double Twips(double points) => Math.Round(points * 20, MidpointRounding.AwayFromZero) / 20;
+        return new FontMetrics(Twips(ascent * scale), Twips(descent * scale) + Twips(Math.Max(0, gap) * scale));
     }
 }
 
@@ -68,7 +74,7 @@ internal sealed class FontSelector(FontResolver resolver, IConversionWarningSink
     public ResolvedFont ForCharacterWithFallback(RunProperties p, int codePoint)
     {
         var font = ForCharacter(p, codePoint);
-        if (font.Font.HasGlyph(codePoint) || codePoint < 0x20 || IsInvisible(codePoint)) return font;
+        if (TextShaper.Covers(font.Font, codePoint) || codePoint < 0x20 || IsInvisible(codePoint)) return font;
         bool cs = UsesComplexScript(p, codePoint);
         var fallback = resolver.ResolveFallback(codePoint, cs ? p.ComplexScriptBold ?? p.Bold : p.Bold, cs ? p.ComplexScriptItalic ?? p.Italic : p.Italic);
         if (fallback is null)

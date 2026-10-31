@@ -20,7 +20,8 @@ public class NoteTests
         $"<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:{kind}Reference w:id=\"{id}\"/></w:r>";
 
     private static string Text(Note note) =>
-        string.Concat(note.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<TextRun>().Select(t => t.Text));
+        string.Concat(note.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines)
+            .Select(i => i switch { TextRun t => t.Text, NoteMark m => m.Note.Mark, _ => "" }));
 
     [Fact]
     public void Reads_and_numbers_footnotes_and_endnotes()
@@ -45,14 +46,48 @@ public class NoteTests
         Assert.Equal(" first note", Text(refs[3].Note)); // custom mark: no number in the note either
     }
 
+    [Fact]
+    public void Footnote_numbers_restart_in_each_section()
+    {
+        var restart = "<w:footnotePr><w:numRestart w:val=\"eachSect\"/></w:footnotePr>";
+        var doc = DocxReader.Read(new DocxBuilder
+        {
+            Footnotes = Separators + Footnote(1, "a") + Footnote(2, "b") + Footnote(3, "c"),
+            Body = P(R("A") + Ref(1) + R("B") + Ref(2), Section(extra: restart)) + P(R("C") + Ref(3)) + Section(extra: restart),
+        }.BuildStream());
+
+        var marks = doc.Sections.Select(s => string.Join(",", s.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines)
+            .OfType<NoteReference>().Select(r => r.Mark))).ToList();
+        Assert.Equal(["1,2", "1"], marks);
+        Assert.Equal("1 c", Text(doc.Sections[1].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<NoteReference>().Single().Note));
+    }
+
+    [Fact]
+    public void Footnote_numbers_restart_on_each_page()
+    {
+        var notes = Enumerable.Range(1, 3).Select(i => new Note(NoteKind.Footnote) { Mark = $"{i}", PageMark = n => $"p{n}" }).ToList();
+        foreach (var note in notes)
+        {
+            var p = Para("note");
+            p.Inlines.Insert(0, new NoteMark(note, LayoutTestHelpers.Text));
+            note.Blocks.Add(p);
+        }
+        var layout = Render(Doc(Page(10), WithNote("one", notes[0]), WithNote("two", notes[1]),
+            new Paragraph { Inlines = { new Break(BreakKind.Page, LayoutTestHelpers.Text) } }, WithNote("three", notes[2])));
+
+        Assert.Equal(["p1", "p2", "p1"], notes.Select(n => n.Mark));
+        Assert.Equal(2, Texts(layout.Pages[0]).Count(t => t.Text.StartsWith("p1")));
+        Assert.Contains(Texts(layout.Pages[1]), t => t.Text.StartsWith("p1"));
+    }
+
     private static readonly double LineHeight =
-        Math.Max(Noto.WinAscent + Noto.WinDescent, Noto.Ascender - Noto.Descender + Noto.LineGap) * 10.0 / Noto.UnitsPerEm;
+        NotoLineHeight();
 
     private static Section Page(int lines) => new() { PageHeight = 144 + LineHeight * lines + 0.5, Margins = new Thickness(72, 72, 72, 72) };
 
     private static Note Note(NoteKind kind, params string[] lines)
     {
-        var note = new Note(kind);
+        var note = new Note(kind) { Mark = "1" };
         foreach (var line in lines) note.Blocks.Add(Para(line));
         return note;
     }
@@ -60,7 +95,7 @@ public class NoteTests
     private static Paragraph WithNote(string text, Note note)
     {
         var p = Para(text);
-        p.Inlines.Add(new NoteReference(note, "1", LayoutTestHelpers.Text with { VerticalPosition = VerticalPosition.Superscript }));
+        p.Inlines.Add(new NoteReference(note, LayoutTestHelpers.Text with { VerticalPosition = VerticalPosition.Superscript }));
         return p;
     }
 
@@ -73,7 +108,7 @@ public class NoteTests
         var layout = Render(Doc(Page(20), Para("body"), WithNote("ref", Note(NoteKind.Footnote, "footnote"))));
         var page = Assert.Single(layout.Pages);
         var note = Texts(page).Single(t => t.Text == "footnote");
-        Assert.Equal(72 + 20 * LineHeight, note.Baseline + note.Font.WinDescent * 10.0 / note.Font.UnitsPerEm, 0);
+        Assert.Equal(72 + 20 * LineHeight + 0.5, note.Baseline + 2.95, 2); // content bottom; 2.95 = descent in twips
         var separator = Assert.Single(page.Items.OfType<LineItem>());
         Assert.True(separator.Y1 < note.Baseline && separator.X2 - separator.X1 < 200);
     }
@@ -93,7 +128,7 @@ public class NoteTests
     public void Long_footnotes_continue_on_the_next_page()
     {
         var lines = Enumerable.Range(1, 12).Select(i => $"note{i}").ToArray();
-        var layout = Render(Doc(Page(10), WithNote("ref", Note(NoteKind.Footnote, lines)), Para("after")));
+        var layout = Render(Doc(Page(11), WithNote("ref", Note(NoteKind.Footnote, lines)), Para("after")));
         Assert.Equal(0, PageOf(layout, "ref"));
         Assert.Equal(0, PageOf(layout, "note1"));
         Assert.Equal(1, PageOf(layout, "note12"));
