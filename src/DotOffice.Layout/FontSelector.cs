@@ -1,5 +1,6 @@
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
 
 namespace DotOffice.Layout;
 
@@ -73,7 +74,7 @@ internal sealed class FontSelector(FontResolver resolver, IConversionWarningSink
     public ResolvedFont ForCharacterWithFallback(RunProperties p, int codePoint)
     {
         var font = ForCharacter(p, codePoint);
-        if (font.Font.HasGlyph(codePoint) || codePoint < 0x20 || IsInvisible(codePoint)) return font;
+        if (TextShaper.Covers(font.Font, codePoint) || codePoint < 0x20 || IsInvisible(codePoint)) return font;
         bool cs = UsesComplexScript(p, codePoint);
         var fallback = resolver.ResolveFallback(codePoint, cs ? p.ComplexScriptBold ?? p.Bold : p.Bold, cs ? p.ComplexScriptItalic ?? p.Italic : p.Italic);
         if (fallback is null)

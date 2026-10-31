@@ -108,6 +108,7 @@ internal static class IndicShaper
         layout.Apply(false, glyphs, last);
 
         for (int i = 0; i < glyphs.Count; i++) glyphs[i] = glyphs[i] with { XAdvance = font.GetAdvanceWidth(glyphs[i].Glyph) };
+        TextShaper.ApplySpaceFallback(font, glyphs);
         if (layout.HasPositioning)
         {
             // Indic marks keep their advance (HarfBuzz's ZERO_WIDTH_MARKS_NONE).
@@ -241,7 +242,7 @@ internal static class IndicShaper
             var (category, position) = Properties(cp);
             glyphs.Add(new GlyphInfo
             {
-                Glyph = (ushort)font.GetGlyphId(cp), Cluster = cluster, Text = text, Mask = Global,
+                Glyph = Normalizer.NominalGlyph(font, cp), Cluster = cluster, Text = text, Mask = Global,
                 XAdvance = 0, AttachTo = -1, CursiveTo = -1, CodePoint = cp, ShaperCategory = (byte)category,
                 ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp),
             });

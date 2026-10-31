@@ -166,4 +166,18 @@ public class TextShaperTests
         Assert.Equal([(426, 0, -272, -100), (3, 260, 0, 0)],
             Positions(TextShaper.Shape(Arabic, " \u0650", rightToLeft: true, kerning: true)));
     }
+
+    [Fact]
+    public void Spaces_and_the_non_breaking_hyphen_the_font_lacks_use_fallback_glyphs()
+    {
+        // Noto Sans Arabic has no hair, figure or punctuation space and no U+2011: HarfBuzz draws them with the
+        // space glyph at the width of their kind and with the hyphen's glyph.
+        var glyphs = TextShaper.Shape(Arabic, "1\u200A1\u20071\u2008\u2011\u2010", rightToLeft: false, kerning: true);
+        Assert.Equal([(119, 572, 0, 0), (3, 63, 0, 0), (119, 572, 0, 0), (3, 572, 0, 0), (119, 572, 0, 0), (3, 268, 0, 0),
+            (220, 322, 0, 0), (220, 322, 0, 0)], Positions(glyphs));
+        Assert.Equal("\u2011", glyphs[6].Text);
+        Assert.True(TextShaper.Covers(Arabic, 0x200A));
+        Assert.True(TextShaper.Covers(Latin, 0x2260)); // ≠: "=" and U+0338
+        Assert.False(TextShaper.Covers(Arabic, 'a'));
+    }
 }
