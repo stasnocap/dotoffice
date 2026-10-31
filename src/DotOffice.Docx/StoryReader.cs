@@ -19,6 +19,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     private StyleSheet Styles => context.Styles;
 
+    /// <summary>Text of w:footnoteRef/w:endnoteRef when reading a note.</summary>
+    public string? NoteMark { get; init; }
+
     private readonly Stack<Hyperlink> _links = new();
     private readonly Dictionary<string, string> _openBookmarks = new(StringComparer.Ordinal);
 
@@ -371,7 +374,15 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     break;
                 case "footnoteReference":
                 case "endnoteReference":
-                    context.WarnOnce("docx.notes", "Footnotes and endnotes are not supported yet; references were skipped.");
+                    var noteKind = r.LocalName == "footnoteReference" ? NoteKind.Footnote : NoteKind.Endnote;
+                    bool customMark = r.WAttr("customMarkFollows") is not null && r.OnOff("customMarkFollows");
+                    if (!Suppressed(Props(), state) && r.WAttr("id") is { } noteId
+                        && context.ReadNote(noteKind, noteId, customMark) is var (note, mark))
+                        AddInline(state, new NoteReference(note, mark, Props()));
+                    break;
+                case "footnoteRef":
+                case "endnoteRef":
+                    if (NoteMark is { Length: > 0 } && !Suppressed(Props(), state)) AddText(state, NoteMark, Props());
                     break;
             }
             r.Skip();

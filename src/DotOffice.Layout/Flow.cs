@@ -33,6 +33,9 @@ internal class Slice
 
     public bool IsHeaderRow { get; set; }
 
+    /// <summary>Footnotes referenced in this slice; they go to the bottom of the page the slice lands on.</summary>
+    public IReadOnlyList<Note> Footnotes { get; set; } = [];
+
     /// <summary>Splits the slice so the first part fits in <paramref name="available"/>; null if it cannot be split.</summary>
     public virtual (Slice First, Slice Remainder)? Split(double available) => null;
 }
@@ -167,6 +170,7 @@ internal static class ParagraphLayouter
                 ColumnBreakBefore = columnBreakBefore,
                 KeepWithPrevious = i > 0 && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
                                    || (props.WidowControl && (i == 1 || i == lines.Count - 1))),
+                Footnotes = line.Atoms.Where(a => a.Note is { Kind: NoteKind.Footnote }).Select(a => a.Note!).ToList(),
             };
             breakBefore = line.EndsWithPageBreak && !line.EndsWithColumnBreak;
             columnBreakBefore = line.EndsWithColumnBreak;
@@ -279,7 +283,7 @@ internal static class ParagraphLayouter
         {
             if (a.Kind == AtomKind.Marker)
             {
-                items.Add(new AnchorItem(a.Bookmark!, x0 + a.X, top));
+                if (a.Bookmark is { } name) items.Add(new AnchorItem(name, x0 + a.X, top));
                 continue;
             }
             if (a.Link is null || a.Kind is AtomKind.LineBreak or AtomKind.PageBreak) continue;

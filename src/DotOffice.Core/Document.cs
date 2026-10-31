@@ -4,6 +4,10 @@ namespace DotOffice.Core;
 public sealed class Document
 {
     public List<Section> Sections { get; } = [];
+
+    /// <summary>Endnotes in reference order; laid out after the last section.</summary>
+    public List<Note> Endnotes { get; } = [];
+
     public DocumentSettings Settings { get; init; } = new();
     public string? Title { get; set; }
     public string? Author { get; set; }

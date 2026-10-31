@@ -65,3 +65,20 @@ public sealed class FieldRun(FieldKind kind, RunProperties properties) : Inline(
     /// <summary>Result stored in the document, shown when the field cannot be evaluated.</summary>
     public string? CachedResult { get; set; }
 }
+public enum NoteKind { Footnote, Endnote }
+
+/// <summary>Footnote or endnote content; its first paragraph normally starts with the note mark.</summary>
+public sealed class Note(NoteKind kind)
+{
+    public NoteKind Kind { get; } = kind;
+    public List<Block> Blocks { get; } = [];
+}
+
+/// <summary>A footnote/endnote reference mark in the text (formatted by its run properties, usually superscript).</summary>
+public sealed class NoteReference(Note note, string mark, RunProperties properties) : Inline(properties)
+{
+    public Note Note { get; } = note;
+
+    /// <summary>The mark shown in the text, e.g. "1" or "iv"; empty when the author typed a custom mark.</summary>
+    public string Mark { get; } = mark;
+}

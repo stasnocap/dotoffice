@@ -30,6 +30,9 @@ internal sealed class Atom
 
     /// <summary>Bookmark name of a <see cref="AtomKind.Marker"/> atom.</summary>
     public string? Bookmark { get; init; }
+
+    /// <summary>The note referenced by this atom (its mark, or a marker when the mark is custom text).</summary>
+    public Note? Note { get; init; }
     public TabStop? Tab { get; set; }
 
     /// <summary>Part of the list label text (not its suffix).</summary>
@@ -105,6 +108,11 @@ internal sealed class Itemizer(FontSelector fonts)
                 case BookmarkStart:
                     segments.Add(new Segment(AtomKind.Marker, "", inline.Properties, inline));
                     break;
+                case NoteReference note:
+                    segments.Add(note.Mark.Length > 0
+                        ? new Segment(AtomKind.Text, Transform(note.Mark, note.Properties), note.Properties, note)
+                        : new Segment(AtomKind.Marker, "", note.Properties, note));
+                    break;
             }
         }
 
@@ -130,7 +138,11 @@ internal sealed class Itemizer(FontSelector fonts)
                     break;
                 case AtomKind.Marker:
                     // Glued to the preceding text so a bookmark never starts a line of its own.
-                    atoms.Add(new Atom { Kind = AtomKind.Marker, Props = s.Props, Bookmark = ((BookmarkStart)s.Inline!).Name, BreakBefore = LineBreakOpportunity.None });
+                    atoms.Add(new Atom
+                    {
+                        Kind = AtomKind.Marker, Props = s.Props, BreakBefore = LineBreakOpportunity.None,
+                        Bookmark = (s.Inline as BookmarkStart)?.Name, Note = (s.Inline as NoteReference)?.Note,
+                    });
                     break;
                 case AtomKind.LineBreak:
                 case AtomKind.PageBreak:
@@ -217,6 +229,7 @@ internal sealed class Itemizer(FontSelector fonts)
                 Rise = rise,
                 Field = field,
                 Link = s.Inline?.Link,
+                Note = (s.Inline as NoteReference)?.Note,
                 Width = font.Font.MeasureText(piece, atomSize) + props.CharacterSpacing * piece.Length,
                 BreakBefore = offset + start < breaks.Length ? breaks[offset + start] : LineBreakOpportunity.None,
             });
@@ -394,7 +407,7 @@ internal static class LineBuilder
 
     private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore) => new()
     {
-        Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link,
+        Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link, Note = a.Note,
         Width = Measure(a, text), BreakBefore = breakBefore,
     };
 

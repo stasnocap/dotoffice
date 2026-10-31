@@ -28,6 +28,10 @@ internal sealed class DocxBuilder
     public string? Numbering { get; set; }
     public string? Settings { get; set; }
     public string? Theme { get; set; }
+
+    /// <summary>Inner XML of footnotes.xml / endnotes.xml (w:footnote / w:endnote elements).</summary>
+    public string? Footnotes { get; set; }
+    public string? Endnotes { get; set; }
     public string? Title { get; set; }
 
     /// <summary>Adds a header part and returns its relationship id.</summary>
@@ -73,6 +77,8 @@ internal sealed class DocxBuilder
             Optional(Styles, "styles", "styles.xml", "styles");
             Optional(Numbering, "numbering", "numbering.xml", "numbering");
             Optional(Settings, "settings", "settings.xml", "settings");
+            Optional(Footnotes, "footnotes", "footnotes.xml", "footnotes");
+            Optional(Endnotes, "endnotes", "endnotes.xml", "endnotes");
             if (Theme is not null)
             {
                 Write(zip, "word/theme/theme1.xml",
