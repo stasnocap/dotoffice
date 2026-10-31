@@ -506,7 +506,9 @@ public sealed class LayoutEngine
     {
         private readonly HashSet<Note> _placedNotes = new(ReferenceEqualityComparer.Instance);
 
-        private readonly HashSet<FloatingImage> _placedFloats = new(ReferenceEqualityComparer.Instance);
+        /// <summary>Where each floating image went, so it can follow its anchor when that moves to another page.</summary>
+        private readonly Dictionary<FloatingImage, (Page Page, ImageItem Item, Exclusion? Exclusion)> _placedFloats =
+            new(ReferenceEqualityComparer.Instance);
 
         private Page Current => pages[^1];
 
@@ -524,13 +526,24 @@ public sealed class LayoutEngine
         {
             foreach (var f in floats)
             {
-                if (!_placedFloats.Add(f)) continue;
+                if (_placedFloats.TryGetValue(f, out var placed))
+                {
+                    if (ReferenceEquals(placed.Page, page)) continue;
+                    // The anchor moved to a later page: the image goes with it.
+                    placed.Page.Floats.RemoveAll(x => ReferenceEquals(x.Item, placed.Item));
+                    if (placed.Exclusion is { } old) placed.Page.Exclusions.Remove(old);
+                }
                 var item = FloatItem(f, page, page.Region.Section, page.Region.Columns[page.Column], anchorY);
                 page.Floats.Add((item, f.BehindText));
-                if (f.Wrap == TextWrap.None) continue;
-                var d = f.Distance;
-                page.Exclusions.Add(new Exclusion(item.X - d.Left, item.Y - d.Top, item.Width + d.Left + d.Right, item.Height + d.Top + d.Bottom,
-                    FullWidth: f.Wrap == TextWrap.TopAndBottom));
+                Exclusion? exclusion = null;
+                if (f.Wrap != TextWrap.None)
+                {
+                    var d = f.Distance;
+                    exclusion = new Exclusion(item.X - d.Left, item.Y - d.Top, item.Width + d.Left + d.Right, item.Height + d.Top + d.Bottom,
+                        FullWidth: f.Wrap == TextWrap.TopAndBottom);
+                    page.Exclusions.Add(exclusion.Value);
+                }
+                _placedFloats[f] = (page, item, exclusion);
             }
         }
 
