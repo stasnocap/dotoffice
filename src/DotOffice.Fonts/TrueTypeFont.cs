@@ -41,9 +41,17 @@ public sealed class TrueTypeFont
     public short UnderlinePosition { get; }
     public short UnderlineThickness { get; }
 
-    /// <summary>OS/2 usWinAscent/usWinDescent (0 when absent); Office line metrics are based on these.</summary>
+    /// <summary>OS/2 usWinAscent/usWinDescent (0 when absent).</summary>
     public ushort WinAscent { get; }
     public ushort WinDescent { get; }
+
+    /// <summary>OS/2 sTypoAscender/sTypoDescender/sTypoLineGap (0 when absent).</summary>
+    public short TypoAscender { get; }
+    public short TypoDescender { get; }
+    public short TypoLineGap { get; }
+
+    /// <summary>The OS/2 USE_TYPO_METRICS flag (fsSelection bit 7): line spacing should come from the typo metrics.</summary>
+    public bool UseTypoMetrics { get; }
 
     /// <summary>Strikeout offset above the baseline in font units.</summary>
     public short StrikeoutPosition { get; }
@@ -123,6 +131,10 @@ public sealed class TrueTypeFont
             IsEmbeddingRestricted = (fsType & 0x000F) == 0x0002;
             if (os2.Length >= 78)
             {
+                UseTypoMetrics = (U16(o + 62) & 0x80) != 0;
+                TypoAscender = S16(o + 68);
+                TypoDescender = S16(o + 70);
+                TypoLineGap = S16(o + 72);
                 WinAscent = (ushort)U16(o + 74);
                 WinDescent = (ushort)U16(o + 76);
             }

@@ -106,12 +106,7 @@ public class ParagraphLayoutTests
         Assert.Equal(expected, lines[1].Baseline - lines[0].Baseline, 2);
     }
 
-    private static double FontMetricsHeight()
-    {
-        double scale = 10.0 / Noto.UnitsPerEm;
-        double win = Noto.WinAscent + Noto.WinDescent, hhea = Noto.Ascender - Noto.Descender + Noto.LineGap;
-        return Math.Max(win, hhea) * scale;
-    }
+    private static double FontMetricsHeight() => NotoLineHeight();
 
     [Fact]
     public void Spacing_before_and_after_add_up_and_contextual_spacing_removes_them()

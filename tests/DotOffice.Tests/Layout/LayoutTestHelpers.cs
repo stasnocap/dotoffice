@@ -48,6 +48,14 @@ internal static class LayoutTestHelpers
 
     public static double Right(TextItem t) => t.X + t.Font.MeasureText(t.Text, t.FontSize) + t.CharacterSpacing * t.Text.Length;
 
+    /// <summary>Single line height of Noto Sans at <paramref name="size"/>: its typo metrics (USE_TYPO_METRICS), each rounded to twips as in LibreOffice.</summary>
+    public static double NotoLineHeight(double size = 10)
+    {
+        static double Twips(double points) => Math.Round(points * 20, MidpointRounding.AwayFromZero) / 20;
+        double scale = size / Noto.UnitsPerEm;
+        return Twips(Noto.TypoAscender * scale) + Twips(-Noto.TypoDescender * scale) + Twips(Noto.TypoLineGap * scale);
+    }
+
     public static string Words(int count, string prefix = "word") =>
         string.Join(' ', Enumerable.Range(1, count).Select(i => $"{prefix}{i}"));
 }
