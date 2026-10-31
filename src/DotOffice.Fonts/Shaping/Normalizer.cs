@@ -3,8 +3,10 @@ namespace DotOffice.Fonts.Shaping;
 /// <summary>
 /// A character after normalization. <see cref="Text"/> is the text it stands for: the original character on the
 /// first part of a decomposition (empty on the others), the letter and its marks after a composition.
+/// <see cref="Hidden"/> marks characters GSUB must not skip although they are default ignorable (HarfBuzz's
+/// UPROPS_MASK_HIDDEN: Mongolian free variation selectors, tags, and a CGJ that keeps marks from reordering).
 /// </summary>
-internal readonly record struct NormalizedChar(int CodePoint, int Cluster, string Text);
+internal readonly record struct NormalizedChar(int CodePoint, int Cluster, string Text, bool Hidden = false);
 
 /// <summary>
 /// HarfBuzz's normalization before shaping (hb-ot-shape-normalize.cc): characters the font lacks are decomposed
@@ -22,6 +24,7 @@ internal static class Normalizer
     {
         public int CodePoint, Cluster, Class;
         public string Text;
+        public bool Hidden;
     }
 
     private static readonly Dictionary<int, (int First, int Second)> Decompositions = new();
@@ -71,7 +74,7 @@ internal static class Normalizer
                 else DecomposeCurrent(font, text[idx], shortest: false, shaper, items);
             }
         }
-        if (allSimple) return items.Select(c => new NormalizedChar(c.CodePoint, c.Cluster, c.Text)).ToList();
+        if (allSimple) return items.Select(c => new NormalizedChar(c.CodePoint, c.Cluster, c.Text, c.Hidden)).ToList();
 
         // Second round: reorder marks (stable sort by modified combining class, then the shaper's own rules).
         for (int i = 0; i < items.Count; i++)
@@ -88,6 +91,11 @@ internal static class Normalizer
             }
             i = end;
         }
+
+        // A CGJ that prevented no reordering may be skipped like other default ignorables.
+        for (int i = 1; i + 1 < items.Count; i++)
+            if (items[i].CodePoint == 0x034F && (items[i + 1].Class == 0 || items[i - 1].Class <= items[i + 1].Class))
+                items[i] = items[i] with { Hidden = false };
 
         // Third round: recompose marks with their starter when not blocked and the font has the composite.
         var output = new List<Item>(items.Count) { items[0] };
@@ -107,7 +115,7 @@ internal static class Normalizer
             output.Add(current);
             if (current.Class == 0) starter = output.Count - 1;
         }
-        return output.Select(c => new NormalizedChar(c.CodePoint, c.Cluster, c.Text)).ToList();
+        return output.Select(c => new NormalizedChar(c.CodePoint, c.Cluster, c.Text, c.Hidden)).ToList();
     }
 
     private static string Original(int cp) => char.ConvertFromUtf32(cp);
@@ -115,6 +123,7 @@ internal static class Normalizer
     private static Item NewItem(int cp, int cluster, string text) => new()
     {
         CodePoint = cp, Cluster = cluster, Text = text, Class = TextShaper.IsMark(cp) ? CombiningClass(cp) : 0,
+        Hidden = cp is 0x034F or >= 0x180B and <= 0x180D or 0x180F or >= 0xE0020 and <= 0xE007F,
     };
 
     private static void DecomposeCurrent(TrueTypeFont font, (int CodePoint, int Cluster) c, bool shortest, Shaper shaper, List<Item> output)

@@ -122,6 +122,7 @@ public static class TextShaper
                     layout.Apply(true, glyphs, layout.Lookups(true, script, joining ? [("kern", Kern), ("dist", Kern), ("curs", Common)] : [("kern", Kern)]), rightToLeft);
                 layout.Apply(true, glyphs, layout.Lookups(true, script,
                     [("mark", Marks | OpenTypeLayout.ManualJoiners), ("mkmk", Marks | OpenTypeLayout.ManualJoiners)]));
+                ZeroIgnorables(glyphs);
                 ResolveAttachments(glyphs, rightToLeft);
             }
         }
@@ -209,7 +210,7 @@ public static class TextShaper
             {
                 Glyph = gid, Cluster = c.Cluster, Text = c.Text, Mask = mask,
                 XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1, CodePoint = c.CodePoint,
-                Ignorable = IsDefaultIgnorable(c.CodePoint),
+                Ignorable = IsDefaultIgnorable(c.CodePoint), Hidden = c.Hidden,
             };
         }).ToList();
 
@@ -221,6 +222,16 @@ public static class TextShaper
         "init" => (tag, Init),
         _ => (tag, Common),
     };
+
+    /// <summary>
+    /// Default ignorables lose their advance and horizontal offset before mark offsets are resolved, as in
+    /// HarfBuzz's hb_ot_zero_width_default_ignorables.
+    /// </summary>
+    internal static void ZeroIgnorables(List<GlyphInfo> glyphs)
+    {
+        for (int i = 0; i < glyphs.Count; i++)
+            if (glyphs[i].Ignorable) glyphs[i] = glyphs[i] with { XAdvance = 0, XOffset = 0 };
+    }
 
     /// <summary>ZWJ, ZWNJ and other default ignorables become invisible: the space glyph without advance (or nothing).</summary>
     internal static void HideIgnorables(TrueTypeFont font, List<GlyphInfo> glyphs)
@@ -235,9 +246,10 @@ public static class TextShaper
     }
 
     internal static bool IsDefaultIgnorable(int cp) =>
-        cp is 0x00AD or 0x034F or 0x061C or >= 0x115F and <= 0x1160 or >= 0x17B4 and <= 0x17B5 or >= 0x180B and <= 0x180F
-            or >= 0x200B and <= 0x200F or >= 0x202A and <= 0x202E or >= 0x2060 and <= 0x206F or 0x3164
-            or >= 0xFE00 and <= 0xFE0F or 0xFEFF or 0xFFA0 or >= 0xFFF0 and <= 0xFFF8;
+        cp is 0x00AD or 0x034F or 0x061C or >= 0x17B4 and <= 0x17B5 or >= 0x180B and <= 0x180F
+            or >= 0x200B and <= 0x200F or >= 0x202A and <= 0x202E or >= 0x2060 and <= 0x206F
+            or >= 0xFE00 and <= 0xFE0F or 0xFEFF or >= 0xFFF0 and <= 0xFFF8 or >= 0x1D173 and <= 0x1D17A
+            or >= 0xE0000 and <= 0xE0FFF;
 
     /// <summary>Turns cursive and mark attachments into offsets relative to each glyph's own pen position.</summary>
     internal static void ResolveAttachments(List<GlyphInfo> glyphs, bool rightToLeft)
