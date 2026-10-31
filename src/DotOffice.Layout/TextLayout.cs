@@ -126,6 +126,9 @@ internal sealed class Itemizer(FontSelector fonts)
                         ? new Segment(AtomKind.Text, Transform(note.Mark, note.Properties), note.Properties, note)
                         : new Segment(AtomKind.Marker, "", note.Properties, note));
                     break;
+                case NoteMark { Note.Mark.Length: > 0 } mark:
+                    segments.Add(new Segment(AtomKind.Text, Transform(mark.Note.Mark, mark.Properties), mark.Properties, mark));
+                    break;
             }
         }
 
