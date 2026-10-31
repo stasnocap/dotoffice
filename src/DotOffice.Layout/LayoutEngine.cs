@@ -228,7 +228,20 @@ public sealed class LayoutEngine
                     keepWithNext = keep;
                     slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
                 }
-                foreach (var slice in slices) paginator.Add(slice, x);
+                for (int j = 0; j < slices.Count; j++)
+                {
+                    // A paragraph continuing in a column of another width is broken again for that width.
+                    if (slices[j] is { Reflow: { } reflow, BreakBefore: false, ColumnBreakBefore: false } && paginator.StartsInNextColumn(slices[j]))
+                    {
+                        paginator.NextColumn();
+                        if (Math.Abs(paginator.Column.Width - width) > 0.5)
+                        {
+                            (x, width) = paginator.Column;
+                            slices = [.. slices.Take(j), .. reflow(x, width, paginator.Obstacles)];
+                        }
+                    }
+                    paginator.Add(slices[j], x);
+                }
             }
             int index = document.Sections.IndexOf(section);
             var next = index + 1 < document.Sections.Count ? document.Sections[index + 1] : null;
