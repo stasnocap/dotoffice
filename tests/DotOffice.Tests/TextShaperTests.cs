@@ -137,4 +137,33 @@ public class TextShaperTests
         Assert.Equal(4, glyphs.Length);
         Assert.All(glyphs, g => Assert.Equal(0, g.GlyphId));
     }
+
+    [Theory]
+    [InlineData("abc αβγ d", "0,4,latn 4,4,grek 8,1,latn")]
+    [InlineData("y\u030C\u0301Ω", "0,3,latn 3,1,grek")] // marks inherit the script of their base
+    [InlineData("a\u0902b", "0,3,latn")]
+    [InlineData("(αβ (abc) γ)", "0,5,grek 5,3,latn 8,4,grek")] // closing brackets take their opening bracket's script
+    [InlineData("a\U00010330b", "0,1,latn 1,2,goth 3,1,latn")]
+    [InlineData("12 ?", "0,4,DFLT")]
+    [InlineData("アあ", "0,2,kana")] // Katakana and Hiragana share a tag, so they stay together
+    public void Text_is_split_into_script_runs_as_LibreOffice_does(string text, string expected)
+    {
+        text = System.Text.RegularExpressions.Regex.Unescape(text);
+        Assert.Equal(expected, string.Join(" ", ScriptRuns.Split(text).Select(r => $"{r.Start},{r.Length},{r.Tag}")));
+    }
+
+    [Fact]
+    public void Each_script_run_is_shaped_with_its_own_script()
+    {
+        // The Devanagari mark inherits the Latin script: no dotted circle, as with HarfBuzz for a Latin run.
+        Assert.Equal([(0, 600, 0, 0), (100, 0, 0, 0), (82, 409, 0, 0)],
+            Positions(TextShaper.Shape(Devanagari, "b\u0902र", rightToLeft: false, kerning: true)));
+    }
+
+    [Fact]
+    public void Right_to_left_runs_of_common_characters_are_shaped_left_to_right_like_HarfBuzz()
+    {
+        Assert.Equal([(426, 0, -272, -100), (3, 260, 0, 0)],
+            Positions(TextShaper.Shape(Arabic, " \u0650", rightToLeft: true, kerning: true)));
+    }
 }

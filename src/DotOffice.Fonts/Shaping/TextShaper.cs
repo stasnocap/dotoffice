@@ -14,6 +14,7 @@ internal enum JoiningType : byte { NotListed, U, R, L, D, C, T }
 /// <summary>
 /// Basic OpenType shaping, after HarfBuzz's default, Arabic and Hebrew shapers: normalization, Arabic-style
 /// joining forms (isol/fina/medi/init), ligatures, kerning and mark positioning from the font's GSUB/GPOS tables.
+/// Text is split into script runs (<see cref="ScriptRuns"/>) and each is shaped with its script's features.
 /// Indic scripts go to the <see cref="IndicShaper"/>; Sinhala, Tibetan, Myanmar and Khmer are not handled (their
 /// glyphs are mapped one to one).
 /// </summary>
@@ -33,7 +34,7 @@ public static class TextShaper
         int previous = -1;
         foreach (var rune in text.EnumerateRunes())
         {
-            if (ScriptOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value))
+            if (ScriptRuns.TagOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value))
                 return true;
             int glyph = font.GetGlyphId(rune.Value);
             if (layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, glyph)) return true;
@@ -53,11 +54,27 @@ public static class TextShaper
     /// </summary>
     public static ShapedGlyph[] Shape(TrueTypeFont font, string text, bool rightToLeft, bool kerning, bool ligatures = true)
     {
-        if (!rightToLeft && text.EnumerateRunes().Any(r => IndicShaper.IsIndic(r.Value)))
+        // Like LibreOffice, each script run is shaped on its own with its script's OpenType features.
+        var runs = ScriptRuns.Split(text);
+        if (runs.Count == 1) return ShapeRun(font, text, runs[0].Tag, rightToLeft, kerning, ligatures);
+        var result = new List<ShapedGlyph>(text.Length);
+        foreach (var (start, length, tag) in runs)
+            result.AddRange(ShapeRun(font, text.Substring(start, length), tag, rightToLeft, kerning, ligatures)
+                .Select(g => g with { Cluster = g.Cluster + start }));
+        return result.ToArray();
+    }
+
+    private static ShapedGlyph[] ShapeRun(TrueTypeFont font, string text, string script, bool rightToLeft, bool kerning, bool ligatures)
+    {
+        // HarfBuzz shapes a right-to-left run of a left-to-right script (or of Common characters) left to right
+        // with its graphemes reversed.
+        if (rightToLeft && !RightToLeftScripts.Contains(script) && script is not ("hung" or "ital" or "runr" or "tfng"))
+            return ShapeReversed(font, text, script, kerning, ligatures);
+        if (!rightToLeft)
         {
             try
             {
-                if (IndicShaper.Shape(font, text, ligatures) is { } indic)
+                if (IndicShaper.Shape(font, text, script, ligatures) is { } indic)
                     return indic.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
             }
             catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
@@ -68,9 +85,6 @@ public static class TextShaper
         var codePoints = new List<(int CodePoint, int Cluster)>(text.Length);
         for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
             codePoints.Add((char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i], i));
-        string script = "DFLT";
-        foreach (var (cp, _) in codePoints)
-            if (ScriptOf(cp) is { } s) { script = s; if (s != "latn") break; }
         bool joining = script is "arab" or "syrc" or "nko ";
         bool complex = joining || script == "hebr";
 
@@ -115,6 +129,45 @@ public static class TextShaper
         HideIgnorables(font, glyphs);
         return glyphs.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
     }
+
+    private static ShapedGlyph[] ShapeReversed(TrueTypeFont font, string text, string script, bool kerning, bool ligatures)
+    {
+        var graphemes = new List<(int Start, int Length)>();
+        int previous = -1;
+        for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
+        {
+            int cp = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
+            bool continuation = graphemes.Count > 0 && (IsMark(cp) || cp == 0x200D || cp is >= 0x1F3FB and <= 0x1F3FF
+                || cp is 0xFF9E or 0xFF9F or >= 0xE0020 and <= 0xE007F
+                || IsRegionalIndicator(cp) && IsRegionalIndicator(previous) && graphemes[^1].Length == (previous >= 0x10000 ? 2 : 1));
+            if (continuation) graphemes[^1] = (graphemes[^1].Start, i + (cp >= 0x10000 ? 2 : 1) - graphemes[^1].Start);
+            else graphemes.Add((i, cp >= 0x10000 ? 2 : 1));
+            previous = cp;
+        }
+
+        var reversed = new System.Text.StringBuilder(text.Length);
+        var original = new int[text.Length];
+        for (int g = graphemes.Count - 1; g >= 0; g--)
+        {
+            var (start, length) = graphemes[g];
+            for (int k = 0; k < length; k++) original[reversed.Length + k] = start + k;
+            reversed.Append(text, start, length);
+        }
+        var glyphs = ShapeRun(font, reversed.ToString(), script, rightToLeft: false, kerning, ligatures);
+        Array.Reverse(glyphs);
+        for (int i = 0; i < glyphs.Length; i++) glyphs[i] = glyphs[i] with { Cluster = original[glyphs[i].Cluster] };
+        return glyphs;
+    }
+
+    private static bool IsRegionalIndicator(int cp) => cp is >= 0x1F1E6 and <= 0x1F1FF;
+
+    /// <summary>Scripts written right to left (HarfBuzz's hb_script_get_horizontal_direction).</summary>
+    private static readonly HashSet<string> RightToLeftScripts =
+    [
+        "arab", "hebr", "syrc", "thaa", "cprt", "khar", "phnx", "nko ", "lydi", "avst", "armi", "phli", "prti", "sarb",
+        "orkh", "samr", "mand", "merc", "mero", "mani", "mend", "nbat", "narb", "palm", "phlp", "hatr", "adlm", "rohg",
+        "sogo", "sogd", "elym", "chrs", "yezi", "ougr", "gara",
+    ];
 
     private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars, uint mask) =>
         chars.Select(c =>
@@ -225,18 +278,4 @@ public static class TextShaper
     internal static bool IsMark(int cp) =>
         CharUnicodeInfo.GetUnicodeCategory(cp) is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark
             or UnicodeCategory.SpacingCombiningMark;
-
-    /// <summary>OpenType script tag for a letter, or null for common characters (digits, punctuation…).</summary>
-    private static string? ScriptOf(int cp) => cp switch
-    {
-        >= 0x0600 and <= 0x06FF or >= 0x0750 and <= 0x077F or >= 0x0870 and <= 0x08FF
-            or >= 0xFB50 and <= 0xFDFF or >= 0xFE70 and <= 0xFEFF => cp is >= 0x0660 and <= 0x0669 ? null : "arab",
-        >= 0x0590 and <= 0x05FF or >= 0xFB1D and <= 0xFB4F => "hebr",
-        >= 0x0700 and <= 0x074F => "syrc",
-        >= 0x07C0 and <= 0x07FF => "nko ",
-        >= 0x0370 and <= 0x03FF => "grek",
-        >= 0x0400 and <= 0x052F => "cyrl",
-        >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= 0x00C0 and <= 0x024F => "latn",
-        _ => null,
-    };
 }
