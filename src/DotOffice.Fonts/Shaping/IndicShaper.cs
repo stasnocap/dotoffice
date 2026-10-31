@@ -72,15 +72,13 @@ internal static class IndicShaper
     };
 
     /// <summary>
-    /// Shapes <paramref name="text"/>; returns null when the font was not designed for the script (no Indic script
-    /// tag in GSUB), in which case the default shaping applies, as in HarfBuzz. Without <paramref name="ligatures"/>
-    /// clig is off.
+    /// Shapes <paramref name="text"/>, a run of the script with the OpenType tag <paramref name="script"/>; returns
+    /// null when that is not an Indic script or the font was not designed for it (no Indic script tag in GSUB), in
+    /// which case the default shaping applies, as in HarfBuzz. Without <paramref name="ligatures"/> clig is off.
     /// </summary>
-    public static List<GlyphInfo>? Shape(TrueTypeFont font, string text, bool ligatures = true)
+    public static List<GlyphInfo>? Shape(TrueTypeFont font, string text, string script, bool ligatures = true)
     {
-        Config? config = null;
-        foreach (var rune in text.EnumerateRunes())
-            if ((config = ScriptOf(rune.Value)) is not null) break;
+        var config = Array.Find(Configs, c => c.OldTag == script);
         var layout = font.OpenTypeLayout;
         if (config is null) return null;
         string tag;
