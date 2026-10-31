@@ -3,7 +3,8 @@ using DotOffice.Core;
 namespace DotOffice.Layout;
 
 /// <summary>A laid-out line of cell content; <see cref="Y"/> is relative to the row's top.</summary>
-internal sealed record CellLine(double Y, double Height, IReadOnlyList<LayoutItem> Items);
+internal sealed record CellLine(double Y, double Height, IReadOnlyList<LayoutItem> Items, IReadOnlyList<Note> Footnotes,
+    IReadOnlyList<FloatingImage> Floats);
 
 /// <summary>The part of a (possibly vertically merged) cell that falls into one row.</summary>
 internal sealed record CellPart(double X, double Width, Thickness Margins, Color? Shading, BorderSet Borders,
@@ -20,6 +21,8 @@ internal sealed class RowSlice : Slice
         _cells = cells;
         _cantSplit = cantSplit;
         Height = height;
+        Footnotes = cells.SelectMany(c => c.Lines).SelectMany(l => l.Footnotes).ToList();
+        Floats = cells.SelectMany(c => c.Lines).SelectMany(l => l.Floats).ToList();
         Render();
     }
 
@@ -200,7 +203,7 @@ internal static class TableLayouter
                 double top = offset + y, bottom = top + slice.Height;
                 int k = rowTops.Length - 1;
                 while (k > 0 && rowTops[k] >= bottom - 0.01) k--;
-                perRow[k].Add(new CellLine(top - rowTops[k], slice.Height, slice.Items));
+                perRow[k].Add(new CellLine(top - rowTops[k], slice.Height, slice.Items, slice.Footnotes, slice.Floats));
             }
             double x = colX[p.Column], w = colX[p.Column + p.Span] - x;
             for (int r = p.Row; r <= end; r++)

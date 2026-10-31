@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml;
 using DotOffice.Core;
 
@@ -47,16 +48,25 @@ public static class DocxReader
     }
 }
 
+/// <summary>Numbering of footnotes or endnotes (w:footnotePr/w:endnotePr).</summary>
+internal sealed record NoteNumbering(string Format, int Start);
+
 internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeaders, int CompatibilityMode, bool DoNotExpandShiftReturn)
 {
     public static DocxSettings Default { get; } = new(36, false, 15, false);
 
+    public NoteNumbering Footnotes { get; init; } = new("decimal", 1);
+    public NoteNumbering Endnotes { get; init; } = new("lowerRoman", 1);
+
     public static DocxSettings Read(XmlReader r)
     {
         var s = Default with { CompatibilityMode = 12 };
+        string? notes = null; // "footnotePr" or "endnotePr" while inside one
+        int notesDepth = 0;
         while (r.Read())
         {
             if (r.NodeType != XmlNodeType.Element || !r.IsW()) continue;
+            if (notes is not null && r.Depth <= notesDepth) notes = null;
             switch (r.LocalName)
             {
                 case "defaultTabStop":
@@ -66,6 +76,16 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                 case "doNotExpandShiftReturn": s = s with { DoNotExpandShiftReturn = r.OnOff() }; break;
                 case "compatSetting" when r.WAttr("name") == "compatibilityMode":
                     if (int.TryParse(r.WAttr("val"), out var mode)) s = s with { CompatibilityMode = mode };
+                    break;
+                case "footnotePr" or "endnotePr":
+                    (notes, notesDepth) = (r.LocalName, r.Depth);
+                    break;
+                case "numFmt" or "numStart" when notes is not null:
+                    var numbering = notes == "footnotePr" ? s.Footnotes : s.Endnotes;
+                    numbering = r.LocalName == "numFmt"
+                        ? numbering with { Format = r.WAttr("val") ?? numbering.Format }
+                        : numbering with { Start = Math.Clamp(r.IntAttr("val") ?? 1, 0, 100_000) };
+                    s = notes == "footnotePr" ? s with { Footnotes = numbering } : s with { Endnotes = numbering };
                     break;
             }
         }
@@ -81,7 +101,7 @@ internal sealed class SectionData
     public SectionStart Start;
     public int? PageNumberStart;
     public PageNumberFormat PageNumberFormat;
-    public int Columns = 1;
+    public SectionColumns Columns = SectionColumns.Single;
     public Dictionary<string, string> Headers { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> Footers { get; } = new(StringComparer.Ordinal);
 }
@@ -112,6 +132,82 @@ internal sealed class DocxContext
     public StyleSheet Styles { get; }
     public Numbering Numbering { get; }
     public DocxSettings Settings { get; }
+
+    private readonly Dictionary<NoteKind, Dictionary<string, string>?> _noteParts = [];
+    private readonly List<Note> _notes = [];
+    private int _footnoteCount, _endnoteCount, _noteDepth;
+
+    /// <summary>Endnotes in reference order.</summary>
+    public List<Note> Endnotes { get; } = [];
+
+    /// <summary>
+    /// Reads the note <paramref name="id"/> for a new reference and numbers it. Returns null when the
+    /// note does not exist (or notes nest too deeply).
+    /// </summary>
+    public (Note Note, string Mark)? ReadNote(NoteKind kind, string id, bool customMark)
+    {
+        var part = kind == NoteKind.Footnote ? "footnotes" : "endnotes";
+        if (!_noteParts.TryGetValue(kind, out var notes)) _noteParts[kind] = notes = LoadNotes(part);
+        if (notes is null || !notes.TryGetValue(id, out var xml) || _noteDepth > 2)
+        {
+            Warn("docx.note-missing", $"The {kind.ToString().ToLowerInvariant()} with id '{id}' was not found.");
+            return null;
+        }
+
+        var numbering = kind == NoteKind.Footnote ? Settings.Footnotes : Settings.Endnotes;
+        int number = numbering.Start + (kind == NoteKind.Footnote ? _footnoteCount++ : _endnoteCount++);
+        var mark = customMark ? "" : Numbering.FormatNumber(number, numbering.Format);
+        var note = new Note(kind);
+        _notes.Add(note);
+        if (kind == NoteKind.Endnote) Endnotes.Add(note);
+
+        _noteDepth++;
+        try
+        {
+            var partName = Package.FindRelationship(MainPart, part)!.Target;
+            using var r = XmlReader.Create(new StringReader(xml), WordXml.Settings(xml.Length + 1));
+            r.MoveToContent();
+            new StoryReader(this, partName) { NoteMark = mark }.ReadBlocks(r, note.Blocks, cell: null, nesting: 0, onSection: null);
+        }
+        finally
+        {
+            _noteDepth--;
+        }
+        return (note, mark);
+    }
+
+    /// <summary>Note bodies by id; separator notes are skipped because layout draws its own separator.</summary>
+    private Dictionary<string, string>? LoadNotes(string part)
+    {
+        var rel = Package.FindRelationship(MainPart, part);
+        if (rel is null || !Package.Exists(rel.Target)) return null;
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using var r = Package.OpenXml(rel.Target);
+            r.MoveToContent();
+            while (!r.EOF)
+            {
+                if (r.NodeType == XmlNodeType.Element && r.IsW() && r.LocalName is "footnote" or "endnote")
+                {
+                    var id = r.WAttr("id");
+                    var type = r.WAttr("type");
+                    var xml = r.ReadOuterXml();
+                    if (id is not null && type is null or "normal") result.TryAdd(id, xml);
+                }
+                else r.Read();
+            }
+        }
+        catch (XmlException e)
+        {
+            Warn("docx.malformed-part", $"Ignoring malformed part '{rel.Target}': {e.Message}");
+            return null;
+        }
+        return result;
+    }
+
+    /// <summary>Bookmark names and the text they enclose (for REF fields), shared by all stories.</summary>
+    public Dictionary<string, StringBuilder> Bookmarks { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public void Warn(string code, string message) => Options.Warnings.Warn(code, message);
 
@@ -160,15 +256,53 @@ internal sealed class DocxContext
             var section = BuildSection(new SectionData(), previous, blocks);
             document.Sections.Add(section);
         }
+        document.Endnotes.AddRange(Endnotes);
+        ResolveReferences(document);
         return document;
+    }
+
+    /// <summary>Replaces REF placeholders by the bookmarked text (forward references are allowed).</summary>
+    private void ResolveReferences(Document document)
+    {
+        var stories = document.Sections.Select(s => s.Blocks)
+            .Concat(_headerFooters.Values.Select(h => h.Blocks))
+            .Concat(_notes.Select(n => n.Blocks));
+        foreach (var blocks in stories)
+            foreach (var paragraph in Paragraphs(blocks))
+            {
+                var inlines = paragraph.Inlines;
+                for (int i = 0; i < inlines.Count; i++)
+                {
+                    if (inlines[i] is not RefPlaceholder placeholder) continue;
+                    var text = Bookmarks.TryGetValue(placeholder.Bookmark, out var sb) && sb.Length > 0
+                        ? sb.ToString()
+                        : placeholder.CachedResult;
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        Warn("docx.ref-missing", $"REF field points to unknown bookmark '{placeholder.Bookmark}'.");
+                        text = "Error! Reference source not found.";
+                    }
+                    inlines[i] = new TextRun(text, placeholder.Properties) { Link = placeholder.Link };
+                }
+            }
+    }
+
+    private static IEnumerable<Paragraph> Paragraphs(IEnumerable<Block> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block is Paragraph p) yield return p;
+            else if (block is Table t)
+                foreach (var cell in t.Rows.SelectMany(r => r.Cells))
+                    foreach (var nested in Paragraphs(cell.Blocks))
+                        yield return nested;
+        }
     }
 
     private Section BuildSection(SectionData d, Section? previous, List<Block> blocks)
     {
         double max = Options.MaxDimension;
         double width = Math.Clamp(d.Width ?? 612, 36, max), height = Math.Clamp(d.Height ?? 792, 36, max);
-        if (d.Columns > 1)
-            WarnOnce("docx.columns", "Multi-column sections are not supported yet; text is laid out in a single column.");
 
         var section = new Section
         {
@@ -182,6 +316,7 @@ internal sealed class DocxContext
             DifferentFirstPage = d.TitlePage,
             PageNumberStart = d.PageNumberStart,
             PageNumberFormat = d.PageNumberFormat,
+            Columns = d.Columns,
             DefaultHeader = HeaderFooterFor(d.Headers, "default") ?? previous?.DefaultHeader,
             FirstHeader = HeaderFooterFor(d.Headers, "first") ?? previous?.FirstHeader,
             EvenHeader = HeaderFooterFor(d.Headers, "even") ?? previous?.EvenHeader,

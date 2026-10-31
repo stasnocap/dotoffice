@@ -19,7 +19,14 @@ internal sealed record RunFormat
     public FontSpec? Ascii { get; init; }
     public FontSpec? HAnsi { get; init; }
     public FontSpec? EastAsia { get; init; }
+    public FontSpec? ComplexScript { get; init; }
     public double? Size { get; init; }
+    public double? SizeCs { get; init; }
+    public bool? BoldCs { get; init; }
+    public bool? ItalicCs { get; init; }
+    public bool? RightToLeft { get; init; }
+    public bool? UseComplexScript { get; init; }
+    public double? Kerning { get; init; }
     public bool? Bold { get; init; }
     public bool? Italic { get; init; }
     public bool? Caps { get; init; }
@@ -42,7 +49,14 @@ internal sealed record RunFormat
         Ascii = over.Ascii ?? Ascii,
         HAnsi = over.HAnsi ?? HAnsi,
         EastAsia = over.EastAsia ?? EastAsia,
+        ComplexScript = over.ComplexScript ?? ComplexScript,
         Size = over.Size ?? Size,
+        SizeCs = over.SizeCs ?? SizeCs,
+        BoldCs = over.BoldCs ?? BoldCs,
+        ItalicCs = over.ItalicCs ?? ItalicCs,
+        RightToLeft = over.RightToLeft ?? RightToLeft,
+        UseComplexScript = over.UseComplexScript ?? UseComplexScript,
+        Kerning = over.Kerning ?? Kerning,
         Bold = over.Bold ?? Bold,
         Italic = over.Italic ?? Italic,
         Caps = over.Caps ?? Caps,
@@ -77,13 +91,24 @@ internal sealed record RunFormat
                         Ascii = Font(r, "ascii", "asciiTheme") ?? f.Ascii,
                         HAnsi = Font(r, "hAnsi", "hAnsiTheme") ?? f.HAnsi,
                         EastAsia = Font(r, "eastAsia", "eastAsiaTheme") ?? f.EastAsia,
+                        ComplexScript = Font(r, "cs", "cstheme") ?? f.ComplexScript,
                     };
                     break;
                 case "sz":
                     if (r.DoubleAttr("val") is { } sz && sz > 0) f = f with { Size = Math.Min(Units.FromHalfPoints(sz), 1638) };
                     break;
+                case "szCs":
+                    if (r.DoubleAttr("val") is { } szCs && szCs > 0) f = f with { SizeCs = Math.Min(Units.FromHalfPoints(szCs), 1638) };
+                    break;
+                case "kern":
+                    if (r.DoubleAttr("val") is { } kern) f = f with { Kerning = Units.FromHalfPoints(Math.Max(0, kern)) };
+                    break;
                 case "b": f = f with { Bold = r.OnOff() }; break;
                 case "i": f = f with { Italic = r.OnOff() }; break;
+                case "bCs": f = f with { BoldCs = r.OnOff() }; break;
+                case "iCs": f = f with { ItalicCs = r.OnOff() }; break;
+                case "rtl": f = f with { RightToLeft = r.OnOff() }; break;
+                case "cs": f = f with { UseComplexScript = r.OnOff() }; break;
                 case "caps": f = f with { Caps = r.OnOff() }; break;
                 case "smallCaps": f = f with { SmallCaps = r.OnOff() }; break;
                 case "strike": f = f with { Strike = r.OnOff() }; break;
@@ -198,6 +223,7 @@ internal sealed record ParaFormat
     public ColorSpec? Shading { get; init; }
     public int? NumId { get; init; }
     public int? Ilvl { get; init; }
+    public bool? Bidi { get; init; }
 
     public ParaFormat Merge(ParaFormat? over) => over is null ? this : new ParaFormat
     {
@@ -225,6 +251,7 @@ internal sealed record ParaFormat
         Shading = over.Shading ?? Shading,
         NumId = over.NumId ?? NumId,
         Ilvl = over.Ilvl ?? Ilvl,
+        Bidi = over.Bidi ?? Bidi,
     };
 
     /// <summary>Parses w:pPr. The paragraph mark's w:rPr and w:sectPr are handed to the callbacks.</summary>
@@ -284,6 +311,7 @@ internal sealed record ParaFormat
                     };
                     break;
                 case "keepNext": f = f with { KeepNext = r.OnOff() }; break;
+                case "bidi": f = f with { Bidi = r.OnOff() }; break;
                 case "keepLines": f = f with { KeepLines = r.OnOff() }; break;
                 case "pageBreakBefore": f = f with { PageBreakBefore = r.OnOff() }; break;
                 case "widowControl": f = f with { WidowControl = r.OnOff() }; break;

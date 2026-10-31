@@ -21,10 +21,11 @@ jobs:
       - name: Install PDF tools and fonts
         if: runner.os == 'Linux'
         # qpdf/poppler let the end-to-end tests validate their output; the fonts are the
-        # metric-compatible substitutes for Calibri/Cambria/Arial/Times/Courier used by the sample.
+        # metric-compatible substitutes for Calibri/Cambria/Arial/Times/Courier used by the sample,
+        # plus Noto for its Hebrew and Arabic paragraphs.
         run: |
           sudo apt-get update
-          sudo apt-get install -y qpdf poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
+          sudo apt-get install -y qpdf poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea fonts-noto-core
       - run: dotnet build -c Release
       - run: dotnet test -c Release --no-build
       - name: Validate sample PDFs
@@ -52,6 +53,8 @@ jobs:
           grep -q "Page $pages of $pages" showcase.txt
           # Carlito/Caladea must be used for Calibri/Cambria when installed.
           pdffonts showcase.pdf | grep -q Carlito
+          # Phase 3 features: TOC page numbers, footnotes on their reference's page, right-to-left text.
+          bash tools/check-showcase.sh showcase.pdf convert.log
           pdftoppm -r 60 -png showcase.pdf showcase-page
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'

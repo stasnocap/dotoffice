@@ -257,6 +257,13 @@ internal sealed class StyleSheet
             VerticalPosition = merged.VerticalAlign ?? VerticalPosition.Baseline,
             CharacterSpacing = Math.Clamp(merged.Spacing ?? 0, -100, 100),
             BaselineShift = Math.Clamp(merged.Position ?? 0, -500, 500),
+            ComplexScriptFontFamily = FontName(merged.ComplexScript),
+            ComplexScriptFontSize = merged.SizeCs,
+            ComplexScriptBold = merged.BoldCs is null ? null : Toggle(static f => f.BoldCs),
+            ComplexScriptItalic = merged.ItalicCs is null ? null : Toggle(static f => f.ItalicCs),
+            RightToLeft = merged.RightToLeft ?? false,
+            ComplexScript = merged.UseComplexScript ?? false,
+            KerningMinSize = merged.Kerning is > 0 ? merged.Kerning : null,
         };
     }
 
@@ -318,6 +325,7 @@ internal sealed class StyleSheet
                     InsideHorizontal = f.Between ?? Border.None,
                 },
             Shading = f.Shading?.Value,
+            RightToLeft = f.Bidi ?? false,
         };
     }
 }

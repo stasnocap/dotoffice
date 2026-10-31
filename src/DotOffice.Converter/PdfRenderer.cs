@@ -1,5 +1,6 @@
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
 using DotOffice.Layout;
 using DotOffice.Pdf;
 
@@ -15,14 +16,44 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
     public void Render(LayoutDocument layout, Stream output)
     {
         _pdf = new PdfDocument { Title = layout.Title, Author = layout.Author };
-        foreach (var page in layout.Pages) RenderPage(page);
+        var pages = layout.Pages.Select(page => _pdf.AddPage(new PageSize(page.Width, page.Height))).ToList();
+        for (int i = 0; i < pages.Count; i++) RenderPage(layout.Pages[i], pages[i]);
+        AddLinks(layout, pages);
         if (layout.Pages.Count == 0) _pdf.AddPage(PageSize.Letter);
         _pdf.Save(output);
     }
 
-    private void RenderPage(LayoutPage page)
+    /// <summary>Turns link items into annotations; internal links resolve to the first anchor of their bookmark.</summary>
+    private void AddLinks(LayoutDocument layout, List<PdfPage> pages)
     {
-        var canvas = _pdf.AddPage(new PageSize(page.Width, page.Height)).Canvas;
+        var anchors = new Dictionary<string, (PdfPage Page, double Y)>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < pages.Count; i++)
+            foreach (var anchor in layout.Pages[i].Items.OfType<AnchorItem>())
+                anchors.TryAdd(anchor.Name, (pages[i], layout.Pages[i].Height - anchor.Y));
+
+        for (int i = 0; i < pages.Count; i++)
+        {
+            double h = layout.Pages[i].Height;
+            foreach (var link in layout.Pages[i].Items.OfType<LinkItem>())
+            {
+                double y = h - link.Y - link.Height;
+                if (link.Link.Bookmark is { } name && anchors.TryGetValue(name, out var target))
+                    pages[i].AddLink(link.X, y, link.Width, link.Height, target.Page, target.Y);
+                else if (link.Link.Uri is { } uri && IsSafeUri(uri))
+                    pages[i].AddLink(link.X, y, link.Width, link.Height, uri);
+                else if (link.Link.Bookmark is { } missing)
+                    warnings.Warn("pdf.link-target", $"Link target bookmark '{missing}' was not found.");
+            }
+        }
+    }
+
+    /// <summary>Only absolute web/mail links become URI actions (no file:, javascript: or relative paths).</summary>
+    private static bool IsSafeUri(string uri) =>
+        Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme is "http" or "https" or "mailto" or "ftp";
+
+    private void RenderPage(LayoutPage page, PdfPage pdfPage)
+    {
+        var canvas = pdfPage.Canvas;
         double h = page.Height;
         var items = page.Items;
         Color? fill = null, stroke = null;
@@ -45,6 +76,12 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
         {
             switch (items[i])
             {
+                case TextItem { Glyphs: { } shaped } text:
+                    Fill(text.Color);
+                    if (text.SyntheticBold) Stroke(text.Color);
+                    canvas.DrawGlyphs(Font(text.Font), text.FontSize, h - text.Baseline, Positions(text, shaped),
+                        new TextStyle(text.SyntheticBold, text.SyntheticItalic));
+                    break;
                 case TextItem text:
                     // Coalesce following runs that share font, size, style and baseline into one text object.
                     var segments = new List<TextSegment> { new(text.X, text.Text) };
@@ -84,10 +121,25 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
         }
     }
 
+    /// <summary>Absolute glyph positions in visual order: right-to-left runs are drawn last glyph first.</summary>
+    private static List<PositionedGlyph> Positions(TextItem text, IReadOnlyList<ShapedGlyph> glyphs)
+    {
+        double scale = text.FontSize / text.Font.UnitsPerEm;
+        var result = new List<PositionedGlyph>(glyphs.Count);
+        double x = text.X;
+        for (int k = 0; k < glyphs.Count; k++)
+        {
+            var g = glyphs[text.RightToLeft ? glyphs.Count - 1 - k : k];
+            result.Add(new PositionedGlyph(g.GlyphId, g.Text, x + g.XOffset * scale, g.YOffset * scale));
+            x += g.Advance * scale + (g.Advance != 0 ? text.CharacterSpacing : 0);
+        }
+        return result;
+    }
+
     private static bool SameRun(TextItem a, TextItem b) =>
         ReferenceEquals(a.Font, b.Font) && a.FontSize == b.FontSize && a.Color == b.Color && Math.Abs(a.Baseline - b.Baseline) < 0.001
         && a.SyntheticBold == b.SyntheticBold && a.SyntheticItalic == b.SyntheticItalic && a.CharacterSpacing == b.CharacterSpacing
-        && b.X >= a.X;
+        && b.X >= a.X && b.Glyphs is null;
 
     private PdfFont Font(TrueTypeFont font)
     {

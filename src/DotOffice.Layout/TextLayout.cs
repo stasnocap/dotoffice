@@ -1,11 +1,13 @@
 using System.Text;
 using DotOffice.Core;
 using DotOffice.Fonts;
+using DotOffice.Fonts.Shaping;
+using DotOffice.Layout.Bidi;
 using DotOffice.Layout.LineBreaking;
 
 namespace DotOffice.Layout;
 
-internal enum AtomKind { Text, Space, Tab, Image, LineBreak, PageBreak }
+internal enum AtomKind { Text, Space, Tab, Image, LineBreak, PageBreak, Marker }
 
 /// <summary>
 /// The smallest unit of inline layout: a stretch of text in one font without break opportunities
@@ -25,7 +27,14 @@ internal sealed class Atom
 
     public double Width { get; init; }
     public ImageRun? Image { get; init; }
-    public FieldKind? Field { get; init; }
+    public FieldRun? Field { get; init; }
+    public Hyperlink? Link { get; init; }
+
+    /// <summary>Bookmark name of a <see cref="AtomKind.Marker"/> atom.</summary>
+    public string? Bookmark { get; init; }
+
+    /// <summary>The note referenced by this atom (its mark, or a marker when the mark is custom text).</summary>
+    public Note? Note { get; init; }
     public TabStop? Tab { get; set; }
 
     /// <summary>Part of the list label text (not its suffix).</summary>
@@ -41,6 +50,17 @@ internal sealed class Atom
     public int SpaceCount => Kind == AtomKind.Space ? Text.Length : 0;
 
     public bool IsBreak => Kind is AtomKind.LineBreak or AtomKind.PageBreak;
+
+    /// <summary>A <see cref="AtomKind.PageBreak"/> atom that only ends the column.</summary>
+    public bool IsColumnBreak { get; init; }
+
+    /// <summary>Bidi embedding level; odd levels are right to left.</summary>
+    public byte Level { get; init; }
+
+    public bool RightToLeft => (Level & 1) == 1;
+
+    /// <summary>Shaped glyphs in logical order, or null when the text maps to glyphs one to one.</summary>
+    public ShapedGlyph[]? Glyphs { get; init; }
 }
 
 internal sealed class Line
@@ -49,8 +69,12 @@ internal sealed class Line
     public double Ascent { get; set; }
     public double Descent { get; set; }
     public bool EndsWithPageBreak { get; init; }
+    public bool EndsWithColumnBreak { get; init; }
     public bool EndsWithLineBreak { get; init; }
     public bool IsLast { get; set; }
+
+    /// <summary>Extra space above the line, pushing it below an obstacle such as a floating image.</summary>
+    public double Gap { get; init; }
 
     /// <summary>Atoms that are drawn (trailing spaces and breaks excluded).</summary>
     public int VisibleCount { get; set; }
@@ -62,7 +86,7 @@ internal sealed class Itemizer(FontSelector fonts)
     private readonly record struct Segment(AtomKind Kind, string Text, RunProperties Props, Inline? Inline, bool IsLabel = false);
 
     /// <summary>Builds atoms for a paragraph; <paramref name="fieldText"/> supplies text for page-number fields.</summary>
-    public List<Atom> Itemize(Paragraph paragraph, Func<FieldKind, string> fieldText)
+    public List<Atom> Itemize(Paragraph paragraph, Func<FieldRun, string> fieldText)
     {
         var segments = new List<Segment>();
         if (paragraph.ListLabel is { } label && !label.Properties.Hidden)
@@ -77,7 +101,7 @@ internal sealed class Itemizer(FontSelector fonts)
             switch (inline)
             {
                 case TextRun t:
-                    AddText(segments, Transform(t.Text, t.Properties), t.Properties);
+                    AddText(segments, Transform(t.Text, t.Properties), t.Properties, t);
                     break;
                 case Tab:
                     segments.Add(new Segment(AtomKind.Tab, "\t", inline.Properties, inline));
@@ -92,7 +116,15 @@ internal sealed class Itemizer(FontSelector fonts)
                     segments.Add(new Segment(AtomKind.PageBreak, "\f", inline.Properties, inline));
                     break;
                 case FieldRun f:
-                    segments.Add(new Segment(AtomKind.Text, fieldText(f.Kind), inline.Properties, inline));
+                    segments.Add(new Segment(AtomKind.Text, fieldText(f), inline.Properties, inline));
+                    break;
+                case BookmarkStart:
+                    segments.Add(new Segment(AtomKind.Marker, "", inline.Properties, inline));
+                    break;
+                case NoteReference note:
+                    segments.Add(note.Mark.Length > 0
+                        ? new Segment(AtomKind.Text, Transform(note.Mark, note.Properties), note.Properties, note)
+                        : new Segment(AtomKind.Marker, "", note.Properties, note));
                     break;
             }
         }
@@ -102,6 +134,9 @@ internal sealed class Itemizer(FontSelector fonts)
         var text = all.ToString();
         var breaks = new LineBreakOpportunity[text.Length];
         LineBreaker.FindBreaks(text, breaks);
+        byte paragraphLevel = paragraph.Properties.RightToLeft ? (byte)1 : (byte)0;
+        var levels = BidiLevels(segments, text, paragraphLevel);
+        byte Level(int index) => levels is null ? (byte)0 : index < levels.Length ? levels[index] : paragraphLevel;
 
         var atoms = new List<Atom>();
         int offset = 0;
@@ -111,18 +146,38 @@ internal sealed class Itemizer(FontSelector fonts)
             switch (s.Kind)
             {
                 case AtomKind.Tab:
-                    atoms.Add(new Atom { Kind = AtomKind.Tab, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before });
+                    atoms.Add(new Atom
+                    {
+                        Kind = AtomKind.Tab, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before,
+                        Link = s.Inline?.Link, Level = Level(offset),
+                    });
                     break;
                 case AtomKind.Image:
                     var image = (ImageRun)s.Inline!;
-                    atoms.Add(new Atom { Kind = AtomKind.Image, Props = s.Props, Image = image, Width = image.Width, BreakBefore = before });
+                    atoms.Add(new Atom
+                    {
+                        Kind = AtomKind.Image, Props = s.Props, Image = image, Width = image.Width, BreakBefore = before, Link = image.Link,
+                        Level = Level(offset),
+                    });
+                    break;
+                case AtomKind.Marker:
+                    // Glued to the preceding text so a bookmark never starts a line of its own.
+                    atoms.Add(new Atom
+                    {
+                        Kind = AtomKind.Marker, Props = s.Props, BreakBefore = LineBreakOpportunity.None,
+                        Bookmark = (s.Inline as BookmarkStart)?.Name, Note = (s.Inline as NoteReference)?.Note, Level = Level(offset),
+                    });
                     break;
                 case AtomKind.LineBreak:
                 case AtomKind.PageBreak:
-                    atoms.Add(new Atom { Kind = s.Kind, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before });
+                    atoms.Add(new Atom
+                    {
+                        Kind = s.Kind, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before,
+                        IsColumnBreak = s.Inline is Break { Kind: BreakKind.Column }, Level = paragraphLevel,
+                    });
                     break;
                 default:
-                    AddTextAtoms(atoms, s, text, offset, breaks);
+                    AddTextAtoms(atoms, s, offset, breaks, Level);
                     break;
             }
             offset += s.Text.Length;
@@ -130,18 +185,18 @@ internal sealed class Itemizer(FontSelector fonts)
         return atoms;
     }
 
-    private static void AddText(List<Segment> segments, string text, RunProperties props)
+    private static void AddText(List<Segment> segments, string text, RunProperties props, Inline source)
     {
         int start = 0;
         for (int i = 0; i <= text.Length; i++)
         {
             char c = i < text.Length ? text[i] : '\0';
             if (i < text.Length && c is not ('\t' or '\n' or '\r' or '\v' or '\f')) continue;
-            if (i > start) segments.Add(new Segment(AtomKind.Text, text[start..i], props, null));
-            if (c == '\t') segments.Add(new Segment(AtomKind.Tab, "\t", props, null));
+            if (i > start) segments.Add(new Segment(AtomKind.Text, text[start..i], props, source));
+            if (c == '\t') segments.Add(new Segment(AtomKind.Tab, "\t", props, source));
             else if (c is '\n' or '\v' || (c == '\r' && (i + 1 >= text.Length || text[i + 1] != '\n')))
-                segments.Add(new Segment(AtomKind.LineBreak, "\n", props, null));
-            else if (c == '\f') segments.Add(new Segment(AtomKind.PageBreak, "\f", props, null));
+                segments.Add(new Segment(AtomKind.LineBreak, "\n", props, source));
+            else if (c == '\f') segments.Add(new Segment(AtomKind.PageBreak, "\f", props, source));
             start = i + 1;
         }
     }
@@ -149,18 +204,47 @@ internal sealed class Itemizer(FontSelector fonts)
     private static string Transform(string text, RunProperties props) =>
         props.Caps ? text.ToUpperInvariant() : text;
 
-    private void AddTextAtoms(List<Atom> atoms, Segment s, string all, int offset, LineBreakOpportunity[] breaks)
+    /// <summary>
+    /// Bidi embedding levels per UTF-16 index of the paragraph text, or null when everything is at level 0
+    /// (a left-to-right paragraph without right-to-left text). Breaks count as whitespace, not paragraph
+    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left.
+    /// </summary>
+    private static byte[]? BidiLevels(List<Segment> segments, string text, byte paragraphLevel)
+    {
+        bool any = paragraphLevel == 1 || segments.Exists(s => s.Props.RightToLeft && s.Text.Length > 0);
+        if (!any)
+            foreach (var rune in text.EnumerateRunes())
+                if (BidiAlgorithm.GetClass(rune.Value) is BidiClass.R or BidiClass.AL or BidiClass.AN or BidiClass.RLE or BidiClass.RLO
+                    or BidiClass.RLI or BidiClass.FSI) { any = true; break; }
+        if (!any) return null;
+
+        var classes = new BidiClass[text.Length];
+        var codePoints = new int[text.Length];
+        int offset = 0;
+        foreach (var s in segments)
+        {
+            for (int i = 0; i < s.Text.Length; i++)
+            {
+                int cp = char.IsSurrogatePair(s.Text, i) ? char.ConvertToUtf32(s.Text, i) : s.Text[i];
+                var cls = s.Kind is AtomKind.LineBreak or AtomKind.PageBreak ? BidiClass.WS
+                    : char.IsLowSurrogate(s.Text[i]) ? BidiClass.BN : BidiAlgorithm.GetClass(cp);
+                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) cls = BidiClass.R;
+                classes[offset + i] = cls;
+                codePoints[offset + i] = cp;
+            }
+            offset += s.Text.Length;
+        }
+        var levels = BidiAlgorithm.ResolveLevels(classes, codePoints, paragraphLevel);
+        // The low half of a surrogate pair goes with its high half.
+        for (int i = 1; i < text.Length; i++)
+            if (char.IsLowSurrogate(text[i])) levels[i] = levels[i - 1];
+        return levels;
+    }
+
+    private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level)
     {
         var props = s.Props;
-        var field = (s.Inline as FieldRun)?.Kind;
-        double baseSize = props.FontSize;
-        double size = props.VerticalPosition == VerticalPosition.Baseline ? baseSize : baseSize * 2 / 3;
-        double rise = props.BaselineShift + props.VerticalPosition switch
-        {
-            VerticalPosition.Superscript => baseSize / 3,
-            VerticalPosition.Subscript => -baseSize * 0.14,
-            _ => 0,
-        };
+        var field = s.Inline as FieldRun;
 
         int i = 0;
         var text = s.Text;
@@ -170,22 +254,41 @@ internal sealed class Itemizer(FontSelector fonts)
             int cp = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
             bool isSpace = text[i] == ' ';
             bool small = props.SmallCaps && char.IsLower(text[i]);
+            bool complex = FontSelector.UsesComplexScript(props, cp);
+            byte atomLevel = level(offset + start);
             var font = isSpace ? fonts.ForCharacter(props, ' ') : fonts.ForCharacterWithFallback(props, cp);
+            if (TextShaper.IsUnsupportedComplexScript(cp))
+                fonts.WarnOnce("layout.complex-script", "Indic and similar scripts need reordering that is not implemented; their text may render incorrectly.");
             i += char.IsSurrogatePair(text, start) ? 2 : 1;
             while (i < text.Length)
             {
+                // A field result stays one atom: its text is substituted after pagination.
                 if (field is null && breaks[offset + i] != LineBreakOpportunity.None) break;
-                if ((text[i] == ' ') != isSpace) break;
+                if (field is null && (text[i] == ' ') != isSpace) break;
                 if (props.SmallCaps && char.IsLower(text[i]) != small) break;
+                if (char.IsLowSurrogate(text[i])) { i++; continue; }
                 int next = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
-                if (!isSpace && !char.IsLowSurrogate(text[i]) && !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)
-                    && !IsCombining(next))
+                if (field is null && level(offset + i) != atomLevel) break;
+                if (field is null && !isSpace && !IsCombining(next)
+                    && (FontSelector.UsesComplexScript(props, next) != complex || !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)))
                     break;
                 i += char.IsSurrogatePair(text, i) ? 2 : 1;
             }
-            var piece = text[start..i];
+
+            var piece = StripBidiControls(text[start..i]);
+            if (piece.Length == 0) continue;
+            double baseSize = FontSelector.SizeFor(props, cp);
+            double size = props.VerticalPosition == VerticalPosition.Baseline ? baseSize : baseSize * 2 / 3;
+            double rise = props.BaselineShift + props.VerticalPosition switch
+            {
+                VerticalPosition.Superscript => baseSize / 3,
+                VerticalPosition.Subscript => -baseSize * 0.14,
+                _ => 0,
+            };
             double atomSize = small ? size * 0.8 : size;
             if (small) piece = piece.ToUpperInvariant();
+            bool rtl = (atomLevel & 1) == 1;
+            var (width, glyphs) = isSpace ? (Measure(font, piece, atomSize, props, rtl, shape: false), null) : Shape(font, piece, atomSize, props, rtl);
             atoms.Add(new Atom
             {
                 Kind = isSpace ? AtomKind.Space : AtomKind.Text,
@@ -196,10 +299,67 @@ internal sealed class Itemizer(FontSelector fonts)
                 Size = atomSize,
                 Rise = rise,
                 Field = field,
-                Width = font.Font.MeasureText(piece, atomSize) + props.CharacterSpacing * piece.Length,
+                Link = s.Inline?.Link,
+                Note = (s.Inline as NoteReference)?.Note,
+                Level = atomLevel,
+                Glyphs = glyphs,
+                Width = width,
                 BreakBefore = offset + start < breaks.Length ? breaks[offset + start] : LineBreakOpportunity.None,
             });
         }
+    }
+
+    /// <summary>
+    /// Shapes text when it needs it (complex script, marks, kerning, or right-to-left so its glyphs can be drawn
+    /// in reverse with mirrored brackets); returns its width and glyphs (null when unshaped). The glyphs keep the
+    /// logical characters as their text.
+    /// </summary>
+    internal static (double Width, ShapedGlyph[]? Glyphs) Shape(ResolvedFont font, string text, double size, RunProperties props, bool rtl)
+    {
+        bool kerning = props.KerningMinSize is { } min && size >= min;
+        if (!rtl && !TextShaper.NeedsShaping(text, kerning)) return (Measure(font, text, size, props, rtl, shape: false), null);
+        var glyphs = TextShaper.Shape(font.Font, rtl ? Mirror(text) : text, rtl, kerning);
+        // Mirrored glyphs still stand for the logical character in extracted text.
+        if (rtl)
+            for (int i = 0; i < glyphs.Length; i++) glyphs[i] = glyphs[i] with { Text = Mirror(glyphs[i].Text) };
+        double units = 0;
+        int advancing = 0;
+        foreach (var g in glyphs)
+        {
+            units += g.Advance;
+            if (g.Advance != 0) advancing++;
+        }
+        return (units * size / font.Font.UnitsPerEm + props.CharacterSpacing * advancing, glyphs);
+    }
+
+    /// <summary>Width of text in a font; shaped when <paramref name="shape"/> is set and the text needs it.</summary>
+    internal static double Measure(ResolvedFont font, string text, double size, RunProperties props, bool rtl, bool shape = true)
+    {
+        if (shape || rtl) return Shape(font, text, size, props, rtl).Width;
+        int runes = 0;
+        foreach (var _ in text.EnumerateRunes()) runes++;
+        return font.Font.MeasureText(text, size) + props.CharacterSpacing * runes;
+    }
+
+    /// <summary>Bidi formatting characters steer the algorithm but are never drawn.</summary>
+    private static string StripBidiControls(string text) =>
+        text.AsSpan().IndexOfAny("\u200E\u200F\u061C\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069") < 0
+            ? text
+            : string.Concat(text.Where(c => c is not ('\u200E' or '\u200F' or '\u061C' or >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069')));
+
+    /// <summary>Replaces characters with their mirrored forms (brackets…) for right-to-left display (L4).</summary>
+    private static string Mirror(string text)
+    {
+        StringBuilder? sb = null;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsSurrogate(text[i])) continue;
+            int mirrored = BidiAlgorithm.Mirror(text[i]);
+            if (mirrored == text[i] || mirrored > 0xFFFF) continue;
+            sb ??= new StringBuilder(text);
+            sb[i] = (char)mirrored;
+        }
+        return sb?.ToString() ?? text;
     }
 
     private static bool IsCombining(int cp) =>
@@ -208,35 +368,51 @@ internal sealed class Itemizer(FontSelector fonts)
 }
 
 /// <summary>Geometry a paragraph's lines are filled into. All x values are relative to the text area's left edge.</summary>
+/// <remarks>For right-to-left paragraphs lines are filled as if left to right and mirrored afterwards, so
+/// <see cref="LeftIndent"/> and left alignment refer to the start (right) side.</remarks>
 internal readonly record struct LineFrame(double Width, double LeftIndent, double RightIndent, double FirstLineIndent,
-    IReadOnlyList<TabStop> TabStops, double DefaultTabStop);
+    IReadOnlyList<TabStop> TabStops, double DefaultTabStop, bool RightToLeft = false);
+
+/// <summary>
+/// Supplies per-line geometry while a paragraph is broken into lines (text wrapping around floats):
+/// <see cref="Next"/> is asked before each line, <see cref="Done"/> is told about each finished line.
+/// </summary>
+internal interface ILineSpace
+{
+    /// <summary>Frame for the next line and the gap to leave above it.</summary>
+    (LineFrame Frame, double Gap) Next(LineFrame frame, bool first);
+
+    void Done(Line line);
+}
 
 /// <summary>Greedy line filling over break opportunities, with tab stops, alignment and justification.</summary>
 internal static class LineBuilder
 {
     private const double Epsilon = 0.01;
 
-    public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks)
+    public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks,
+        ILineSpace? space = null)
     {
         var lines = new List<Line>();
         int i = 0;
         while (i < atoms.Count)
         {
             bool first = lines.Count == 0;
-            double startX = frame.LeftIndent + (first ? frame.FirstLineIndent : 0);
-            double maxX = frame.Width - frame.RightIndent;
+            var (f, gap) = space?.Next(frame, first) ?? (frame, 0);
+            double startX = f.LeftIndent + (first ? f.FirstLineIndent : 0);
+            double maxX = f.Width - f.RightIndent;
             int end = i;
             while (end < atoms.Count)
             {
                 int wordEnd = end + 1;
                 while (wordEnd < atoms.Count && atoms[wordEnd].BreakBefore == LineBreakOpportunity.None && !atoms[wordEnd - 1].IsBreak)
                     wordEnd++;
-                double contentEnd = Position(atoms, i, wordEnd, startX, frame);
+                double contentEnd = Position(atoms, i, wordEnd, startX, f);
                 if (contentEnd > maxX + Epsilon && end > i) break; // word does not fit: line ends before it
                 if (contentEnd > maxX + Epsilon && end == i)
                 {
                     // A single word wider than the line: break it between characters.
-                    if (SplitToFit(atoms, i, wordEnd, startX, maxX, frame)) continue;
+                    if (SplitToFit(atoms, i, wordEnd, startX, maxX, f)) continue;
                 }
                 end = wordEnd;
                 if (atoms[end - 1].IsBreak) break;
@@ -246,22 +422,29 @@ internal static class LineBuilder
 
             var lineAtoms = atoms.GetRange(i, end - i);
             var last = lineAtoms[^1];
-            lines.Add(new Line
+            var line = new Line
             {
                 Atoms = lineAtoms,
                 EndsWithPageBreak = last.Kind == AtomKind.PageBreak,
-                EndsWithLineBreak = last.Kind == AtomKind.LineBreak,
-            });
+                EndsWithColumnBreak = last.IsColumnBreak,
+                Gap = gap,
+                IsLast = end == atoms.Count && !last.IsBreak,
+            };
+            lines.Add(line);
             i = end;
+            Finish(line, f, alignment, first, justifyBeforeBreaks);
+            space?.Done(line);
         }
 
         // A trailing break leaves an empty line holding the paragraph mark.
         if (lines.Count == 0 || lines[^1].Atoms[^1].IsBreak)
-            lines.Add(new Line { Atoms = [] });
-        lines[^1].IsLast = true;
-
-        for (int l = 0; l < lines.Count; l++)
-            Finish(lines[l], frame, alignment, l == 0, justifyBeforeBreaks);
+        {
+            var (f, gap) = space?.Next(frame, lines.Count == 0) ?? (frame, 0);
+            var line = new Line { Atoms = [], Gap = gap, IsLast = true };
+            lines.Add(line);
+            Finish(line, f, alignment, lines.Count == 1, justifyBeforeBreaks);
+            space?.Done(line);
+        }
         return lines;
     }
 
@@ -368,13 +551,19 @@ internal static class LineBuilder
     }
 
     private static double Measure(Atom atom, string text) =>
-        atom.Font!.Font.MeasureText(text, atom.Size) + atom.Props.CharacterSpacing * text.Length;
+        Itemizer.Measure(atom.Font!, text, atom.Size, atom.Props, atom.RightToLeft, shape: atom.Glyphs is not null);
 
-    private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore) => new()
+    private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore)
     {
-        Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field,
-        Width = Measure(a, text), BreakBefore = breakBefore,
-    };
+        var (width, glyphs) = a.Glyphs is null
+            ? (Itemizer.Measure(a.Font!, text, a.Size, a.Props, rtl: false, shape: false), null)
+            : Itemizer.Shape(a.Font!, text, a.Size, a.Props, a.RightToLeft);
+        return new Atom
+        {
+            Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link, Note = a.Note,
+            Level = a.Level, Glyphs = glyphs, Width = width, BreakBefore = breakBefore,
+        };
+    }
 
     private static void Finish(Line line, LineFrame frame, ParagraphAlignment alignment, bool first, bool justifyBeforeBreaks)
     {
@@ -384,7 +573,7 @@ internal static class LineBuilder
         double contentEnd = Position(atoms, 0, atoms.Count, startX, frame);
 
         int visible = atoms.Count;
-        while (visible > 0 && atoms[visible - 1].Kind is AtomKind.Space or AtomKind.LineBreak or AtomKind.PageBreak) visible--;
+        while (visible > 0 && atoms[visible - 1].Kind is AtomKind.Space or AtomKind.LineBreak or AtomKind.PageBreak or AtomKind.Marker) visible--;
         line.VisibleCount = visible;
 
         double extra = maxX - contentEnd;
@@ -418,6 +607,8 @@ internal static class LineBuilder
             foreach (var atom in atoms) atom.X += offset;
         }
 
+        if (frame.RightToLeft || atoms.Exists(a => a.Level > 0)) Reorder(line, frame);
+
         double ascent = 0, descent = 0;
         foreach (var atom in atoms)
         {
@@ -433,6 +624,30 @@ internal static class LineBuilder
         }
         line.Ascent = ascent;
         line.Descent = descent;
+    }
+
+    /// <summary>
+    /// Puts a line's atoms in visual order (bidi rule L2 on atom levels) and positions them left to right
+    /// inside the span the logical layout gave the line; right-to-left paragraphs mirror that span first.
+    /// The drawn atoms of <see cref="Line.Atoms"/> end up in visual order.
+    /// </summary>
+    private static void Reorder(Line line, LineFrame frame)
+    {
+        var atoms = line.Atoms;
+        int visible = line.VisibleCount;
+        if (visible == 0) return;
+        double start = atoms[0].X, end = atoms[visible - 1].X + atoms[visible - 1].Advance;
+        double x = frame.RightToLeft ? frame.Width - end : start;
+        var levels = new byte[visible];
+        for (int k = 0; k < visible; k++) levels[k] = atoms[k].Level;
+        var visual = BidiAlgorithm.VisualOrder(levels).Select(k => atoms[k]).ToList();
+        for (int k = 0; k < visible; k++)
+        {
+            atoms[k] = visual[k];
+            atoms[k].X = x;
+            x += atoms[k].Advance;
+        }
+        for (int k = visible; k < atoms.Count; k++) atoms[k].X = x;
     }
 
     /// <summary>Minimum (longest word) and maximum (no wrapping) content widths, for auto table layout.</summary>

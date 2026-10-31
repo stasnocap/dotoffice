@@ -307,8 +307,8 @@ public class DocxReaderTests
         var p = Paragraphs(doc).Single();
         Assert.Equal("link inserted sdt choice", string.Concat(p.Inlines.OfType<TextRun>().Select(t => t.Text)));
         Assert.Contains(warnings.Warnings, w => w.Code == "docx.vml");
-        Assert.Contains(warnings.Warnings, w => w.Code == "docx.notes");
-        Assert.Contains(warnings.Warnings, w => w.Code == "docx.floating");
+        Assert.Contains(warnings.Warnings, w => w.Code == "docx.note-missing"); // no footnotes part
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code == "docx.floating");
     }
 
     [Fact]

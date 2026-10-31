@@ -19,13 +19,31 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     private StyleSheet Styles => context.Styles;
 
+    /// <summary>Text of w:footnoteRef/w:endnoteRef when reading a note.</summary>
+    public string? NoteMark { get; init; }
+
+    private readonly Stack<Hyperlink> _links = new();
+    private readonly Dictionary<string, string> _openBookmarks = new(StringComparer.Ordinal);
+
     private sealed class FieldFrame
     {
         public StringBuilder Instruction { get; } = new();
         public bool Separated { get; set; }
-        public bool Emitted { get; set; }
-        public FieldKind? Kind { get; set; }
+        public FieldInstruction? Field { get; set; }
         public RunProperties? Properties { get; init; }
+
+        /// <summary>The run that replaces the cached result of a field we evaluate ourselves.</summary>
+        public Inline? Emitted { get; set; }
+
+        /// <summary>Some cached result content was shown.</summary>
+        public bool HasResult { get; set; }
+
+        public void Separate()
+        {
+            if (Separated) return;
+            Separated = true;
+            Field = FieldInstruction.Parse(Instruction.ToString());
+        }
     }
 
     private sealed class BlockSink(List<Block> target, Func<SectionData, List<Block>>? onSection)
@@ -235,6 +253,24 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 ReadRun(r, state);
                 break;
             case "hyperlink":
+                var link = HyperlinkTarget(r);
+                if (link is not null) _links.Push(link);
+                if (r.Enter()) ReadInlines(r, depth, state);
+                if (link is not null) _links.Pop();
+                break;
+            case "bookmarkStart":
+                if (r.WAttr("name") is { Length: > 0 } name)
+                {
+                    if (r.WAttr("id") is { } bookmarkId) _openBookmarks[bookmarkId] = name;
+                    context.Bookmarks.TryAdd(name, new StringBuilder());
+                    AddInline(state, new BookmarkStart(name, state.Paragraph.MarkProperties));
+                }
+                r.Skip();
+                break;
+            case "bookmarkEnd":
+                if (r.WAttr("id") is { } endId) _openBookmarks.Remove(endId);
+                r.Skip();
+                break;
             case "smartTag":
             case "customXml":
             case "ins":
@@ -251,7 +287,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 });
                 break;
             case "fldSimple":
-                var frame = new FieldFrame { Separated = true, Kind = ParseField(r.WAttr("instr")), Properties = state.Paragraph.MarkProperties };
+                var frame = new FieldFrame { Properties = state.Paragraph.MarkProperties };
+                frame.Instruction.Append(r.WAttr("instr"));
+                frame.Separate();
                 _fields.Push(frame);
                 if (r.Enter()) ReadInlines(r, depth, state);
                 EndField(state);
@@ -296,7 +334,7 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     continue;
                 case "t":
                     var text = r.ReadText();
-                    if (!Suppressed(Props(), state)) AddText(state, text, Props());
+                    if (!Suppressed(Props(), state, text)) AddText(state, text, Props());
                     continue;
                 case "instrText":
                     var instruction = r.ReadText();
@@ -304,24 +342,24 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     continue;
                 case "tab":
                 case "ptab":
-                    if (!Suppressed(Props(), state)) state.Paragraph.Inlines.Add(new Tab(Props()));
+                    if (!Suppressed(Props(), state)) AddInline(state, new Tab(Props()));
                     break;
                 case "br":
                 case "cr":
                     if (!Suppressed(Props(), state))
                     {
                         var kind = r.WAttr("type") switch { "page" => BreakKind.Page, "column" => BreakKind.Column, _ => BreakKind.Line };
-                        state.Paragraph.Inlines.Add(new Break(r.LocalName == "cr" ? BreakKind.Line : kind, Props()));
+                        AddInline(state, new Break(r.LocalName == "cr" ? BreakKind.Line : kind, Props()));
                     }
                     break;
                 case "noBreakHyphen":
-                    if (!Suppressed(Props(), state)) AddText(state, "‑", Props());
+                    if (!Suppressed(Props(), state, "‑")) AddText(state, "‑", Props());
                     break;
                 case "sym":
                     if (!Suppressed(Props(), state)) AddSymbol(r, state, Props());
                     break;
                 case "pgNum":
-                    if (!Suppressed(Props(), state)) state.Paragraph.Inlines.Add(new FieldRun(FieldKind.Page, Props()));
+                    if (!Suppressed(Props(), state)) AddInline(state, new FieldRun(FieldKind.Page, Props()));
                     break;
                 case "fldChar":
                     HandleFieldChar(r.WAttr("fldCharType"), state, Props());
@@ -336,7 +374,15 @@ internal sealed class StoryReader(DocxContext context, string partName)
                     break;
                 case "footnoteReference":
                 case "endnoteReference":
-                    context.WarnOnce("docx.notes", "Footnotes and endnotes are not supported yet; references were skipped.");
+                    var noteKind = r.LocalName == "footnoteReference" ? NoteKind.Footnote : NoteKind.Endnote;
+                    bool customMark = r.WAttr("customMarkFollows") is not null && r.OnOff("customMarkFollows");
+                    if (!Suppressed(Props(), state) && r.WAttr("id") is { } noteId
+                        && context.ReadNote(noteKind, noteId, customMark) is var (note, mark))
+                        AddInline(state, new NoteReference(note, mark, Props()));
+                    break;
+                case "footnoteRef":
+                case "endnoteRef":
+                    if (NoteMark is { Length: > 0 } && !Suppressed(Props(), state)) AddText(state, NoteMark, Props());
                     break;
             }
             r.Skip();
@@ -348,7 +394,33 @@ internal sealed class StoryReader(DocxContext context, string partName)
         if (text.Length == 0) return;
         if (SymbolFonts.IsSymbolFont(props.FontFamily)) text = SymbolFonts.Map(props.FontFamily, text);
         text = text.Replace("­", ""); // soft hyphens are invisible unless a line breaks there
-        if (text.Length > 0) state.Paragraph.Inlines.Add(new TextRun(text, props));
+        if (text.Length > 0) AddInline(state, new TextRun(text, props));
+    }
+
+    /// <summary>Adds an inline to the paragraph, attaching the current hyperlink and recording bookmark text.</summary>
+    private void AddInline(ParagraphState state, Inline inline)
+    {
+        inline.Link ??= CurrentLink();
+        if (inline is TextRun text && _openBookmarks.Count > 0)
+            foreach (var name in _openBookmarks.Values)
+                if (context.Bookmarks.TryGetValue(name, out var sb) && sb.Length < 4096) sb.Append(text.Text);
+        state.Paragraph.Inlines.Add(inline);
+    }
+
+    private Hyperlink? CurrentLink()
+    {
+        foreach (var f in _fields)
+            if (f.Separated && f.Field?.Link is { } link) return link;
+        return _links.TryPeek(out var current) ? current : null;
+    }
+
+    private Hyperlink? HyperlinkTarget(XmlReader r)
+    {
+        var anchor = r.WAttr("anchor");
+        string? uri = null;
+        if (r.RAttr("id") is { } id && context.Package.GetRelationships(partName).TryGetValue(id, out var rel) && rel.IsExternal)
+            uri = rel.Target;
+        return uri is null && anchor is null ? null : new Hyperlink(uri, anchor);
     }
 
     private void AddSymbol(XmlReader r, ParagraphState state, RunProperties props)
@@ -359,16 +431,16 @@ internal sealed class StoryReader(DocxContext context, string partName)
         var text = ((char)code).ToString();
         if (SymbolFonts.IsSymbolFont(font)) text = SymbolFonts.Map(font!, text, unknown: '□');
         else if (font is not null) props = props with { FontFamily = font };
-        state.Paragraph.Inlines.Add(new TextRun(text, props));
+        AddInline(state, new TextRun(text, props));
     }
 
     private static void MergeAdjacentText(List<Inline> inlines)
     {
         for (int i = inlines.Count - 1; i > 0; i--)
         {
-            if (inlines[i] is TextRun b && inlines[i - 1] is TextRun a && ReferenceEquals(a.Properties, b.Properties))
+            if (inlines[i] is TextRun b && inlines[i - 1] is TextRun a && ReferenceEquals(a.Properties, b.Properties) && a.Link == b.Link)
             {
-                inlines[i - 1] = new TextRun(a.Text + b.Text, a.Properties);
+                inlines[i - 1] = new TextRun(a.Text + b.Text, a.Properties) { Link = a.Link };
                 inlines.RemoveAt(i);
             }
         }
@@ -378,25 +450,39 @@ internal sealed class StoryReader(DocxContext context, string partName)
 
     /// <summary>
     /// Decides whether run content is shown. Instructions are always hidden. For fields we evaluate
-    /// ourselves (PAGE, NUMPAGES) the first piece of cached result is replaced by a <see cref="FieldRun"/>
-    /// carrying that run's formatting, and the rest of the cached result is hidden.
+    /// ourselves (PAGE, PAGEREF, REF…) the first piece of cached result is replaced by a <see cref="FieldRun"/>
+    /// (or a REF placeholder) carrying that run's formatting, and the rest of the cached result is hidden.
     /// </summary>
-    private bool Suppressed(RunProperties props, ParagraphState state)
+    private bool Suppressed(RunProperties props, ParagraphState state, string? text = null)
     {
         if (_fields.Count == 0) return false;
         foreach (var f in _fields)
             if (!f.Separated) return true;
         foreach (var f in _fields)
         {
-            if (f.Kind is not { } kind) continue;
-            if (!f.Emitted)
+            if (f.Field is not { IsEvaluated: true } field)
             {
-                f.Emitted = true;
-                state.Paragraph.Inlines.Add(new FieldRun(kind, props));
+                f.HasResult = true;
+                continue;
             }
+            if (f.Emitted is null)
+            {
+                f.Emitted = field.CreateInline(props);
+                AddInline(state, f.Emitted);
+            }
+            if (text is not null) AppendCached(f.Emitted, text);
             return true;
         }
         return false;
+    }
+
+    private static void AppendCached(Inline inline, string text)
+    {
+        switch (inline)
+        {
+            case FieldRun run: run.CachedResult += text; break;
+            case RefPlaceholder placeholder: placeholder.CachedResult += text; break;
+        }
     }
 
     private void HandleFieldChar(string? type, ParagraphState state, RunProperties props)
@@ -407,41 +493,26 @@ internal sealed class StoryReader(DocxContext context, string partName)
                 _fields.Push(new FieldFrame { Properties = props });
                 break;
             case "separate":
-                if (_fields.TryPeek(out var frame) && !frame.Separated)
-                {
-                    frame.Separated = true;
-                    frame.Kind = ParseField(frame.Instruction.ToString());
-                }
+                if (_fields.TryPeek(out var frame)) frame.Separate();
                 break;
             case "end":
-                if (_fields.TryPeek(out var ending) && !ending.Separated)
-                {
-                    ending.Separated = true;
-                    ending.Kind = ParseField(ending.Instruction.ToString());
-                }
+                if (_fields.TryPeek(out var ending)) ending.Separate();
                 EndField(state);
                 break;
         }
     }
 
-    /// <summary>Closes the innermost field; a supported field without cached result is emitted now.</summary>
+    /// <summary>Closes the innermost field; an evaluated field without cached result is emitted now.</summary>
     private void EndField(ParagraphState state)
     {
         if (!_fields.TryPop(out var frame)) return;
-        if (frame.Kind is { } kind && !frame.Emitted && !_fields.Any(f => !f.Separated || f.Emitted))
-            state.Paragraph.Inlines.Add(new FieldRun(kind, frame.Properties ?? state.Paragraph.MarkProperties));
-    }
-
-    private static FieldKind? ParseField(string? instruction)
-    {
-        if (instruction is null) return null;
-        var name = instruction.Trim().Split(' ', 2)[0].ToUpperInvariant();
-        return name switch
-        {
-            "PAGE" => FieldKind.Page,
-            "NUMPAGES" => FieldKind.NumPages,
-            _ => null,
-        };
+        bool hidden = _fields.Any(f => !f.Separated || f.Emitted is not null);
+        if (hidden || frame.Field is not { } field) return;
+        var props = frame.Properties ?? state.Paragraph.MarkProperties;
+        if (field.IsEvaluated && frame.Emitted is null)
+            AddInline(state, field.CreateInline(props));
+        else if (!frame.HasResult && field.Name is "DATE" or "TIME")
+            AddText(state, FieldInstruction.FormatDate(DateTime.Now, field.Picture ?? (field.Name == "TIME" ? "h:mm am/pm" : "M/d/yyyy")), props);
     }
 
     // ---------------------------------------------------------------- drawings
@@ -453,12 +524,8 @@ internal sealed class StoryReader(DocxContext context, string partName)
         while (r.NextChild(depth))
         {
             if (r.IsWP() && r.LocalName == "inline") ReadInlineDrawing(r, state, props);
-            else
-            {
-                if (r.IsWP() && r.LocalName == "anchor")
-                    context.WarnOnce("docx.floating", "Floating (anchored) drawings are not supported yet and were skipped.");
-                r.Skip();
-            }
+            else if (r.IsWP() && r.LocalName == "anchor") ReadAnchorDrawing(r, state, props);
+            else r.Skip();
         }
     }
 
@@ -486,14 +553,110 @@ internal sealed class StoryReader(DocxContext context, string partName)
         }
         if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
 
+        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+            AddInline(state, new ImageRun(image, width, height, props));
+    }
+
+    /// <summary>Reads a wp:anchor picture: position, wrapping and z-order.</summary>
+    private void ReadAnchorDrawing(XmlReader r, ParagraphState state, RunProperties props)
+    {
+        static double Emu(XmlReader r, string name) =>
+            long.TryParse(r.GetAttribute(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? Math.Clamp(Units.FromEmu(v), 0, 1584) : 0;
+
+        bool behind = r.GetAttribute("behindDoc") is "1" or "true";
+        var distance = new Thickness(Emu(r, "distT"), Emu(r, "distR"), Emu(r, "distB"), Emu(r, "distL"));
+        var horizontal = new FloatPosition(FloatReference.Column, FloatAlignment.Offset, 0);
+        var vertical = new FloatPosition(FloatReference.Paragraph, FloatAlignment.Offset, 0);
+        bool inHorizontal = true;
+        var wrap = TextWrap.None;
+        long cx = 0, cy = 0;
+        string? embed = null, graphicType = null;
+        int depth = r.Depth;
+        if (r.IsEmptyElement) { r.Read(); return; }
+        r.Read();
+        while (!r.EOF && r.Depth > depth)
+        {
+            if (r.NodeType == XmlNodeType.Element && r.IsWP())
+            {
+                switch (r.LocalName)
+                {
+                    case "positionH" or "positionV":
+                        inHorizontal = r.LocalName == "positionH";
+                        var reference = ParseReference(r.GetAttribute("relativeFrom"), inHorizontal);
+                        if (inHorizontal) horizontal = horizontal with { RelativeTo = reference };
+                        else vertical = vertical with { RelativeTo = reference };
+                        break;
+                    case "posOffset":
+                        double offset = long.TryParse(r.ReadElementContentAsString().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var emu)
+                            ? Math.Clamp(Units.FromEmu(emu), -context.Options.MaxDimension, context.Options.MaxDimension) : 0;
+                        if (inHorizontal) horizontal = horizontal with { Alignment = FloatAlignment.Offset, Offset = offset };
+                        else vertical = vertical with { Alignment = FloatAlignment.Offset, Offset = offset };
+                        continue;
+                    case "align":
+                        var alignment = r.ReadElementContentAsString().Trim() switch
+                        {
+                            "left" or "top" or "inside" => FloatAlignment.Start,
+                            "center" => FloatAlignment.Center,
+                            "right" or "bottom" or "outside" => FloatAlignment.End,
+                            _ => FloatAlignment.Offset,
+                        };
+                        if (inHorizontal) horizontal = horizontal with { Alignment = alignment };
+                        else vertical = vertical with { Alignment = alignment };
+                        continue;
+                    case "extent":
+                        long.TryParse(r.GetAttribute("cx"), NumberStyles.Integer, CultureInfo.InvariantCulture, out cx);
+                        long.TryParse(r.GetAttribute("cy"), NumberStyles.Integer, CultureInfo.InvariantCulture, out cy);
+                        break;
+                    case "wrapTopAndBottom": wrap = TextWrap.TopAndBottom; break;
+                    // Tight/through wrapping follows the outline; the bounding rectangle is a close approximation.
+                    case "wrapSquare" or "wrapTight" or "wrapThrough": wrap = TextWrap.Square; break;
+                    case "wrapNone": wrap = TextWrap.None; break;
+                }
+            }
+            else if (r.NodeType == XmlNodeType.Element && r.IsA())
+            {
+                if (r.LocalName == "blip") embed ??= r.RAttr("embed");
+                else if (r.LocalName == "graphicData") graphicType = r.GetAttribute("uri");
+            }
+            r.Read();
+        }
+        if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
+
+        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+            AddInline(state, new FloatingImage(image, width, height, props)
+            {
+                Horizontal = horizontal, Vertical = vertical, Wrap = behind ? TextWrap.None : wrap, BehindText = behind, Distance = distance,
+            });
+    }
+
+    private static FloatReference ParseReference(string? value, bool horizontal) => value switch
+    {
+        "page" => FloatReference.Page,
+        "margin" => FloatReference.Margin,
+        "column" => FloatReference.Column,
+        "character" => FloatReference.Character,
+        "leftMargin" => FloatReference.LeftMargin,
+        "rightMargin" => FloatReference.RightMargin,
+        "insideMargin" => FloatReference.InsideMargin,
+        "outsideMargin" => FloatReference.OutsideMargin,
+        "paragraph" => FloatReference.Paragraph,
+        "line" => FloatReference.Line,
+        "topMargin" => FloatReference.TopMargin,
+        "bottomMargin" => FloatReference.BottomMargin,
+        _ => horizontal ? FloatReference.Column : FloatReference.Paragraph,
+    };
+
+    /// <summary>Resolves a picture's image part and size; null (with a warning) for non-pictures and broken links.</summary>
+    private (ImageData Image, double Width, double Height)? LoadPicture(string? embed, string? graphicType, long cx, long cy)
+    {
         if (embed is null)
         {
             var kind = graphicType?[(graphicType.LastIndexOf('/') + 1)..] ?? "unknown";
-            context.WarnOnce("docx.graphic." + kind, $"Inline graphic of type '{kind}' (charts, shapes, diagrams) is not supported.");
-            return;
+            context.WarnOnce("docx.graphic." + kind, $"Graphic of type '{kind}' (charts, shapes, diagrams) is not supported.");
+            return null;
         }
         double width = Units.FromEmu(cx), height = Units.FromEmu(cy);
-        if (width <= 0 || height <= 0) return;
+        if (width <= 0 || height <= 0) return null;
         double max = context.Options.MaxDimension;
         if (width > max || height > max)
         {
@@ -504,10 +667,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
         if (!context.Package.GetRelationships(partName).TryGetValue(embed, out var rel) || rel.IsExternal)
         {
             context.Warn("docx.image-link", $"Image relationship '{embed}' is missing or external.");
-            return;
+            return null;
         }
-        if (context.GetImage(rel.Target) is { } image)
-            state.Paragraph.Inlines.Add(new ImageRun(image, width, height, props));
+        return context.GetImage(rel.Target) is { } image ? (image, width, height) : null;
     }
 
     // ---------------------------------------------------------------- sections
@@ -556,7 +718,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
                         _ => PageNumberFormat.Decimal,
                     };
                     break;
-                case "cols": d.Columns = Math.Max(1, r.IntAttr("num") ?? 1); break;
+                case "cols":
+                    d.Columns = ReadColumns(r);
+                    continue;
                 case "headerReference":
                     if (r.RAttr("id") is { } hid) d.Headers[r.WAttr("type") ?? "default"] = hid;
                     break;
@@ -567,6 +731,28 @@ internal sealed class StoryReader(DocxContext context, string partName)
             r.Skip();
         }
         return d;
+    }
+
+    private static SectionColumns ReadColumns(XmlReader r)
+    {
+        int count = Math.Clamp(r.IntAttr("num") ?? 1, 1, 45);
+        double spacing = Math.Clamp(r.TwipsAttr("space") ?? 36, 0, 1584);
+        bool separator = r.WAttr("sep") is not null && r.OnOff("sep");
+        bool equal = r.OnOff("equalWidth");
+        var definitions = new List<ColumnDefinition>();
+        int depth = r.Depth;
+        if (r.Enter())
+        {
+            while (r.NextChild(depth))
+            {
+                if (r.IsW() && r.LocalName == "col" && definitions.Count < 45)
+                    definitions.Add(new ColumnDefinition(Math.Clamp(r.TwipsAttr("w") ?? 0, 0, 31_680), Math.Clamp(r.TwipsAttr("space") ?? 0, 0, 1584)));
+                r.Skip();
+            }
+        }
+        // Explicit widths only apply when equalWidth is off; w:num still gives the count otherwise.
+        if (equal || definitions.Count < 2 || definitions.All(d => d.Width <= 0)) definitions.Clear();
+        return new SectionColumns { Count = definitions.Count > 0 ? definitions.Count : count, Spacing = spacing, Definitions = definitions, Separator = separator };
     }
 
     // ---------------------------------------------------------------- tables
