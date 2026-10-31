@@ -67,6 +67,17 @@ public class TextShaperTests
     }
 
     [Fact]
+    public void Shaping_does_not_stop_after_many_runs_in_one_font()
+    {
+        // The lookup operation limit applies per call; it used to be shared by every call on a font.
+        var font = TrueTypeFont.Load(TestAssets.Path("NotoSans-Regular.ttf"));
+        string text = string.Concat(Enumerable.Repeat("AVTAWAY ", 20));
+        var expected = Positions(TextShaper.Shape(font, text, false, kerning: true));
+        for (int i = 0; i < 2000; i++) TextShaper.Shape(font, text, false, kerning: true);
+        Assert.Equal(expected, Positions(TextShaper.Shape(font, text, false, kerning: true)));
+    }
+
+    [Fact]
     public void Fonts_without_layout_tables_map_characters_one_to_one()
     {
         var glyphs = TextShaper.Shape(Latin, "سلام", rightToLeft: true, kerning: false); // no Arabic glyphs: .notdef
