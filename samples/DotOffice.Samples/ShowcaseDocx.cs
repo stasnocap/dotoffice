@@ -7,7 +7,8 @@ namespace DotOffice.Samples;
 
 /// <summary>
 /// Generates a self-contained showcase DOCX (raw WordprocessingML) exercising the features of the
-/// converter: styles, lists, tables, headers/footers, sections, images and pagination.
+/// converter: styles, lists, tables, headers/footers, sections, images, pagination, a table of contents,
+/// fields and links, columns, footnotes and endnotes, floating images and right-to-left text.
 /// Everything in it is generated, so it can be redistributed freely.
 /// </summary>
 internal static class ShowcaseDocx
@@ -25,13 +26,20 @@ internal static class ShowcaseDocx
         "stretches the spaces between words so that both edges of the column line up, while the last line " +
         "of every paragraph stays left aligned. Tables, lists, headers and footers are handled by the same engine.";
 
+    private static readonly string[] Headings =
+    [
+        "Character formatting", "Paragraph formatting", "Lists", "Images", "Tables", "Pagination", "Landscape section",
+        "Multiple columns", "Footnotes and endnotes", "Floating images", "Right-to-left text", "Fields and links",
+    ];
+
     public static void Write(string path, byte[]? jpeg)
     {
         var body = new StringBuilder();
         body.Append(P(R("DotOffice showcase"), "<w:pStyle w:val=\"Title\"/>"));
         body.Append(P(R("A generated document converted to PDF without LibreOffice.", "<w:i/>"), "<w:pStyle w:val=\"Subtitle\"/>"));
+        body.Append(TableOfContents());
 
-        body.Append(P(R("1. Character formatting"), "<w:pStyle w:val=\"Heading1\"/>"));
+        body.Append(Heading(1));
         body.Append(P(R("Plain, ") + R("bold", "<w:b/>") + R(", ") + R("italic", "<w:i/>") + R(", ") + R("bold italic", "<w:b/><w:i/>")
                       + R(", ") + R("underlined", "<w:u w:val=\"single\"/>") + R(", ") + R("double underline", "<w:u w:val=\"double\"/>")
                       + R(", ") + R("struck", "<w:strike/>") + R(", ") + R("colored", "<w:color w:val=\"C00000\"/>") + R(", ")
@@ -42,7 +50,7 @@ internal static class ShowcaseDocx
                       + R(", while ") + R("direct bold stays bold", "<w:b/>") + R("."), "<w:pStyle w:val=\"EmphasisPara\"/>"));
         body.Append(P(R("Unicode: Привет, мир! Γειά σου κόσμε! Ångström, naïve café — “quotes” … ✓")));
 
-        body.Append(P(R("2. Paragraph formatting"), "<w:pStyle w:val=\"Heading1\"/>"));
+        body.Append(Heading(2));
         body.Append(P(R(Lorem), "<w:jc w:val=\"both\"/>"));
         body.Append(P(R("Centered paragraph with 1.5 line spacing. " + Lorem[..160]), "<w:jc w:val=\"center\"/><w:spacing w:line=\"360\" w:lineRule=\"auto\"/>"));
         body.Append(P(R("Right aligned text."), "<w:jc w:val=\"right\"/>"));
@@ -58,7 +66,7 @@ internal static class ShowcaseDocx
         body.Append(P(R("Decimal tab:") + Tab() + R("1234.56"), "<w:tabs><w:tab w:val=\"decimal\" w:pos=\"4320\"/></w:tabs>"));
         body.Append(P(R("Decimal tab:") + Tab() + R("7.5"), "<w:tabs><w:tab w:val=\"decimal\" w:pos=\"4320\"/></w:tabs>"));
 
-        body.Append(P(R("3. Lists"), "<w:pStyle w:val=\"Heading1\"/>"));
+        body.Append(Heading(3));
         foreach (var (level, text) in new[] { (0, "First item"), (1, "Nested item a"), (1, "Nested item b"), (2, "Third level"), (0, "Second item"), (1, "Nested again (restarts at a)"), (0, "Third item with a long text that wraps onto the next line to show the hanging indentation of list items.") })
             body.Append(P(R(text), $"<w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"1\"/></w:numPr>"));
         body.Append(P(R("Bullets, mixed with numbers:")));
@@ -69,7 +77,7 @@ internal static class ShowcaseDocx
             body.Append(P(R($"Item {i + 1}"), "<w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"3\"/></w:numPr>"));
 
         var parts = new List<(string Name, byte[] Data, string RelId)>();
-        body.Append(P(R("4. Images"), "<w:pStyle w:val=\"Heading1\"/>"));
+        body.Append(Heading(4));
         parts.Add(("image1.png", GradientPng(160, 100), "rIdImg1"));
         body.Append(P(R("PNG with alpha over a shaded paragraph: ") + Image("rIdImg1", 160, 100, 1),
             "<w:shd w:val=\"clear\" w:fill=\"FFF2CC\"/>"));
@@ -79,12 +87,12 @@ internal static class ShowcaseDocx
             body.Append(P(R("JPEG: ") + Image("rIdImg2", 120, 75, 2) + R(" inline with text.")));
         }
 
-        body.Append(P(R("5. Tables"), "<w:pStyle w:val=\"Heading1\"/>"));
+        body.Append(Heading(5));
         body.Append(SimpleTable());
         body.Append(P(R("")));
         body.Append(LongTable());
 
-        body.Append(P(R("6. Pagination"), "<w:pStyle w:val=\"Heading1\"/><w:pageBreakBefore/>"));
+        body.Append(Heading(6, "<w:pageBreakBefore/>"));
         for (int i = 1; i <= 12; i++)
             body.Append(P(R($"Paragraph {i}. " + Lorem + " " + Lorem), "<w:jc w:val=\"both\"/>"));
 
@@ -92,10 +100,67 @@ internal static class ShowcaseDocx
         body.Append(P(R("End of the portrait section."), "<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>" +
             "<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/><w:headerReference w:type=\"first\" r:id=\"rIdFirstHeader\"/><w:titlePg/>" +
             "<w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>"));
-        body.Append(P(R("7. Landscape section"), "<w:pStyle w:val=\"Heading1\"/>"));
-        body.Append(P(R("This section uses a landscape page. Headers and footers are inherited from the previous section. " + Lorem), "<w:jc w:val=\"both\"/>"));
-        body.Append("<w:sectPr><w:pgSz w:w=\"15840\" w:h=\"12240\" w:orient=\"landscape\"/>" +
-                    "<w:pgMar w:top=\"1080\" w:right=\"1080\" w:bottom=\"1080\" w:left=\"1080\" w:header=\"540\" w:footer=\"540\" w:gutter=\"0\"/></w:sectPr>");
+        body.Append(Heading(7));
+        body.Append(P(R("This section uses a landscape page. Headers and footers are inherited from the previous section. " + Lorem), "<w:jc w:val=\"both\"/>"
+            + "<w:sectPr><w:pgSz w:w=\"15840\" w:h=\"12240\" w:orient=\"landscape\"/>" +
+              "<w:pgMar w:top=\"1080\" w:right=\"1080\" w:bottom=\"1080\" w:left=\"1080\" w:header=\"540\" w:footer=\"540\" w:gutter=\"0\"/></w:sectPr>"));
+
+        // 8. Columns: a one-column heading, two columns with a separator and a column break, then three
+        // columns balanced by a continuous section break, and one column again.
+        body.Append(Heading(8));
+        body.Append(P(R("The next paragraphs flow through two columns separated by a line. A column break ends the first column early; "
+                        + "the three columns after it are balanced because a continuous section break follows them."),
+            Portrait("<w:type w:val=\"nextPage\"/>")));
+        body.Append(P(R("Column one. " + Lorem), "<w:jc w:val=\"both\"/>"));
+        body.Append(P(R("Still column one, then a column break.") + "<w:r><w:br w:type=\"column\"/></w:r>" + R("Column two starts here. " + Lorem),
+            "<w:jc w:val=\"both\"/>"));
+        body.Append(P(R("Two columns end here."), Portrait("<w:type w:val=\"continuous\"/><w:cols w:num=\"2\" w:space=\"720\" w:sep=\"1\"/>")));
+        for (int i = 1; i <= 6; i++)
+            body.Append(P(R($"Balanced column text {i}. " + Lorem[..(120 + i * 25)]), "<w:jc w:val=\"both\"/>"));
+        body.Append(P(R("Three balanced columns end here."), Portrait("<w:type w:val=\"continuous\"/><w:cols w:num=\"3\" w:space=\"360\"/>")));
+        body.Append(P(R("Back to a single column below the balanced columns.")));
+
+        // 9. Footnotes and endnotes.
+        body.Append(Heading(9));
+        body.Append(P(R("Footnotes are numbered automatically") + NoteRef("footnote", 1) + R(" and placed at the bottom of the page that "
+                      + "references them, below a short separator line") + NoteRef("footnote", 2)
+                      + R(". Endnotes are collected after the last section") + NoteRef("endnote", 1) + R(".")));
+
+        // 10. Floating images.
+        body.Append(Heading(10));
+        body.Append(P(Anchor("rIdImg1", 150, 94, 3, "<wp:positionH relativeFrom=\"margin\"><wp:align>right</wp:align></wp:positionH>"
+                                                + "<wp:positionV relativeFrom=\"paragraph\"><wp:posOffset>0</wp:posOffset></wp:positionV>",
+                             "<wp:wrapSquare wrapText=\"bothSides\"/>", 114300)
+                      + R("Square wrapping: this paragraph flows around a floating image anchored to the right margin. " + Lorem + " " + Lorem),
+            "<w:jc w:val=\"both\"/>"));
+        body.Append(P(Anchor("rIdImg1", 80, 50, 4, "<wp:positionH relativeFrom=\"column\"><wp:align>center</wp:align></wp:positionH>"
+                                               + "<wp:positionV relativeFrom=\"paragraph\"><wp:posOffset>127000</wp:posOffset></wp:positionV>",
+                             "<wp:wrapTopAndBottom/>", 63500)
+                      + R("Top-and-bottom wrapping keeps lines above and below this centered image. " + Lorem), "<w:jc w:val=\"both\"/>"));
+
+        // 11. Right-to-left text: Hebrew and Arabic paragraphs with numbers, brackets and embedded English.
+        body.Append(Heading(11));
+        const string hebrew = "<w:rFonts w:cs=\"Noto Sans Hebrew\"/><w:rtl/>";
+        const string arabic = "<w:rFonts w:cs=\"Noto Sans Arabic\"/><w:rtl/><w:szCs w:val=\"24\"/>";
+        body.Append(P(R("זהו טקסט בעברית עם מספר 2026 (בסוגריים) ומילה ", hebrew) + R("English") + R(" באמצע.", hebrew), "<w:bidi/>"));
+        body.Append(P(R("שָׁלוֹם עוֹלָם — טקסט מנוקד.", hebrew), "<w:bidi/>"));
+        body.Append(P(R("مرحبا بالعالم، هذا نص عربي مع الأرقام ١٢٣ و456 وكلمة ", arabic) + R("PDF") + R(" في الوسط.", arabic), "<w:bidi/><w:jc w:val=\"both\"/>"));
+        body.Append(P(R("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", arabic), "<w:bidi/><w:jc w:val=\"center\"/>"));
+        body.Append(P(R("A left-to-right paragraph can contain ") + R("كلمات عربية", arabic) + R(" and ") + R("מילים בעברית", hebrew) + R(" in their own direction.")));
+        body.Append(P(R("Kerning (w:kern): AVATAR WAVE Toyota", "<w:kern w:val=\"1\"/><w:sz w:val=\"28\"/>") + R("  without: ") +
+                      R("AVATAR WAVE Toyota", "<w:sz w:val=\"28\"/>")));
+
+        // 12. Fields and links.
+        body.Append(Heading(12));
+        body.Append(P(R("This paragraph is on page ") + Field("PAGE", "1") + R(" (in roman numerals: ") + Field("PAGE \\* roman", "i")
+                      + R("). The footnote section starts on page ") + Field("PAGEREF _Toc9 \\h", "1") + R(" and is titled \u201C")
+                      + Field("REF _Toc9 \\h", "stale cached title") + R("\u201D. Document date: ") + Field("DATE \\@ \"d MMMM yyyy\"", "31 October 2026")
+                      + R(". Unknown fields keep their cached result: ") + Field("MERGEFIELD Customer", "\u00ABCustomer\u00BB") + R(".")));
+        body.Append(P(R("Links: ") + $"<w:hyperlink r:id=\"rIdLink\">{R("the DotOffice repository", "<w:rStyle w:val=\"Hyperlink\"/>")}</w:hyperlink>"
+                      + R(", an internal link to ") + $"<w:hyperlink w:anchor=\"_Toc8\">{R("the columns section", "<w:rStyle w:val=\"Hyperlink\"/>")}</w:hyperlink>"
+                      + R(" and a HYPERLINK field to ") + Field("HYPERLINK \"https://www.unicode.org/reports/tr9/\"", "UAX #9", "<w:rStyle w:val=\"Hyperlink\"/>") + R(".")));
+        body.Append(P(R("The end of the document. The endnote follows.")));
+        body.Append(Portrait("<w:type w:val=\"continuous\"/>"));
 
         using var zip = new ZipArchive(File.Create(path), ZipArchiveMode.Create);
         Entry(zip, "[Content_Types].xml",
@@ -111,6 +176,8 @@ internal static class ShowcaseDocx
             "<Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/>" +
             "<Override PartName=\"/word/header2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/>" +
             "<Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>" +
+            "<Override PartName=\"/word/footnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/>" +
+            "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml\"/>" +
             "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>");
         Entry(zip, "_rels/.rels",
             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
@@ -129,6 +196,10 @@ internal static class ShowcaseDocx
         Rel("rIdHeader", "header", "header1.xml");
         Rel("rIdFirstHeader", "header", "header2.xml");
         Rel("rIdFooter", "footer", "footer1.xml");
+        Rel("rIdFootnotes", "footnotes", "footnotes.xml");
+        Rel("rIdEndnotes", "endnotes", "endnotes.xml");
+        rels.Append("<Relationship Id=\"rIdLink\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\" " +
+                    "Target=\"https://github.com/stasnocap/dotoffice\" TargetMode=\"External\"/>");
         foreach (var (name, data, relId) in parts)
         {
             Rel(relId, "image", "media/" + name);
@@ -139,18 +210,72 @@ internal static class ShowcaseDocx
         Entry(zip, "word/document.xml", $"<w:document {Ns}><w:body>{body}</w:body></w:document>");
         Entry(zip, "word/styles.xml", $"<w:styles {Ns}>{Styles}</w:styles>");
         Entry(zip, "word/numbering.xml", $"<w:numbering {Ns}>{Numbering}</w:numbering>");
+        Entry(zip, "word/footnotes.xml", $"<w:footnotes {Ns}>" + Separators("footnote")
+            + Note("footnote", 1, "Footnote text uses the FootnoteText style. Its number is the w:footnoteRef mark.")
+            + Note("footnote", 2, "A second footnote on the same page.") + "</w:footnotes>");
+        Entry(zip, "word/endnotes.xml", $"<w:endnotes {Ns}>" + Separators("endnote")
+            + Note("endnote", 1, "Endnotes are numbered with lowercase roman numerals by default.") + "</w:endnotes>");
         Entry(zip, "word/settings.xml", $"<w:settings {Ns}><w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>");
         Entry(zip, "word/theme/theme1.xml",
             "<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"Office\"><a:themeElements><a:fontScheme name=\"Office\">" +
             "<a:majorFont><a:latin typeface=\"Cambria\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:majorFont>" +
             "<a:minorFont><a:latin typeface=\"Calibri\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>");
-        Entry(zip, "word/header1.xml", $"<w:hdr {Ns}>" + P(R("DotOffice showcase") + Tab() + Tab() + R("Phase 2", "<w:i/>"), "<w:pStyle w:val=\"Header\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"1\" w:color=\"808080\"/></w:pBdr>") + "</w:hdr>");
+        Entry(zip, "word/header1.xml", $"<w:hdr {Ns}>" + P(R("DotOffice showcase") + Tab() + Tab() + R("Phase 3", "<w:i/>"), "<w:pStyle w:val=\"Header\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"1\" w:color=\"808080\"/></w:pBdr>") + "</w:hdr>");
         Entry(zip, "word/header2.xml", $"<w:hdr {Ns}>" + P(R("First page header — different from the rest", "<w:color w:val=\"808080\"/>"), "<w:jc w:val=\"center\"/>") + "</w:hdr>");
         Entry(zip, "word/footer1.xml", $"<w:ftr {Ns}>" + P(R("Page ") + "<w:fldSimple w:instr=\" PAGE \"><w:r><w:rPr><w:b/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>" + R(" of ")
                                                       + "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> NUMPAGES </w:instrText></w:r>"
                                                       + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
                                                       "<w:jc w:val=\"center\"/>") + "</w:ftr>");
     }
+
+    private static string Heading(int number, string pPr = "") =>
+        P($"<w:bookmarkStart w:id=\"{number}\" w:name=\"_Toc{number}\"/>{R($"{number}. {Headings[number - 1]}")}<w:bookmarkEnd w:id=\"{number}\"/>",
+          "<w:pStyle w:val=\"Heading1\"/>" + pPr);
+
+    /// <summary>A TOC field as Word saves it: cached entries linking to the headings, with PAGEREF page numbers (stale here).</summary>
+    private static string TableOfContents()
+    {
+        var sb = new StringBuilder(P(R("Contents"), "<w:pStyle w:val=\"TOCHeading\"/>"));
+        for (int i = 1; i <= Headings.Length; i++)
+        {
+            var entry = $"<w:hyperlink w:anchor=\"_Toc{i}\">{R($"{i}. {Headings[i - 1]}")}{Tab()}{Field($"PAGEREF _Toc{i} \\h", "0")}</w:hyperlink>";
+            if (i == 1) entry = "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-1\" \\h \\z \\u </w:instrText></w:r>"
+                                + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>" + entry;
+            if (i == Headings.Length) entry += "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+            sb.Append(P(entry, "<w:pStyle w:val=\"TOC1\"/>"));
+        }
+        return sb.ToString();
+    }
+
+    private static string Field(string instruction, string cached, string rPr = "") =>
+        $"<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> {SecurityElement.Escape(instruction)} </w:instrText></w:r>" +
+        $"<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>{R(cached, rPr)}<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+
+    private static string NoteRef(string kind, int id) =>
+        $"<w:r><w:rPr><w:rStyle w:val=\"{(kind == "footnote" ? "FootnoteReference" : "EndnoteReference")}\"/></w:rPr><w:{kind}Reference w:id=\"{id}\"/></w:r>";
+
+    private static string Note(string kind, int id, string text) =>
+        $"<w:{kind} w:id=\"{id}\"><w:p><w:pPr><w:pStyle w:val=\"FootnoteText\"/></w:pPr>" +
+        $"<w:r><w:rPr><w:rStyle w:val=\"{(kind == "footnote" ? "FootnoteReference" : "EndnoteReference")}\"/></w:rPr><w:{kind}Ref/></w:r>{R(" " + text)}</w:p></w:{kind}>";
+
+    private static string Separators(string kind) =>
+        $"<w:{kind} w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:{kind}>" +
+        $"<w:{kind} w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:{kind}>";
+
+    /// <summary>A portrait letter-size w:sectPr with the given extra settings (section type, columns).</summary>
+    private static string Portrait(string extra) =>
+        $"<w:sectPr>{extra}<w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" " +
+        "w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>";
+
+    /// <summary>A floating picture (wp:anchor); <paramref name="distance"/> is the wrap distance in EMU.</summary>
+    private static string Anchor(string relId, double widthPt, double heightPt, int id, string position, string wrap, long distance) =>
+        $"<w:r><w:drawing><wp:anchor distT=\"{distance}\" distB=\"{distance}\" distL=\"{distance}\" distR=\"{distance}\" simplePos=\"0\" relativeHeight=\"{id}\" " +
+        $"behindDoc=\"0\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\"><wp:simplePos x=\"0\" y=\"0\"/>{position}" +
+        $"<wp:extent cx=\"{(long)(widthPt * 12700)}\" cy=\"{(long)(heightPt * 12700)}\"/>{wrap}<wp:docPr id=\"{id}\" name=\"Floating {id}\"/>" +
+        "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+        $"<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"float{id}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"{relId}\"/>" +
+        $"<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{(long)(widthPt * 12700)}\" cy=\"{(long)(heightPt * 12700)}\"/>" +
+        "</a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>";
 
     private static string SimpleTable()
     {
@@ -202,6 +327,15 @@ internal static class ShowcaseDocx
         "<w:style w:type=\"character\" w:styleId=\"Strong\"><w:name w:val=\"Strong\"/><w:rPr><w:b/><w:color w:val=\"7030A0\"/></w:rPr></w:style>" +
         "<w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"40\"/><w:ind w:left=\"720\"/><w:contextualSpacing/></w:pPr></w:style>" +
         "<w:style w:type=\"paragraph\" w:styleId=\"Header\"><w:name w:val=\"header\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"4680\"/><w:tab w:val=\"right\" w:pos=\"9360\"/></w:tabs><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr></w:style>" +
+        "<w:style w:type=\"paragraph\" w:styleId=\"TOCHeading\"><w:name w:val=\"TOC Heading\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:before=\"240\" w:after=\"80\"/></w:pPr>" +
+        "<w:rPr><w:rFonts w:asciiTheme=\"majorHAnsi\" w:hAnsiTheme=\"majorHAnsi\"/><w:color w:val=\"2F5496\"/><w:sz w:val=\"28\"/></w:rPr></w:style>" +
+        "<w:style w:type=\"paragraph\" w:styleId=\"TOC1\"><w:name w:val=\"toc 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:tabs><w:tab w:val=\"right\" w:leader=\"dot\" w:pos=\"9350\"/></w:tabs>" +
+        "<w:spacing w:after=\"40\"/></w:pPr></w:style>" +
+        "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>" +
+        "<w:style w:type=\"paragraph\" w:styleId=\"FootnoteText\"><w:name w:val=\"footnote text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>" +
+        "<w:rPr><w:sz w:val=\"18\"/><w:szCs w:val=\"18\"/></w:rPr></w:style>" +
+        "<w:style w:type=\"character\" w:styleId=\"FootnoteReference\"><w:name w:val=\"footnote reference\"/><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr></w:style>" +
+        "<w:style w:type=\"character\" w:styleId=\"EndnoteReference\"><w:name w:val=\"endnote reference\"/><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr></w:style>" +
         "<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/>" +
         "<w:tblCellMar><w:top w:w=\"0\" w:type=\"dxa\"/><w:left w:w=\"108\" w:type=\"dxa\"/><w:bottom w:w=\"0\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>" +
         "<w:style w:type=\"table\" w:styleId=\"GridTable\"><w:name w:val=\"Grid Table 4 Accent 1\"/><w:basedOn w:val=\"TableNormal\"/>" +
