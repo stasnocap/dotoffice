@@ -123,6 +123,19 @@ public class ColumnTests
     }
 
     [Fact]
+    public void A_paragraph_continuing_in_a_column_of_another_width_is_broken_for_that_width()
+    {
+        var columns = new SectionColumns { Count = 2, Definitions = [new ColumnDefinition(100, 20), new ColumnDefinition(348, 0)] };
+        var page = Assert.Single(Render(Doc(Section(4, columns), Para(Words(25)))).Pages);
+        var narrow = Texts(page).Where(t => t.Text.StartsWith("word") && t.X < 192).ToList();
+        var wide = Texts(page).Where(t => t.Text.StartsWith("word") && t.X >= 192).ToList();
+        Assert.All(narrow, t => Assert.True(Right(t) <= 172 + 0.01));
+        Assert.Contains(wide, t => Right(t) > 192 + 200); // wide lines, not narrow ones moved across
+        Assert.Equal(25, narrow.Count + wide.Count); // no word lost or repeated
+        Assert.True(wide.Select(t => t.Baseline).Distinct().Count() < 4);
+    }
+
+    [Fact]
     public void Reader_parses_column_settings()
     {
         var doc = DocxReader.Read(new DocxBuilder

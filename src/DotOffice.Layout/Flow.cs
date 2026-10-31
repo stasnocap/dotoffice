@@ -36,6 +36,12 @@ internal class Slice
     /// <summary>Footnotes referenced in this slice; they go to the bottom of the page the slice lands on.</summary>
     public IReadOnlyList<Note> Footnotes { get; set; } = [];
 
+    /// <summary>
+    /// Lays out this paragraph line and the rest of its paragraph again for a column at x of the given width
+    /// (when the paragraph continues in a column of another width); null for other slices and first lines.
+    /// </summary>
+    public Func<double, double, Obstacles?, List<Slice>>? Reflow { get; set; }
+
     /// <summary>Floating images anchored in this slice; positioned when the slice is placed.</summary>
     public IReadOnlyList<FloatingImage> Floats { get; set; } = [];
 
@@ -185,10 +191,17 @@ internal static class ParagraphLayouter
     }
 
     public static List<Slice> Layout(Paragraph p, Paragraph? prev, Paragraph? next, double x0, double width, FlowContext ctx,
-        Obstacles? obstacles = null)
+        Obstacles? obstacles = null) =>
+        Layout(p, prev, next, ctx.Itemizer.Itemize(p, ctx.FieldText), continued: false, x0, width, ctx, obstacles);
+
+    /// <summary>
+    /// Lays out <paramref name="atoms"/> of <paramref name="p"/>; <paramref name="continued"/> means they are the
+    /// rest of the paragraph after lines placed elsewhere (no first-line indent, spacing before or top border).
+    /// </summary>
+    private static List<Slice> Layout(Paragraph p, Paragraph? prev, Paragraph? next, List<Atom> atoms, bool continued,
+        double x0, double width, FlowContext ctx, Obstacles? obstacles)
     {
         var props = p.Properties;
-        var atoms = ctx.Itemizer.Itemize(p, ctx.FieldText);
         // Right/center-aligned list labels end at (or center on) the first-line position.
         double labelWidth = atoms.Where(a => a.IsLabel).Sum(a => a.Width);
         double labelShift = p.ListLabel?.Alignment switch
@@ -197,17 +210,17 @@ internal static class ParagraphLayouter
             ParagraphAlignment.Center => labelWidth / 2,
             _ => 0,
         };
-        var frame = new LineFrame(width, props.LeftIndent, props.RightIndent, props.FirstLineIndent - labelShift, props.TabStops,
-            ctx.Settings.DefaultTabStop, props.RightToLeft);
+        var frame = new LineFrame(width, props.LeftIndent, props.RightIndent, continued ? 0 : props.FirstLineIndent - labelShift,
+            props.TabStops, ctx.Settings.DefaultTabStop, props.RightToLeft);
         bool sameStylePrev = prev is not null && prev.Properties.StyleId == props.StyleId;
         bool sameStyleNext = next is not null && next.Properties.StyleId == props.StyleId;
-        double spaceBefore = props.ContextualSpacing && sameStylePrev ? 0 : props.SpaceBefore;
+        double spaceBefore = props.ContextualSpacing && sameStylePrev || continued ? 0 : props.SpaceBefore;
         double spaceAfter = props.ContextualSpacing && sameStyleNext ? 0 : props.SpaceAfter;
 
         var borders = props.Borders;
         bool groupedPrev = borders.HasAny && prev is not null && SameBorderGroup(prev, p);
         bool groupedNext = borders.HasAny && next is not null && SameBorderGroup(p, next);
-        var topBorder = groupedPrev ? borders.InsideHorizontal : borders.Top;
+        var topBorder = continued ? Border.None : groupedPrev ? borders.InsideHorizontal : borders.Top;
         var bottomBorder = groupedNext ? Border.None : borders.Bottom;
         double topExtra = topBorder.IsVisible ? topBorder.Space + topBorder.Width : 0;
         double bottomExtra = bottomBorder.IsVisible ? bottomBorder.Space + bottomBorder.Width : 0;
@@ -219,11 +232,12 @@ internal static class ParagraphLayouter
         double areaRight = x0 + width - props.RightIndent + (borders.Right.IsVisible ? borders.Right.Space + borders.Right.Width : 0);
 
         var slices = new List<Slice>(lines.Count);
-        bool breakBefore = props.PageBreakBefore, columnBreakBefore = false;
+        bool breakBefore = props.PageBreakBefore && !continued, columnBreakBefore = false;
+        int consumed = 0; // atoms in the lines before line i
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
-            bool first = i == 0, last = i == lines.Count - 1;
+            bool first = i == 0 && !continued, last = i == lines.Count - 1;
             double ascent = line.Ascent, descent = line.Descent;
             if (ascent + descent <= 0) (ascent, descent) = (mark.Ascent, mark.Descent);
             var (height, baseline) = LineHeight(props.LineSpacing, ascent, descent);
@@ -244,11 +258,17 @@ internal static class ParagraphLayouter
                 TrailingSpace = last ? spaceAfter : 0,
                 BreakBefore = breakBefore,
                 ColumnBreakBefore = columnBreakBefore,
-                KeepWithPrevious = i > 0 && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
+                KeepWithPrevious = (i > 0 || continued) && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
                                    || (props.WidowControl && (i == 1 || i == lines.Count - 1))),
                 Footnotes = line.Atoms.Where(a => a.Note is { Kind: NoteKind.Footnote }).Select(a => a.Note!).ToList(),
                 Floats = first ? p.Inlines.OfType<FloatingImage>().Where(f => !f.Properties.Hidden).ToList() : [],
             };
+            if (!first && consumed < atoms.Count)
+            {
+                var rest = atoms.GetRange(consumed, atoms.Count - consumed);
+                slice.Reflow = (x, w, o) => Layout(p, prev, next, rest, continued: true, x, w, ctx, o);
+            }
+            consumed += line.Atoms.Count;
             breakBefore = line.EndsWithPageBreak && !line.EndsWithColumnBreak;
             columnBreakBefore = line.EndsWithColumnBreak;
 
