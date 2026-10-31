@@ -150,6 +150,45 @@ internal static class Normalizer
         return 2;
     }
 
+    /// <summary>
+    /// The glyph for a character left whole by normalization: its own, else (HarfBuzz's decompose_current_character)
+    /// the space glyph for a Unicode space or the hyphen's glyph for U+2011 NON-BREAKING HYPHEN.
+    /// </summary>
+    public static ushort NominalGlyph(TrueTypeFont font, int cp)
+    {
+        int glyph = font.GetGlyphId(cp);
+        if (glyph != 0) return (ushort)glyph;
+        if (SpaceFallback(cp) != 0) return (ushort)font.GetGlyphId(0x20);
+        return (ushort)(cp == 0x2011 ? font.GetGlyphId(0x2010) : 0);
+    }
+
+    /// <summary>True when shaping draws <paramref name="cp"/> with a glyph of the font, directly or through normalization.</summary>
+    public static bool Covers(TrueTypeFont font, int cp, Shaper shaper = Shaper.Default) =>
+        NominalGlyph(font, cp) != 0
+        || DecomposeChar(cp, shaper, out int a, out int b) && Covers(font, a, shaper) && (b == 0 || font.GetGlyphId(b) != 0);
+
+    /// <summary>
+    /// For a space HarfBuzz may draw with the font's space glyph, its width as a fraction of the em (n for 1/n),
+    /// or a negative code: -1 the space's own width, -2 4/18 em, -3 a digit, -4 '.' or ',', -5 half a space. 0 for
+    /// other characters.
+    /// </summary>
+    public static int SpaceFallback(int cp) => cp switch
+    {
+        0x0020 or 0x00A0 => -1,
+        0x2001 or 0x2003 or 0x3000 => 1,
+        0x2000 or 0x2002 => 2,
+        0x2004 => 3,
+        0x2005 => 4,
+        0x2009 => 5,
+        0x2006 => 6,
+        0x200A => 16,
+        0x205F => -2,
+        0x2007 => -3,
+        0x2008 => -4,
+        0x202F => -5,
+        _ => 0,
+    };
+
     private const int SBase = 0xAC00, LBase = 0x1100, VBase = 0x1161, TBase = 0x11A7;
     private const int LCount = 19, VCount = 21, TCount = 28, NCount = VCount * TCount, SCount = LCount * NCount;
 

@@ -24,7 +24,8 @@ public static class TextShaper
 
     /// <summary>
     /// True when <paramref name="text"/> needs more than a cmap lookup in <paramref name="font"/>: complex-script
-    /// letters, combining marks, glyphs a default substitution (ligatures such as "fi") may start at, or (with
+    /// letters, combining marks, characters drawn decomposed or with a fallback glyph, glyphs a default
+    /// substitution (ligatures such as "fi") may start at, or (with
     /// <paramref name="kerning"/>) pair kerning.
     /// </summary>
     public static bool NeedsShaping(TrueTypeFont font, string text, bool kerning)
@@ -37,6 +38,7 @@ public static class TextShaper
             if (ScriptRuns.TagOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value))
                 return true;
             int glyph = font.GetGlyphId(rune.Value);
+            if (glyph == 0 && Normalizer.Covers(font, rune.Value)) return true; // decomposed or a fallback glyph
             if (layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, glyph)) return true;
             previous = glyph;
         }
@@ -110,6 +112,7 @@ public static class TextShaper
 
             for (int i = 0; i < glyphs.Count; i++)
                 glyphs[i] = glyphs[i] with { XAdvance = font.GetAdvanceWidth(glyphs[i].Glyph) };
+            ApplySpaceFallback(font, glyphs);
             if (layout.HasPositioning)
             {
                 // Marks do not advance the pen; GPOS positions them relative to their base.
@@ -159,6 +162,35 @@ public static class TextShaper
         return glyphs;
     }
 
+    /// <summary>
+    /// Gives spaces drawn with the font's space glyph (<see cref="Normalizer.NominalGlyph"/>) the width of their
+    /// kind, as HarfBuzz's _hb_ot_shape_fallback_spaces does.
+    /// </summary>
+    internal static void ApplySpaceFallback(TrueTypeFont font, List<GlyphInfo> glyphs)
+    {
+        for (int i = 0; i < glyphs.Count; i++)
+        {
+            var g = glyphs[i];
+            int kind = Normalizer.SpaceFallback(g.CodePoint);
+            if (kind is 0 or -1 || font.GetGlyphId(g.CodePoint) != 0 || g.Text.Length > 1) continue;
+            int em = font.UnitsPerEm;
+            int? advance = kind switch
+            {
+                > 0 => (em + kind / 2) / kind,
+                -2 => em * 4 / 18,
+                -3 => Enumerable.Range('0', 10).Select(font.GetGlyphId).Where(d => d != 0).Select(d => (int?)font.GetAdvanceWidth(d)).FirstOrDefault(),
+                -4 => font.GetGlyphId('.') is not 0 and var p ? font.GetAdvanceWidth(p)
+                    : font.GetGlyphId(',') is not 0 and var c ? font.GetAdvanceWidth(c) : null,
+                _ => g.XAdvance / 2,
+            };
+            if (advance is { } a) glyphs[i] = g with { XAdvance = a };
+        }
+    }
+
+    /// <summary>True when shaping draws <paramref name="codePoint"/> with a glyph of <paramref name="font"/>
+    /// (directly, decomposed, or with a fallback glyph), so no other font is needed for it.</summary>
+    public static bool Covers(TrueTypeFont font, int codePoint) => Normalizer.Covers(font, codePoint);
+
     private static bool IsRegionalIndicator(int cp) => cp is >= 0x1F1E6 and <= 0x1F1FF;
 
     /// <summary>Scripts written right to left (HarfBuzz's hb_script_get_horizontal_direction).</summary>
@@ -172,7 +204,7 @@ public static class TextShaper
     private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars, uint mask) =>
         chars.Select(c =>
         {
-            var gid = font.GetGlyphId(c.CodePoint);
+            var gid = Normalizer.NominalGlyph(font, c.CodePoint);
             return new GlyphInfo
             {
                 Glyph = gid, Cluster = c.Cluster, Text = c.Text, Mask = mask,
