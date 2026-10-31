@@ -45,6 +45,9 @@ internal sealed class Atom
     public int SpaceCount => Kind == AtomKind.Space ? Text.Length : 0;
 
     public bool IsBreak => Kind is AtomKind.LineBreak or AtomKind.PageBreak;
+
+    /// <summary>A <see cref="AtomKind.PageBreak"/> atom that only ends the column.</summary>
+    public bool IsColumnBreak { get; init; }
 }
 
 internal sealed class Line
@@ -53,6 +56,7 @@ internal sealed class Line
     public double Ascent { get; set; }
     public double Descent { get; set; }
     public bool EndsWithPageBreak { get; init; }
+    public bool EndsWithColumnBreak { get; init; }
     public bool EndsWithLineBreak { get; init; }
     public bool IsLast { get; set; }
 
@@ -130,7 +134,11 @@ internal sealed class Itemizer(FontSelector fonts)
                     break;
                 case AtomKind.LineBreak:
                 case AtomKind.PageBreak:
-                    atoms.Add(new Atom { Kind = s.Kind, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before });
+                    atoms.Add(new Atom
+                    {
+                        Kind = s.Kind, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before,
+                        IsColumnBreak = s.Inline is Break { Kind: BreakKind.Column },
+                    });
                     break;
                 default:
                     AddTextAtoms(atoms, s, text, offset, breaks);
@@ -263,6 +271,7 @@ internal static class LineBuilder
             {
                 Atoms = lineAtoms,
                 EndsWithPageBreak = last.Kind == AtomKind.PageBreak,
+                EndsWithColumnBreak = last.IsColumnBreak,
                 EndsWithLineBreak = last.Kind == AtomKind.LineBreak,
             });
             i = end;

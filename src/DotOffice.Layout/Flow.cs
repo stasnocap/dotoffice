@@ -22,6 +22,9 @@ internal class Slice
     /// <summary>Forced page break before this slice.</summary>
     public bool BreakBefore { get; set; }
 
+    /// <summary>Forced column break before this slice (a page break in single-column sections).</summary>
+    public bool ColumnBreakBefore { get; set; }
+
     /// <summary>No page break allowed between the previous slice and this one (keep lines, widows, keep-with-next).</summary>
     public bool KeepWithPrevious { get; set; }
 
@@ -59,28 +62,34 @@ internal static class BlockFlow
         var slices = new List<Slice>();
         if (ctx.Depth > MaxDepth) return slices;
         bool keepWithNext = false;
-        for (int i = 0; i < blocks.Count; i++)
-        {
-            List<Slice> produced;
-            switch (blocks[i])
-            {
-                case Paragraph p:
-                    var prev = i > 0 ? blocks[i - 1] as Paragraph : null;
-                    var next = i + 1 < blocks.Count ? blocks[i + 1] as Paragraph : null;
-                    produced = ParagraphLayouter.Layout(p, prev, next, x0, width, ctx);
-                    break;
-                case Table t:
-                    produced = TableLayouter.Layout(t, x0, width, ctx);
-                    break;
-                default:
-                    continue;
-            }
-            if (produced.Count == 0) continue;
-            if (keepWithNext) produced[0].KeepWithPrevious = true;
-            keepWithNext = blocks[i] is Paragraph { Properties.KeepWithNext: true };
-            slices.AddRange(produced);
-        }
+        for (int i = 0; i < blocks.Count; i++) slices.AddRange(BuildBlock(blocks, i, x0, width, ctx, ref keepWithNext));
         return slices;
+    }
+
+    /// <summary>
+    /// Lays out one block of <paramref name="blocks"/> (neighbors matter for spacing and borders).
+    /// <paramref name="keepWithNext"/> carries the previous block's keep-with-next into this one.
+    /// </summary>
+    public static List<Slice> BuildBlock(IReadOnlyList<Block> blocks, int i, double x0, double width, FlowContext ctx, ref bool keepWithNext)
+    {
+        List<Slice> produced;
+        switch (blocks[i])
+        {
+            case Paragraph p:
+                var prev = i > 0 ? blocks[i - 1] as Paragraph : null;
+                var next = i + 1 < blocks.Count ? blocks[i + 1] as Paragraph : null;
+                produced = ParagraphLayouter.Layout(p, prev, next, x0, width, ctx);
+                break;
+            case Table t:
+                produced = TableLayouter.Layout(t, x0, width, ctx);
+                break;
+            default:
+                return [];
+        }
+        if (produced.Count == 0) return produced;
+        if (keepWithNext) produced[0].KeepWithPrevious = true;
+        keepWithNext = blocks[i] is Paragraph { Properties.KeepWithNext: true };
+        return produced;
     }
 
     /// <summary>Stacks slices without pagination (cells, headers); returns total height.</summary>
@@ -132,7 +141,7 @@ internal static class ParagraphLayouter
         double areaRight = x0 + width - props.RightIndent + (borders.Right.IsVisible ? borders.Right.Space + borders.Right.Width : 0);
 
         var slices = new List<Slice>(lines.Count);
-        bool breakBefore = props.PageBreakBefore;
+        bool breakBefore = props.PageBreakBefore, columnBreakBefore = false;
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
@@ -155,10 +164,12 @@ internal static class ParagraphLayouter
                 LeadingSpace = first ? spaceBefore : 0,
                 TrailingSpace = last ? spaceAfter : 0,
                 BreakBefore = breakBefore,
-                KeepWithPrevious = i > 0 && !breakBefore && (props.KeepLinesTogether
+                ColumnBreakBefore = columnBreakBefore,
+                KeepWithPrevious = i > 0 && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
                                    || (props.WidowControl && (i == 1 || i == lines.Count - 1))),
             };
-            breakBefore = line.EndsWithPageBreak;
+            breakBefore = line.EndsWithPageBreak && !line.EndsWithColumnBreak;
+            columnBreakBefore = line.EndsWithColumnBreak;
 
             if (props.Shading is { } shading)
                 slice.Items.Add(new RectItem(areaLeft, areaTop, areaRight - areaLeft, y - areaTop, shading));

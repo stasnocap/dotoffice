@@ -82,7 +82,7 @@ internal sealed class SectionData
     public SectionStart Start;
     public int? PageNumberStart;
     public PageNumberFormat PageNumberFormat;
-    public int Columns = 1;
+    public SectionColumns Columns = SectionColumns.Single;
     public Dictionary<string, string> Headers { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> Footers { get; } = new(StringComparer.Ordinal);
 }
@@ -209,8 +209,6 @@ internal sealed class DocxContext
     {
         double max = Options.MaxDimension;
         double width = Math.Clamp(d.Width ?? 612, 36, max), height = Math.Clamp(d.Height ?? 792, 36, max);
-        if (d.Columns > 1)
-            WarnOnce("docx.columns", "Multi-column sections are not supported yet; text is laid out in a single column.");
 
         var section = new Section
         {
@@ -224,6 +222,7 @@ internal sealed class DocxContext
             DifferentFirstPage = d.TitlePage,
             PageNumberStart = d.PageNumberStart,
             PageNumberFormat = d.PageNumberFormat,
+            Columns = d.Columns,
             DefaultHeader = HeaderFooterFor(d.Headers, "default") ?? previous?.DefaultHeader,
             FirstHeader = HeaderFooterFor(d.Headers, "first") ?? previous?.FirstHeader,
             EvenHeader = HeaderFooterFor(d.Headers, "even") ?? previous?.EvenHeader,

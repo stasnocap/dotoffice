@@ -616,7 +616,9 @@ internal sealed class StoryReader(DocxContext context, string partName)
                         _ => PageNumberFormat.Decimal,
                     };
                     break;
-                case "cols": d.Columns = Math.Max(1, r.IntAttr("num") ?? 1); break;
+                case "cols":
+                    d.Columns = ReadColumns(r);
+                    continue;
                 case "headerReference":
                     if (r.RAttr("id") is { } hid) d.Headers[r.WAttr("type") ?? "default"] = hid;
                     break;
@@ -627,6 +629,28 @@ internal sealed class StoryReader(DocxContext context, string partName)
             r.Skip();
         }
         return d;
+    }
+
+    private static SectionColumns ReadColumns(XmlReader r)
+    {
+        int count = Math.Clamp(r.IntAttr("num") ?? 1, 1, 45);
+        double spacing = Math.Clamp(r.TwipsAttr("space") ?? 36, 0, 1584);
+        bool separator = r.WAttr("sep") is not null && r.OnOff("sep");
+        bool equal = r.OnOff("equalWidth");
+        var definitions = new List<ColumnDefinition>();
+        int depth = r.Depth;
+        if (r.Enter())
+        {
+            while (r.NextChild(depth))
+            {
+                if (r.IsW() && r.LocalName == "col" && definitions.Count < 45)
+                    definitions.Add(new ColumnDefinition(Math.Clamp(r.TwipsAttr("w") ?? 0, 0, 31_680), Math.Clamp(r.TwipsAttr("space") ?? 0, 0, 1584)));
+                r.Skip();
+            }
+        }
+        // Explicit widths only apply when equalWidth is off; w:num still gives the count otherwise.
+        if (equal || definitions.Count < 2 || definitions.All(d => d.Width <= 0)) definitions.Clear();
+        return new SectionColumns { Count = definitions.Count > 0 ? definitions.Count : count, Spacing = spacing, Definitions = definitions, Separator = separator };
     }
 
     // ---------------------------------------------------------------- tables
