@@ -2,8 +2,10 @@
 """Generates the Unicode tables used for bidirectional text and Arabic shaping:
 
   src/DotOffice.Layout/Bidi/BidiData.g.cs      bidi classes, mirroring pairs, paired brackets (UAX #9)
-  src/DotOffice.Fonts/Shaping/JoiningData.g.cs Arabic joining types (ArabicShaping.txt) and canonical
-                                               combining classes (UnicodeData.txt) for mark reordering
+  src/DotOffice.Fonts/Shaping/JoiningData.g.cs Arabic joining types (ArabicShaping.txt), canonical
+                                               combining classes (UnicodeData.txt) for mark reordering and
+                                               canonical decompositions (UnicodeData.txt,
+                                               CompositionExclusions.txt) for normalization while shaping
 
 Usage: python3 tools/generate-bidi-data.py [directory containing the UCD files]
 Without an argument the files are downloaded from unicode.org (version below).
@@ -18,6 +20,7 @@ FILES = {
     "BidiBrackets.txt": "BidiBrackets.txt",
     "ArabicShaping.txt": "ArabicShaping.txt",
     "UnicodeData.txt": "UnicodeData.txt",
+    "CompositionExclusions.txt": "CompositionExclusions.txt",
 }
 
 # Must match the BidiClass enum order.
@@ -107,6 +110,17 @@ def main():
         combining[lo:cp + 1] = bytes([ccc]) * (cp - lo + 1)
         first = None
 
+    # Canonical decompositions (Hangul syllables are algorithmic). As in HarfBuzz's gen-ucd-table.py, a pair
+    # composes back unless it is a full composition exclusion (listed, or a non-starter composite or decomposition).
+    exclusions = {int(f[0], 16) for f in records(load("CompositionExclusions.txt"))}
+    decompositions = []
+    for fields in records(load("UnicodeData.txt")):
+        cp, dm = int(fields[0], 16), fields[5]
+        if dm and not dm.startswith("<"):
+            parts = [int(p, 16) for p in dm.split()]
+            composes = len(parts) == 2 and cp not in exclusions and not combining[cp] and not combining[parts[0]]
+            decompositions.append((cp, parts[0], parts[1] if len(parts) == 2 else 0, composes))
+
     path = os.path.join(ROOT, "src", "DotOffice.Layout", "Bidi", "BidiData.g.cs")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     starts, values = ranges(bidi)
@@ -137,8 +151,17 @@ def main():
         write_ranges(f, starts, values, "JoiningType of each range (0 = not listed in ArabicShaping.txt).")
         f.write("}\n\ninternal static class CombiningClassData\n{\n")
         write_ranges(f, ccc_starts, ccc_values, "Canonical_Combining_Class of each range.")
-        f.write("}\n")
-    print(f"{len(starts)} joining ranges, {len(ccc_starts)} combining class ranges written to {os.path.normpath(path)}")
+        f.write("}\n\ninternal static class DecompositionData\n{\n")
+        f.write("    /// <summary>\n")
+        f.write("    /// Canonical decompositions, sorted: (character, first part, second part or 0, 1 when the pair composes back\n")
+        f.write("    /// to the character).\n")
+        f.write("    /// </summary>\n")
+        f.write("    public static ReadOnlySpan<int> Decompositions => new int[]\n    {\n")
+        for i in range(0, len(decompositions), 4):
+            f.write("        " + " ".join(f"0x{u:X}, 0x{a:X}, 0x{b:X}, {int(c)}," for u, a, b, c in decompositions[i:i + 4]) + "\n")
+        f.write("    };\n}\n")
+    print(f"{len(starts)} joining ranges, {len(ccc_starts)} combining class ranges, {len(decompositions)} decompositions "
+          f"written to {os.path.normpath(path)}")
 
 
 if __name__ == "__main__":

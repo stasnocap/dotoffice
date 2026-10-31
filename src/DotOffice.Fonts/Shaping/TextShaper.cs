@@ -12,25 +12,34 @@ public readonly record struct ShapedGlyph(ushort GlyphId, int Cluster, string Te
 internal enum JoiningType : byte { NotListed, U, R, L, D, C, T }
 
 /// <summary>
-/// Basic OpenType shaping: Arabic-style joining forms (isol/fina/medi/init), required and contextual
-/// ligatures, kerning and mark positioning from the font's GSUB/GPOS tables. Indic scripts go to the
-/// <see cref="IndicShaper"/>; Sinhala, Tibetan, Myanmar and Khmer are not handled (their glyphs are mapped one to one).
+/// Basic OpenType shaping, after HarfBuzz's default, Arabic and Hebrew shapers: normalization, Arabic-style
+/// joining forms (isol/fina/medi/init), ligatures, kerning and mark positioning from the font's GSUB/GPOS tables.
+/// Indic scripts go to the <see cref="IndicShaper"/>; Sinhala, Tibetan, Myanmar and Khmer are not handled (their
+/// glyphs are mapped one to one).
 /// </summary>
 public static class TextShaper
 {
     private const uint Isol = 1, Fina = 2, Medi = 4, Init = 8, Common = 16, Kern = 32, Marks = 64;
 
     /// <summary>
-    /// True when <paramref name="text"/> needs more than a cmap lookup: complex-script letters, combining
-    /// marks or (with <paramref name="kerning"/>) pair kerning.
+    /// True when <paramref name="text"/> needs more than a cmap lookup in <paramref name="font"/>: complex-script
+    /// letters, combining marks, glyphs a default substitution (ligatures such as "fi") may start at, or (with
+    /// <paramref name="kerning"/>) pair kerning.
     /// </summary>
-    public static bool NeedsShaping(string text, bool kerning)
+    public static bool NeedsShaping(TrueTypeFont font, string text, bool kerning)
     {
         if (kerning) return true;
+        var layout = font.OpenTypeLayout;
+        int previous = -1;
         foreach (var rune in text.EnumerateRunes())
+        {
             if (ScriptOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value))
                 return true;
-        return false;
+            int glyph = font.GetGlyphId(rune.Value);
+            if (layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, glyph)) return true;
+            previous = glyph;
+        }
+        return layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, -1);
     }
 
     /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented: Sinhala, Tibetan, Myanmar, Khmer.</summary>
@@ -39,15 +48,16 @@ public static class TextShaper
 
     /// <summary>
     /// Shapes one run of text in one font. <paramref name="rightToLeft"/> only affects how mark offsets are
-    /// expressed (glyphs are returned in logical order either way).
+    /// expressed (glyphs are returned in logical order either way). Without <paramref name="ligatures"/> the
+    /// optional ligatures (liga, clig) are off, as LibreOffice does for text with character spacing.
     /// </summary>
-    public static ShapedGlyph[] Shape(TrueTypeFont font, string text, bool rightToLeft, bool kerning)
+    public static ShapedGlyph[] Shape(TrueTypeFont font, string text, bool rightToLeft, bool kerning, bool ligatures = true)
     {
         if (!rightToLeft && text.EnumerateRunes().Any(r => IndicShaper.IsIndic(r.Value)))
         {
             try
             {
-                if (IndicShaper.Shape(font, text) is { } indic)
+                if (IndicShaper.Shape(font, text, ligatures) is { } indic)
                     return indic.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
             }
             catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
@@ -58,25 +68,31 @@ public static class TextShaper
         var codePoints = new List<(int CodePoint, int Cluster)>(text.Length);
         for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
             codePoints.Add((char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i], i));
-        ReorderMarks(codePoints);
-        var glyphs = Nominal(font, codePoints, Common | Kern | Marks);
-
         string script = "DFLT";
         foreach (var (cp, _) in codePoints)
             if (ScriptOf(cp) is { } s) { script = s; if (s != "latn") break; }
         bool joining = script is "arab" or "syrc" or "nko ";
         bool complex = joining || script == "hebr";
-        if (joining) SetJoiningForms(codePoints.Select(c => c.CodePoint).ToList(), glyphs);
 
         var layout = font.OpenTypeLayout;
+        var chars = Normalizer.Normalize(font, codePoints,
+            joining ? Normalizer.Shaper.Arabic : script == "hebr" ? Normalizer.Shaper.Hebrew : Normalizer.Shaper.Default,
+            hasGposMark: layout.Lookups(true, script, [("mark", Marks)]).Count > 0);
+        var glyphs = Nominal(font, chars, Common | Kern | Marks);
+        if (joining) SetJoiningForms(chars.Select(c => c.CodePoint).ToList(), glyphs);
+
         try
         {
-            string[][] stages = joining
-                ? [["ccmp", "locl"], ["isol"], ["fina"], ["medi"], ["init"], ["rlig"], ["calt", "liga"]]
-                : [["ccmp", "locl"], ["rlig"]];
+            // HarfBuzz's stages: the Arabic shaper pauses after rlig and (unless the font has rclt) after calt;
+            // the default shaper applies all its features together.
+            string[][] stages = !joining ? [["ccmp", "locl", "rlig", "calt", "clig", "liga", "rclt"]]
+                : layout.Lookups(false, script, [Feature("rclt")]).Count > 0
+                    ? [["ccmp", "locl"], ["isol"], ["fina"], ["medi"], ["init"], ["rlig"], ["calt", "clig", "liga", "rclt"]]
+                    : [["ccmp", "locl"], ["isol"], ["fina"], ["medi"], ["init"], ["rlig"], ["calt"], ["clig", "liga"]];
             if (layout.HasSubstitutions)
                 foreach (var stage in stages)
-                    layout.Apply(false, glyphs, layout.Lookups(false, script, stage.Select(Feature).ToList()));
+                    layout.Apply(false, glyphs, layout.Lookups(false, script,
+                        stage.Where(f => ligatures || f is not ("liga" or "clig")).Select(Feature).ToList()));
 
             for (int i = 0; i < glyphs.Count; i++)
                 glyphs[i] = glyphs[i] with { XAdvance = font.GetAdvanceWidth(glyphs[i].Glyph) };
@@ -94,71 +110,23 @@ public static class TextShaper
         }
         catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
         {
-            glyphs = Nominal(font, codePoints, 0); // malformed layout tables: fall back to nominal glyphs
+            glyphs = Nominal(font, chars, 0); // malformed layout tables: fall back to nominal glyphs
         }
         HideIgnorables(font, glyphs);
         return glyphs.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
     }
 
-    private static List<GlyphInfo> Nominal(TrueTypeFont font, List<(int CodePoint, int Cluster)> codePoints, uint mask) =>
-        codePoints.Select(c =>
+    private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars, uint mask) =>
+        chars.Select(c =>
         {
             var gid = font.GetGlyphId(c.CodePoint);
             return new GlyphInfo
             {
-                Glyph = gid, Cluster = c.Cluster, Text = char.ConvertFromUtf32(c.CodePoint), Mask = mask,
+                Glyph = gid, Cluster = c.Cluster, Text = c.Text, Mask = mask,
                 XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1, CodePoint = c.CodePoint,
                 Ignorable = IsDefaultIgnorable(c.CodePoint),
             };
         }).ToList();
-
-    /// <summary>
-    /// Canonical ordering of combining marks (stable sort of each mark sequence by combining class), so mark
-    /// stacking does not depend on typing order. Like HarfBuzz, Hebrew shin/sin dots sort right after the base
-    /// and the Arabic shadda before the vowel marks.
-    /// </summary>
-    internal static void ReorderMarks(List<(int CodePoint, int Cluster)> codePoints)
-    {
-        for (int i = 0; i < codePoints.Count; i++)
-        {
-            if (CombiningClass(codePoints[i].CodePoint) == 0) continue;
-            int end = i;
-            while (end < codePoints.Count && CombiningClass(codePoints[end].CodePoint) != 0) end++;
-            if (end - i > 1)
-            {
-                var sorted = codePoints.GetRange(i, end - i).OrderBy(c => CombiningClass(c.CodePoint)).ToList(); // OrderBy is stable
-                for (int k = 0; k < sorted.Count; k++) codePoints[i + k] = sorted[k];
-            }
-            i = end;
-        }
-    }
-
-    /// <summary>
-    /// HarfBuzz's modified combining classes: Hebrew and Arabic points in a typographic order (shin/sin dot and
-    /// shadda first), Telugu length marks before the virama, and a few Thai, Lao and Tibetan vowels moved.
-    /// </summary>
-    private static readonly Dictionary<int, int> ModifiedClasses = new()
-    {
-        [10] = 22, [11] = 15, [12] = 16, [13] = 17, [14] = 23, [15] = 18, [16] = 19, [17] = 20, [18] = 21, [19] = 14,
-        [20] = 24, [21] = 12, [22] = 25, [23] = 13, [24] = 10, [25] = 11, [26] = 26,
-        [27] = 28, [28] = 29, [29] = 30, [30] = 31, [31] = 32, [32] = 33, [33] = 27, [34] = 34, [35] = 35, [36] = 36,
-        [84] = 4, [91] = 5, [103] = 3, [130] = 132, [132] = 131,
-    };
-
-    private static int CombiningClass(int cp)
-    {
-        if (cp is 0x1A60 or 0x0FC6) return 254;
-        if (cp == 0x0F39) return 127;
-        var starts = CombiningClassData.RangeStarts;
-        int lo = 0, hi = starts.Length - 1;
-        while (lo < hi)
-        {
-            int mid = (lo + hi + 1) >> 1;
-            if (starts[mid] <= cp) lo = mid; else hi = mid - 1;
-        }
-        int ccc = CombiningClassData.RangeValues[lo];
-        return ModifiedClasses.GetValueOrDefault(ccc, ccc);
-    }
 
     private static (string, uint) Feature(string tag) => tag switch
     {

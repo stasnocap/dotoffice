@@ -73,9 +73,10 @@ internal static class IndicShaper
 
     /// <summary>
     /// Shapes <paramref name="text"/>; returns null when the font was not designed for the script (no Indic script
-    /// tag in GSUB), in which case the default shaping applies, as in HarfBuzz.
+    /// tag in GSUB), in which case the default shaping applies, as in HarfBuzz. Without <paramref name="ligatures"/>
+    /// clig is off.
     /// </summary>
-    public static List<GlyphInfo>? Shape(TrueTypeFont font, string text)
+    public static List<GlyphInfo>? Shape(TrueTypeFont font, string text, bool ligatures = true)
     {
         Config? config = null;
         foreach (var rune in text.EnumerateRunes())
@@ -103,7 +104,8 @@ internal static class IndicShaper
         // The remaining Indic features apply together, per syllable, with the common ones (liga is off for Indic).
         var last = plan.Lookups(["init"], Init, perSyllable: true, manualJoiners: true)
             .Concat(plan.Lookups(["pres", "abvs", "blws", "psts", "haln"], Global, perSyllable: true, manualJoiners: true))
-            .Concat(plan.Lookups(["rlig", "calt", "clig", "rclt"], Global, perSyllable: false, manualJoiners: false))
+            .Concat(plan.Lookups(ligatures ? ["rlig", "calt", "clig", "rclt"] : ["rlig", "calt", "rclt"], Global,
+                perSyllable: false, manualJoiners: false))
             .GroupBy(l => l.Lookup).Select(g => (g.Key, g.Aggregate(0u, (m, l) => m | l.Mask))).OrderBy(l => l.Key).ToList();
         layout.Apply(false, glyphs, last);
 
@@ -182,34 +184,16 @@ internal static class IndicShaper
 
     // ------------------------------------------------------------------ text preparation
 
-    private static readonly Dictionary<int, (int First, int Second)> Decompositions =
-        IndicData.Decompositions.ToDictionary(d => d.Composite, d => (d.First, d.Second));
-
-    private static readonly Dictionary<(int, int), int> Compositions =
-        IndicData.Decompositions.Where(d => !d.Excluded).ToDictionary(d => (d.First, d.Second), d => d.Composite);
-
     /// <summary>
     /// HarfBuzz's COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT normalization: decompose (when the font has the parts), order
     /// marks canonically, then recompose a letter and following mark when the font has the composite.
     /// </summary>
-    private static List<(int CodePoint, int Cluster)> Normalize(TrueTypeFont font, string text)
+    private static List<NormalizedChar> Normalize(TrueTypeFont font, string text)
     {
         var codePoints = new List<(int CodePoint, int Cluster)>(text.Length);
         for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
             codePoints.Add((char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i], i));
-        var result = new List<(int CodePoint, int Cluster)>(codePoints.Count);
-        foreach (var (cp, cluster) in ApplyVowelConstraints(codePoints)) Decompose(font, cp, cluster, result);
-        TextShaper.ReorderMarks(result);
-        for (int i = result.Count - 1; i > 0; i--)
-        {
-            var (a, b) = (result[i - 1].CodePoint, result[i].CodePoint);
-            if (TextShaper.IsMark(a)) continue; // do not recompose split matras
-            int composite = a == 0x09AF && b == 0x09BC ? 0x09DF : Compositions.GetValueOrDefault((a, b));
-            if (composite == 0 || font.GetGlyphId(composite) == 0) continue;
-            result[i - 1] = (composite, result[i - 1].Cluster);
-            result.RemoveAt(i);
-        }
-        return result;
+        return Normalizer.Normalize(font, ApplyVowelConstraints(codePoints).ToList(), Normalizer.Shaper.Indic);
     }
 
     /// <summary>
@@ -251,28 +235,15 @@ internal static class IndicShaper
         }
     }
 
-    private static void Decompose(TrueTypeFont font, int cp, int cluster, List<(int, int)> output)
+    private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars)
     {
-        // RRA, Bengali RRA/RHA and Tamil AU are kept whole.
-        if (cp is not (0x0931 or 0x09DC or 0x09DD or 0x0B94) && Decompositions.TryGetValue(cp, out var parts)
-            && font.GetGlyphId(parts.Second) != 0 && (font.GetGlyphId(parts.First) != 0 || Decompositions.ContainsKey(parts.First)))
-        {
-            Decompose(font, parts.First, cluster, output);
-            output.Add((parts.Second, cluster));
-            return;
-        }
-        output.Add((cp, cluster));
-    }
-
-    private static List<GlyphInfo> Nominal(TrueTypeFont font, List<(int CodePoint, int Cluster)> codePoints)
-    {
-        var glyphs = new List<GlyphInfo>(codePoints.Count);
-        foreach (var (cp, cluster) in codePoints)
+        var glyphs = new List<GlyphInfo>(chars.Count);
+        foreach (var (cp, cluster, text) in chars)
         {
             var (category, position) = Properties(cp);
             glyphs.Add(new GlyphInfo
             {
-                Glyph = (ushort)font.GetGlyphId(cp), Cluster = cluster, Text = char.ConvertFromUtf32(cp), Mask = Global,
+                Glyph = (ushort)font.GetGlyphId(cp), Cluster = cluster, Text = text, Mask = Global,
                 XAdvance = 0, AttachTo = -1, CursiveTo = -1, CodePoint = cp, ShaperCategory = (byte)category,
                 ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp),
             });
