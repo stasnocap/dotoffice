@@ -180,4 +180,12 @@ public class TextShaperTests
         Assert.True(TextShaper.Covers(Latin, 0x2260)); // ≠: "=" and U+0338
         Assert.False(TextShaper.Covers(Arabic, 'a'));
     }
+
+    [Fact]
+    public void Default_ignorables_lose_their_width_before_marks_are_positioned()
+    {
+        // U+1D173 is not in the font (.notdef, 600 wide) but is ignorable: the grave still sits on the o.
+        Assert.Equal([(82, 605, 0, 0), (3, 0, 0, 0), (2664, 0, 61, 0)],
+            Positions(TextShaper.Shape(Latin, "o\U0001D173\u0300", rightToLeft: false, kerning: true)));
+    }
 }

@@ -116,6 +116,7 @@ internal static class IndicShaper
             const uint manual = Global | OpenTypeLayout.ManualJoiners; // mark and mkmk see ZWJ/ZWNJ, as in HarfBuzz
             layout.Apply(true, glyphs, layout.Lookups(true, gposTag,
                 [("abvm", Global), ("blwm", Global), ("mark", manual), ("mkmk", manual), ("curs", Global), ("dist", Global), ("kern", Global)]));
+            TextShaper.ZeroIgnorables(glyphs);
             TextShaper.ResolveAttachments(glyphs, rightToLeft: false);
         }
         TextShaper.HideIgnorables(font, glyphs);
@@ -237,14 +238,14 @@ internal static class IndicShaper
     private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars)
     {
         var glyphs = new List<GlyphInfo>(chars.Count);
-        foreach (var (cp, cluster, text) in chars)
+        foreach (var (cp, cluster, text, hidden) in chars)
         {
             var (category, position) = Properties(cp);
             glyphs.Add(new GlyphInfo
             {
                 Glyph = Normalizer.NominalGlyph(font, cp), Cluster = cluster, Text = text, Mask = Global,
                 XAdvance = 0, AttachTo = -1, CursiveTo = -1, CodePoint = cp, ShaperCategory = (byte)category,
-                ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp),
+                ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp), Hidden = hidden,
             });
         }
         return glyphs;

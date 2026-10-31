@@ -42,6 +42,9 @@ internal struct GlyphInfo
     /// <summary>Made from a default-ignorable character (ZWJ, ZWNJ…), hidden after shaping.</summary>
     public bool Ignorable;
 
+    /// <summary>A default ignorable GSUB must not skip (see <see cref="NormalizedChar.Hidden"/>).</summary>
+    public bool Hidden;
+
     /// <summary>
     /// Ligature membership (HarfBuzz's lig_props): a ligature and the marks inside it share a non-zero id; a mark's
     /// component is the 1-based ligature component it belongs to (0 for the ligature itself).
@@ -552,11 +555,11 @@ internal sealed class OpenTypeLayout
 
     /// <summary>
     /// Whether a default-ignorable glyph may be skipped: ZWNJ in GPOS (or in GSUB context with automatic joiners),
-    /// ZWJ in context or with automatic joiners, others always (HarfBuzz's may_skip).
+    /// ZWJ in context or with automatic joiners, hidden ones in GPOS, others always (HarfBuzz's may_skip).
     /// </summary>
     private static bool MaySkip(Context ctx, in GlyphInfo g, bool context)
     {
-        if (!g.Ignorable) return false;
+        if (!g.Ignorable || g.Hidden && !ctx.Gpos) return false;
         bool autoJoiners = !ctx.ManualJoiners;
         bool ignoreZwnj = ctx.Gpos || (context && autoJoiners), ignoreZwj = context || autoJoiners;
         return (ignoreZwnj || g.CodePoint != 0x200C) && (ignoreZwj || g.CodePoint != 0x200D);
