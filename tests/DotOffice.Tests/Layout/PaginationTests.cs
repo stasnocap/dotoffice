@@ -9,7 +9,7 @@ public class PaginationTests
     /// <summary>A section whose body holds exactly <paramref name="lines"/> single-spaced lines of 10pt Noto Sans.</summary>
     private static Section LinesPerPage(int lines)
     {
-        double lineHeight = Math.Max(Noto.WinAscent + Noto.WinDescent, Noto.Ascender - Noto.Descender + Noto.LineGap) * 10.0 / Noto.UnitsPerEm;
+        double lineHeight = NotoLineHeight();
         double body = lineHeight * lines + 0.5;
         return new Section { PageHeight = 144 + body, Margins = new Thickness(72, 72, 72, 72) };
     }

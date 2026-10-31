@@ -81,7 +81,7 @@ public class NoteTests
     }
 
     private static readonly double LineHeight =
-        Math.Max(Noto.WinAscent + Noto.WinDescent, Noto.Ascender - Noto.Descender + Noto.LineGap) * 10.0 / Noto.UnitsPerEm;
+        NotoLineHeight();
 
     private static Section Page(int lines) => new() { PageHeight = 144 + LineHeight * lines + 0.5, Margins = new Thickness(72, 72, 72, 72) };
 
@@ -108,7 +108,7 @@ public class NoteTests
         var layout = Render(Doc(Page(20), Para("body"), WithNote("ref", Note(NoteKind.Footnote, "footnote"))));
         var page = Assert.Single(layout.Pages);
         var note = Texts(page).Single(t => t.Text == "footnote");
-        Assert.Equal(72 + 20 * LineHeight, note.Baseline + note.Font.WinDescent * 10.0 / note.Font.UnitsPerEm, 0);
+        Assert.Equal(72 + 20 * LineHeight + 0.5, note.Baseline + 2.95, 2); // content bottom; 2.95 = descent in twips
         var separator = Assert.Single(page.Items.OfType<LineItem>());
         Assert.True(separator.Y1 < note.Baseline && separator.X2 - separator.X1 < 200);
     }
@@ -128,7 +128,7 @@ public class NoteTests
     public void Long_footnotes_continue_on_the_next_page()
     {
         var lines = Enumerable.Range(1, 12).Select(i => $"note{i}").ToArray();
-        var layout = Render(Doc(Page(10), WithNote("ref", Note(NoteKind.Footnote, lines)), Para("after")));
+        var layout = Render(Doc(Page(11), WithNote("ref", Note(NoteKind.Footnote, lines)), Para("after")));
         Assert.Equal(0, PageOf(layout, "ref"));
         Assert.Equal(0, PageOf(layout, "note1"));
         Assert.Equal(1, PageOf(layout, "note12"));

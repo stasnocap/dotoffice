@@ -9,7 +9,7 @@ namespace DotOffice.Tests.Layout;
 public class ColumnTests
 {
     private static readonly double LineHeight =
-        Math.Max(Noto.WinAscent + Noto.WinDescent, Noto.Ascender - Noto.Descender + Noto.LineGap) * 10.0 / Noto.UnitsPerEm;
+        NotoLineHeight();
 
     /// <summary>A section whose columns hold exactly <paramref name="lines"/> lines; content area is 468pt wide.</summary>
     private static Section Section(int lines, SectionColumns columns, SectionStart start = SectionStart.NextPage) => new()

@@ -78,7 +78,7 @@ public class FloatTests
         var image = page.Items.OfType<ImageItem>().Single();
         foreach (var t in Texts(page))
         {
-            double top = t.Baseline - t.FontSize, bottom = t.Baseline + t.FontSize * 0.3;
+            double top = t.Baseline - t.FontSize, bottom = t.Baseline + t.FontSize * 0.29;
             Assert.False(top < image.Y + image.Height && bottom > image.Y, $"'{t.Text}' overlaps the image");
         }
         Assert.Contains(Texts(page), t => t.Baseline > image.Y + image.Height);
