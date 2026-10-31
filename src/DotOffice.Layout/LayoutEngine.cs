@@ -228,7 +228,7 @@ public sealed class LayoutEngine
                     keepWithNext = keep;
                     slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
                 }
-                for (int j = 0; j < slices.Count; j++)
+                for (int j = 0, rebuilds = 0; j < slices.Count; j++)
                 {
                     // A paragraph continuing in a column of another width is broken again for that width.
                     if (slices[j] is { Reflow: { } reflow, BreakBefore: false, ColumnBreakBefore: false } && paginator.StartsInNextColumn(slices[j]))
@@ -241,6 +241,21 @@ public sealed class LayoutEngine
                         }
                     }
                     paginator.Add(slices[j], x);
+
+                    // Lines moved on into a column of another width (keep-with-next, widow control): lay them out again there.
+                    if (Math.Abs(paginator.Column.Width - width) < 0.5 || rebuilds >= 4) continue;
+                    int k = paginator.TrailingInColumn(slices, j);
+                    if (k < 0 || (k > 0 && slices[k].Reflow is null)) continue;
+                    paginator.Unplace(slices.GetRange(k, j - k + 1));
+                    rebuilds++;
+                    (x, width) = paginator.Column;
+                    if (k == 0)
+                    {
+                        keepWithNext = keep;
+                        slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
+                    }
+                    else slices = [.. slices.Take(k), .. slices[k].Reflow!(x, width, paginator.Obstacles)];
+                    j = k - 1;
                 }
             }
             int index = document.Sections.IndexOf(section);
@@ -721,6 +736,48 @@ public sealed class LayoutEngine
             }
         }
 
+        /// <summary>
+        /// The index of the first of <paramref name="slices"/>[0..<paramref name="last"/>] that, with all after it,
+        /// ends the current column; -1 when the current column does not end with them.
+        /// </summary>
+        public int TrailingInColumn(List<Slice> slices, int last)
+        {
+            var page = Current;
+            int k = last, p = page.Placed.Count - 1;
+            if (p < page.ColumnStart || !ReferenceEquals(page.Placed[p].Slice, slices[last])) return -1;
+            while (k > 0 && p > page.ColumnStart && ReferenceEquals(page.Placed[p - 1].Slice, slices[k - 1])) { k--; p--; }
+            return k;
+        }
+
+        /// <summary>Removes <paramref name="slices"/>, the last placements of the current column, with their footnotes.</summary>
+        public void Unplace(List<Slice> slices)
+        {
+            var page = Current;
+            int start = page.Placed.Count - slices.Count;
+            page.Placed.RemoveRange(start, slices.Count);
+            ForgetNotes(page, slices);
+            if (start > page.ColumnStart)
+            {
+                var last = page.Placed[^1];
+                page.Cursor = last.Y + last.Slice.Height + last.Slice.TrailingSpace;
+            }
+            else page.Cursor = page.Region.Top;
+            var region = page.Region;
+            region.Bottom = page.Placed.Where(p => ReferenceEquals(p.Region, region))
+                                .Select(p => p.Y + p.Slice.Height + p.Slice.TrailingSpace).DefaultIfEmpty(region.Top).Max();
+        }
+
+        /// <summary>Takes back the footnotes of <paramref name="slices"/> so they are placed again with them.</summary>
+        private void ForgetNotes(Page page, IReadOnlyCollection<Slice> slices)
+        {
+            if (!slices.Any(s => s.Footnotes.Count > 0)) return;
+            var owners = slices.ToHashSet();
+            var notes = slices.SelectMany(s => s.Footnotes).ToHashSet<Note>(ReferenceEqualityComparer.Instance);
+            foreach (var note in notes) _placedNotes.Remove(note);
+            carry.RemoveAll(line => notes.Contains(line.Note));
+            foreach (var area in page.NoteAreas) area.Lines.RemoveAll(n => n.Owner is not null && owners.Contains(n.Owner));
+        }
+
         /// <summary>Moves the run of slices bound to <paramref name="slice"/> to the next column, if that helps.</summary>
         private bool MoveChain(Page page, Slice slice, double builtX)
         {
@@ -734,14 +791,7 @@ public sealed class LayoutEngine
             var moved = page.Placed.GetRange(start, page.Placed.Count - start);
             page.Placed.RemoveRange(start, page.Placed.Count - start);
             // Their footnotes move with them.
-            var owners = moved.Select(m => m.Slice).ToHashSet();
-            if (moved.Any(m => m.Slice.Footnotes.Count > 0))
-            {
-                var notes = moved.SelectMany(m => m.Slice.Footnotes).ToHashSet<Note>(ReferenceEqualityComparer.Instance);
-                foreach (var note in notes) _placedNotes.Remove(note);
-                carry.RemoveAll(line => notes.Contains(line.Note));
-                foreach (var area in page.NoteAreas) area.Lines.RemoveAll(n => n.Owner is not null && owners.Contains(n.Owner));
-            }
+            ForgetNotes(page, moved.Select(m => m.Slice).ToList());
             var last = page.Placed[^1];
             page.Cursor = last.Y + last.Slice.Height + last.Slice.TrailingSpace;
             NextColumn();
