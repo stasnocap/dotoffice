@@ -288,7 +288,8 @@ internal sealed class Itemizer(FontSelector fonts)
                 if (char.IsLowSurrogate(text[i])) { i++; continue; }
                 int next = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
                 if (field is null && level(offset + i) != atomLevel) break;
-                if (field is null && !isSpace && !IsCombining(next)
+                // Marks and joiners stay with their letter (in its font), as in LibreOffice's grapheme clusters.
+                if (field is null && !isSpace && !IsCombining(next) && next is not (0x200C or 0x200D)
                     && (FontSelector.UsesComplexScript(props, next) != complex || !ReferenceEquals(fonts.ForCharacterWithFallback(props, next).Font, font.Font)))
                     break;
                 i += char.IsSurrogatePair(text, i) ? 2 : 1;
