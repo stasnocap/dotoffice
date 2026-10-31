@@ -128,7 +128,8 @@ public sealed class LayoutEngine
         bool pageRefs = false;
         var bodyContext = Context(settings, field =>
         {
-            if (field.Kind != FieldKind.PageRef) return "1";
+            // Page numbers are only known after pagination: reserve two digits, which fits most documents.
+            if (field.Kind != FieldKind.PageRef) return "99";
             pageRefs = true;
             return bookmarks is not null && field.Bookmark is not null && bookmarks.TryGetValue(field.Bookmark, out var label)
                 ? Format(label.Number, field.NumberFormat ?? label.Format)
