@@ -13,6 +13,7 @@ public sealed class TrueTypeFont
     private readonly Dictionary<string, (int Offset, int Length)> _tables;
     private readonly Dictionary<int, ushort> _cmap;
     private readonly ushort[] _advanceWidths;
+    private readonly short[] _leftSideBearings;
     private readonly int[] _loca;
     private Shaping.OpenTypeLayout? _layout;
 
@@ -103,12 +104,15 @@ public sealed class TrueTypeFont
         int numberOfHMetrics = U16(hhea + 34);
 
         _advanceWidths = new ushort[NumGlyphs];
-        int hmtx = Table("hmtx");
+        _leftSideBearings = new short[NumGlyphs];
+        var (hmtx, hmtxLength) = _tables["hmtx"];
         ushort last = 0;
         for (int g = 0; g < NumGlyphs; g++)
         {
             if (g < numberOfHMetrics) last = (ushort)U16(hmtx + g * 4);
             _advanceWidths[g] = last;
+            int lsb = g < numberOfHMetrics ? g * 4 + 2 : numberOfHMetrics * 4 + (g - numberOfHMetrics) * 2;
+            if (lsb + 2 <= hmtxLength) _leftSideBearings[g] = S16(hmtx + lsb);
         }
 
         _loca = new int[NumGlyphs + 1];
@@ -180,6 +184,20 @@ public sealed class TrueTypeFont
 
     /// <summary>Advance width in font units.</summary>
     public int GetAdvanceWidth(ushort glyphId) => glyphId < NumGlyphs ? _advanceWidths[glyphId] : 0;
+
+    /// <summary>
+    /// Ink extents of a glyph in font units as HarfBuzz reports them: the left side bearing from hmtx, the top
+    /// (yMax) and a negative height; zero for an empty glyph, null for an id outside the font.
+    /// </summary>
+    internal (int XBearing, int YBearing, int Width, int Height)? GetGlyphExtents(ushort glyphId)
+    {
+        if (glyphId >= NumGlyphs) return null;
+        var data = GetGlyphData(glyphId);
+        if (data.Length < 10 || BinaryPrimitives.ReadInt16BigEndian(data) == 0) return (0, 0, 0, 0);
+        int xMin = BinaryPrimitives.ReadInt16BigEndian(data[2..]), yMin = BinaryPrimitives.ReadInt16BigEndian(data[4..]);
+        int xMax = BinaryPrimitives.ReadInt16BigEndian(data[6..]), yMax = BinaryPrimitives.ReadInt16BigEndian(data[8..]);
+        return (_leftSideBearings[glyphId], Math.Max(yMin, yMax), Math.Abs(xMax - xMin), Math.Min(yMin, yMax) - Math.Max(yMin, yMax));
+    }
 
     /// <summary>Measures text width in points at the given size (no kerning or shaping).</summary>
     public double MeasureText(string text, double fontSize)

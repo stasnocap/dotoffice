@@ -323,6 +323,13 @@ internal static class Normalizer
     {
         if (cp is 0x1A60 or 0x0FC6) return 254;
         if (cp == 0x0F39) return 127;
+        int ccc = RawCombiningClass(cp);
+        return ModifiedClasses.GetValueOrDefault(ccc, ccc);
+    }
+
+    /// <summary>The Unicode Canonical_Combining_Class, without HarfBuzz's modifications.</summary>
+    internal static int RawCombiningClass(int cp)
+    {
         var starts = CombiningClassData.RangeStarts;
         int lo = 0, hi = starts.Length - 1;
         while (lo < hi)
@@ -330,7 +337,6 @@ internal static class Normalizer
             int mid = (lo + hi + 1) >> 1;
             if (starts[mid] <= cp) lo = mid; else hi = mid - 1;
         }
-        int ccc = CombiningClassData.RangeValues[lo];
-        return ModifiedClasses.GetValueOrDefault(ccc, ccc);
+        return CombiningClassData.RangeValues[lo];
     }
 }

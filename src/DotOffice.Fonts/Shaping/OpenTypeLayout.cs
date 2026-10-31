@@ -252,6 +252,9 @@ internal sealed class OpenTypeLayout
     }
 
     /// <summary>GDEF glyph class: 1 base, 2 ligature, 3 mark, 4 component, 0 unknown.</summary>
+    /// <summary>True when GDEF has a glyph class definition.</summary>
+    public bool HasGlyphClasses => _gdef.Length >= 12 && U16(_gdef, 4) != 0;
+
     public int GlyphClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 4), glyph) : 0;
 
     private int MarkAttachClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 10), glyph) : 0;
