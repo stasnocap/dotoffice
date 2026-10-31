@@ -18,19 +18,46 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+      - name: Install PDF tools and fonts
+        if: runner.os == 'Linux'
+        # qpdf/poppler let the end-to-end tests validate their output; the fonts are the
+        # metric-compatible substitutes for Calibri/Cambria/Arial/Times/Courier used by the sample.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qpdf poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
       - run: dotnet build -c Release
       - run: dotnet test -c Release --no-build
-      - name: Validate sample PDF
+      - name: Validate sample PDFs
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y qpdf poppler-utils
-          dotnet run -c Release --project samples/DotOffice.Samples -- \
+          dotnet run -c Release --no-build --project samples/DotOffice.Samples -- \
             tests/DotOffice.Tests/Assets/NotoSans-Regular.ttf tests/DotOffice.Tests/Assets/gradient.jpg hello.pdf
           qpdf --check hello.pdf
           pdffonts hello.pdf
           pdftotext hello.pdf - | grep -q "Привет, мир!"
+
+          dotnet run -c Release --no-build --project samples/DotOffice.Samples -- showcase showcase.docx tests/DotOffice.Tests/Assets/gradient.jpg
+          dotnet run -c Release --no-build --project samples/DotOffice.Samples -- convert showcase.docx showcase.pdf | tee convert.log
+          qpdf --check showcase.pdf
+          pdffonts showcase.pdf
+          pdfinfo showcase.pdf | tee info.log
+          grep -q "Title: *DotOffice showcase" info.log
+          pdftotext -layout showcase.pdf showcase.txt
+          for text in "DotOffice showcase" "1. Character formatting" "Nested item a" "Spans two columns" "Row 40 of a table" "7. Landscape section"; do
+            grep -q "$text" showcase.txt || { echo "missing: $text"; exit 1; }
+          done
+          pages=$(pdfinfo showcase.pdf | awk '/^Pages:/ {print $2}')
+          grep -q "Page 1 of $pages" showcase.txt
+          grep -q "Page $pages of $pages" showcase.txt
+          # Carlito/Caladea must be used for Calibri/Cambria when installed.
+          pdffonts showcase.pdf | grep -q Carlito
+          pdftoppm -r 60 -png showcase.pdf showcase-page
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'
         with:
-          name: hello-pdf
-          path: hello.pdf
+          name: sample-pdfs
+          path: |
+            hello.pdf
+            showcase.docx
+            showcase.pdf
+            showcase-page-*.png
