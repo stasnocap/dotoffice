@@ -20,11 +20,17 @@ internal struct GlyphInfo
 
     /// <summary>Index of the glyph a mark is attached to (relative position resolved at the end), or -1.</summary>
     public int AttachTo;
+
+    /// <summary>
+    /// Index of the glyph this one is cursively attached to, or -1. <see cref="YOffset"/> is then relative to
+    /// that glyph's (resolved at the end, along the chain).
+    /// </summary>
+    public int CursiveTo;
 }
 
 /// <summary>
 /// GSUB/GPOS/GDEF interpreter: selects the lookups of a script's features and applies them to a glyph
-/// buffer. Supports GSUB types 1, 2, 4, 5, 6, 7 and GPOS types 1, 2, 4, 5, 6, 7, 8, 9; anything else
+/// buffer. Supports GSUB types 1, 2, 4, 5, 6, 7 and GPOS types 1–9; anything else
 /// (and malformed data, by throwing, which the shaper catches) leaves the glyphs unchanged.
 /// </summary>
 internal sealed class OpenTypeLayout
@@ -178,22 +184,24 @@ internal sealed class OpenTypeLayout
 
     // ------------------------------------------------------------------ lookup application
 
-    private sealed class Context(byte[] table, List<GlyphInfo> glyphs, bool gpos)
+    private sealed class Context(byte[] table, List<GlyphInfo> glyphs, bool gpos, bool rightToLeft)
     {
         public byte[] Table { get; } = table;
         public List<GlyphInfo> Glyphs { get; } = glyphs;
         public bool Gpos { get; } = gpos;
+        public bool RightToLeft { get; } = rightToLeft;
         public int Flags { get; set; }
         public int MarkSet { get; set; }
         public uint Mask { get; set; }
         public int Nesting { get; set; }
     }
 
-    public void Apply(bool gpos, List<GlyphInfo> glyphs, List<(int Lookup, uint Mask)> lookups)
+    /// <summary>Applies <paramref name="lookups"/>; <paramref name="rightToLeft"/> is the text direction (for cursive attachment).</summary>
+    public void Apply(bool gpos, List<GlyphInfo> glyphs, List<(int Lookup, uint Mask)> lookups, bool rightToLeft = false)
     {
         var t = gpos ? _gpos : _gsub;
         if (t.Length < 10) return;
-        var ctx = new Context(t, glyphs, gpos);
+        var ctx = new Context(t, glyphs, gpos, rightToLeft);
         foreach (var (lookup, mask) in lookups)
         {
             ctx.Mask = mask;
@@ -392,6 +400,45 @@ internal sealed class OpenTypeLayout
                 glyphs[i] = Adjust(glyphs[i], t, record, vf1);
                 glyphs[second] = Adjust(glyphs[second], t, record + size1, vf2);
                 return vf2 != 0 ? second + 1 : second;
+            }
+            case 3:
+            {
+                // Cursive attachment: this glyph's entry anchor meets the previous glyph's exit anchor (as in HarfBuzz).
+                if (format != 1) return null;
+                int coverage = sub + U16(t, sub + 2);
+                int index = Coverage(t, coverage, glyph);
+                if (index < 0) return null;
+                int entry = U16(t, sub + 6 + index * 4);
+                int prev = Prev(ctx, i);
+                if (entry == 0 || prev < 0) return null;
+                int prevIndex = Coverage(t, coverage, glyphs[prev].Glyph);
+                if (prevIndex < 0) return null;
+                int exit = U16(t, sub + 6 + prevIndex * 4 + 2);
+                if (exit == 0) return null;
+                int exitX = S16(t, sub + exit + 2), exitY = S16(t, sub + exit + 4);
+                int entryX = S16(t, sub + entry + 2), entryY = S16(t, sub + entry + 4);
+
+                GlyphInfo a = glyphs[prev], b = glyphs[i];
+                if (ctx.RightToLeft)
+                {
+                    int d = exitX + a.XOffset;
+                    a.XAdvance -= d;
+                    a.XOffset -= d;
+                    b.XAdvance = entryX + b.XOffset;
+                }
+                else
+                {
+                    a.XAdvance = exitX + a.XOffset;
+                    int d = entryX + b.XOffset;
+                    b.XAdvance -= d;
+                    b.XOffset -= d;
+                }
+                // The RightToLeft lookup flag makes the last glyph of a chain sit on the baseline instead of the first.
+                if ((ctx.Flags & 0x1) != 0) (a.CursiveTo, a.YOffset) = (i, entryY - exitY);
+                else (b.CursiveTo, b.YOffset) = (prev, exitY - entryY);
+                glyphs[prev] = a;
+                glyphs[i] = b;
+                return i + 1;
             }
             case 4:
             case 5:

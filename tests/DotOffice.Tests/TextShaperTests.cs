@@ -9,6 +9,7 @@ public class TextShaperTests
     private static readonly TrueTypeFont Arabic = TrueTypeFont.Load(TestAssets.Path("NotoSansArabic-Regular.ttf"));
     private static readonly TrueTypeFont Hebrew = TrueTypeFont.Load(TestAssets.Path("NotoSansHebrew-Regular.ttf"));
     private static readonly TrueTypeFont Latin = TrueTypeFont.Load(TestAssets.Path("NotoSans-Regular.ttf"));
+    private static readonly TrueTypeFont Nastaliq = TrueTypeFont.Load(TestAssets.Path("NotoNastaliqUrdu-Regular.ttf"));
 
     private static (int, int, int, int)[] Positions(ShapedGlyph[] glyphs) =>
         glyphs.Select(g => ((int)g.GlyphId, g.Advance, g.XOffset, g.YOffset)).ToArray();
@@ -33,6 +34,17 @@ public class TextShaperTests
         var glyphs = TextShaper.Shape(Arabic, "بِ", rightToLeft: true, kerning: false);
         Assert.Equal([(14, 993, 0, 0), (316, 0, 410, -23), (426, 0, 344, -211)], Positions(glyphs));
         Assert.Equal(["ب", "", "ِ"], glyphs.Select(g => g.Text)); // the dot glyph comes from decomposing the letter
+    }
+
+    [Fact]
+    public void Cursive_attachment_joins_nastaliq_letters_on_a_slope()
+    {
+        Assert.Equal([(951, 0, 0, 0), (188, 607, 0, 95), (953, 0, 0, 0), (399, 201, 0, 0), (4, 297, 0, 0), (436, 660, 0, 0)],
+            Positions(TextShaper.Shape(Nastaliq, "سلام", rightToLeft: true, kerning: false)));
+        Assert.Equal([(3, 330, 0, 0), (143, 406, 0, 0), (126, 300, 0, 0), (551, 422, 0, 0)],
+            Positions(TextShaper.Shape(Nastaliq, "اردو", rightToLeft: true, kerning: false)));
+        var glyphs = TextShaper.Shape(Nastaliq, "پاکستان", rightToLeft: true, kerning: false);
+        Assert.Equal([361, 0, 145, 0], glyphs.Where((_, i) => i is 6 or 7 or 8 or 9).Select(g => g.YOffset)); // the chain climbs
     }
 
     [Fact]
