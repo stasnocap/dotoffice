@@ -47,7 +47,8 @@ jobs:
             grep -q "$text" showcase.txt || { echo "missing: $text"; exit 1; }
           done
           pages=$(pdfinfo showcase.pdf | awk '/^Pages:/ {print $2}')
-          grep -q "Page 1 of $pages" showcase.txt
+          # Page 1 has a first-page header only (titlePg), so numbering starts showing on page 2.
+          grep -q "Page 2 of $pages" showcase.txt
           grep -q "Page $pages of $pages" showcase.txt
           # Carlito/Caladea must be used for Calibri/Cambria when installed.
           pdffonts showcase.pdf | grep -q Carlito
