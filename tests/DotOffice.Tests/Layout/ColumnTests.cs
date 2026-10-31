@@ -136,6 +136,19 @@ public class ColumnTests
     }
 
     [Fact]
+    public void A_paragraph_moved_on_by_widow_control_is_broken_for_the_new_column()
+    {
+        // Three lines fill the narrow column but one: widow control moves the paragraph's first line on with the second.
+        var columns = new SectionColumns { Count = 2, Definitions = [new ColumnDefinition(100, 20), new ColumnDefinition(348, 0)] };
+        var p = Para(Words(25));
+        p = new Paragraph { Properties = p.Properties with { WidowControl = true }, MarkProperties = Text, Inlines = { p.Inlines[0] } };
+        var page = Assert.Single(Render(Doc(Section(4, columns), Lines(3, "A"), p)).Pages);
+        var words = Texts(page).Where(t => t.Text.StartsWith("word")).ToList();
+        Assert.All(words, t => Assert.True(t.X >= 192 - 0.01, $"{t.Text} at {t.X}"));
+        Assert.Contains(words, t => Right(t) > 192 + 200); // laid out at the wide column's width
+    }
+
+    [Fact]
     public void Reader_parses_column_settings()
     {
         var doc = DocxReader.Read(new DocxBuilder
