@@ -39,7 +39,6 @@ internal sealed class OpenTypeLayout
     private const int MaxOperations = 100_000;
 
     private readonly byte[] _gsub, _gpos, _gdef;
-    private int _operations;
 
     public OpenTypeLayout(TrueTypeFont font)
     {
@@ -194,6 +193,9 @@ internal sealed class OpenTypeLayout
         public int MarkSet { get; set; }
         public uint Mask { get; set; }
         public int Nesting { get; set; }
+
+        /// <summary>Lookup applications so far; bounds the work on malicious fonts.</summary>
+        public int Operations { get; set; }
     }
 
     /// <summary>Applies <paramref name="lookups"/>; <paramref name="rightToLeft"/> is the text direction (for cursive attachment).</summary>
@@ -208,7 +210,7 @@ internal sealed class OpenTypeLayout
             if (!SetLookup(ctx, lookup)) continue;
             for (int i = 0; i < glyphs.Count;)
             {
-                if (++_operations > MaxOperations) return;
+                if (++ctx.Operations > MaxOperations) return;
                 if ((glyphs[i].Mask & mask) == 0 || Ignored(ctx, glyphs[i].Glyph)) { i++; continue; }
                 i = ApplyLookup(ctx, lookup, i) is { } next && next > i ? next : i + 1;
             }
