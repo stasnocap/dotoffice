@@ -21,6 +21,8 @@ public sealed class SheetLayoutEngine
 
     private const double MaxRowHeight = 409.5;
 
+    private const int MaxColumns = 16384;
+
     private static readonly Color GridColor = new(0xA6, 0xA6, 0xA6);
 
     private readonly FontSelector _fonts;
@@ -240,7 +242,52 @@ public sealed class SheetLayoutEngine
                 int lastColumn = area.ColumnCount > 1_000 && c1 >= 0 ? Math.Min(area.LastColumn, c1) : area.LastColumn;
                 return new CellRange(area.FirstRow, area.FirstColumn, Math.Max(lastRow, area.FirstRow), Math.Max(lastColumn, area.FirstColumn));
             }
-            return r1 < 0 ? null : new CellRange(r0, c0, r1, c1);
+            return r1 < 0 ? null : ExtendForOverflow(new CellRange(r0, c0, r1, c1));
+        }
+
+        /// <summary>Excel prints text that spills out of the used range, so the range grows to hold it.</summary>
+        private CellRange ExtendForOverflow(CellRange range)
+        {
+            int first = range.FirstColumn, last = range.LastColumn;
+            foreach (var ((row, column), cell) in _sheet.Cells)
+            {
+                if (cell.Kind != CellValueKind.Text || cell.Style.Wrap || cell.Text.Length == 0) continue;
+                double own = _sheet.ColumnWidth(column);
+                if (cell.Text.Length * cell.Style.Font.FontSize * 0.25 <= own) continue;
+                if (_anchors.ContainsKey((row, column)) || _sheet.Merges.Any(m => m.Contains(row, column))) continue;
+                double width = _engine.BuildBlock(cell, cell.Text, 1e7).Width + 2 * CellPadding;
+                if (width <= own + Epsilon) continue;
+                var alignment = AlignmentOf(cell);
+                double need = width - own;
+                if (alignment == ParagraphAlignment.Right) first = Math.Min(first, Spill(row, column, -1, need));
+                else if (alignment == ParagraphAlignment.Center)
+                {
+                    first = Math.Min(first, Spill(row, column, -1, need / 2));
+                    last = Math.Max(last, Spill(row, column, 1, need / 2));
+                }
+                else last = Math.Max(last, Spill(row, column, 1, need + cell.Style.Indent * IndentWidth));
+            }
+            return range with { FirstColumn = first, LastColumn = last };
+        }
+
+        /// <summary>The last column reached when text needing <paramref name="need"/> more width spills in a direction.</summary>
+        private int Spill(int row, int column, int direction, double need)
+        {
+            int c = column;
+            // Spilled text is cut at the page edge, so there is no point reaching further than one page width.
+            double reach = _sheet.ColumnWidth(column), pageWidth = (_setup.PageWidth - _setup.Margins.Left - _setup.Margins.Right) / _setup.Scale;
+            for (int steps = 0; steps < 200 && need > Epsilon && reach < pageWidth; steps++)
+            {
+                int next = c + direction;
+                if (next < 0 || next >= MaxColumns) break;
+                if (_sheet.Cells.TryGetValue((row, next), out var neighbor) && neighbor.Text.Length > 0) break;
+                if (_sheet.Merges.Any(m => m.Contains(row, next))) break;
+                if (reach + _sheet.ColumnWidth(next) > pageWidth + Epsilon) break;
+                c = next;
+                need -= _sheet.ColumnWidth(c);
+                reach += _sheet.ColumnWidth(c);
+            }
+            return c;
         }
 
         // ---- row heights
@@ -387,7 +434,7 @@ public sealed class SheetLayoutEngine
             foreach (var d in drawn)
                 if (d.Cell.Style.Fill is { } fill) items.Add(new RectItem(d.X, d.Y, d.Width, d.Height, fill));
             foreach (var d in drawn)
-                EmitText(d.Cell, d.Row, d.Column, d.X, d.Y, d.Width, d.Height, d.Merge is not null, items);
+                EmitText(d.Cell, d.Row, d.Column, d.X, d.Y, d.Width, d.Height, d.Merge is not null, columns, items);
             foreach (var d in drawn)
                 EmitBorders(d.Cell.Style.Borders, d.X, d.Y, d.Width, d.Height, items);
 
@@ -437,7 +484,21 @@ public sealed class SheetLayoutEngine
             items.Add(new LineItem(x1, y1, x2, y2, border.Width, color, style));
         }
 
-        private void EmitText(Cell cell, int row, int column, double x, double y, double width, double height, bool merged, List<LayoutItem> items)
+        /// <summary>The width of empty neighbors (in the given direction) that text may spill into, up to <paramref name="need"/>.</summary>
+        private double Room(int row, List<int> columns, int position, int direction, double need)
+        {
+            double room = 0;
+            for (int i = position + direction; i >= 0 && i < columns.Count && room < need - Epsilon; i += direction)
+            {
+                int c = columns[i];
+                if (_sheet.Cells.TryGetValue((row, c), out var neighbor) && neighbor.Text.Length > 0) break;
+                if (_sheet.Merges.Any(m => m.Contains(row, c))) break;
+                room += _sheet.ColumnWidth(c);
+            }
+            return room;
+        }
+
+        private void EmitText(Cell cell, int row, int column, double x, double y, double width, double height, bool merged, List<int> columns, List<LayoutItem> items)
         {
             if (cell.Text.Length == 0) return;
             var style = cell.Style;
@@ -464,6 +525,19 @@ public sealed class SheetLayoutEngine
             double right = x + width - CellPadding - (alignment == ParagraphAlignment.Right ? indent : 0);
 
             double clipLeft = x, clipRight = x + width;
+            if (!wrap && !merged && cell.Kind == CellValueKind.Text && block.Width + 2 * CellPadding > width + Epsilon)
+            {
+                double need = block.Width + 2 * CellPadding + (alignment == ParagraphAlignment.Left ? indent : 0) - width;
+                int position = columns.IndexOf(column);
+                if (alignment == ParagraphAlignment.Right) clipLeft -= Room(row, columns, position, -1, need);
+                else if (alignment == ParagraphAlignment.Center)
+                {
+                    double half = Math.Min(Room(row, columns, position, -1, need / 2), Room(row, columns, position, 1, need / 2));
+                    clipLeft -= half;
+                    clipRight += half;
+                }
+                else clipRight += Room(row, columns, position, 1, need);
+            }
 
             double blockHeight = block.Height;
             double top = style.VerticalAlignment switch

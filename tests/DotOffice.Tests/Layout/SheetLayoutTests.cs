@@ -299,3 +299,96 @@ public class SheetLayoutTests
         Assert.Equal("A", doc.Author);
     }
 }
+
+public class SheetOverflowTests
+{
+    private static Cell Text(string text, HorizontalAlignment align = HorizontalAlignment.General) =>
+        SheetLayoutTests.Text(text, SheetLayoutTests.Style(s => s.Horizontal = align));
+
+    private static double Right(TextItem t) => t.X + LayoutTestHelpers.Noto.MeasureText(t.Text, t.FontSize);
+
+    private const string Long = "overflowing text spills";
+
+    [Fact]
+    public void Left_aligned_text_spills_into_empty_neighbors()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Text(Long)));
+        sheet.ColumnWidths[0] = 40;
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToList();
+        Assert.Equal(Long, string.Concat(items.Select(t => t.Text)));
+    }
+
+    [Fact]
+    public void Text_stops_at_the_first_non_empty_neighbor()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Text(Long)), (0, 2, Text("block")));
+        sheet.ColumnWidths[0] = 40;
+        sheet.ColumnWidths[1] = 40;
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        double limit = sheet.PageSetup.Margins.Left + 80;
+        foreach (var t in page.Items.OfType<TextItem>().Where(t => t.Text != "block")) Assert.True(Right(t) <= limit + 0.1);
+        Assert.True(page.Items.OfType<TextItem>().Where(t => t.Text != "block").Max(Right) > sheet.PageSetup.Margins.Left + 45);
+    }
+
+    [Fact]
+    public void A_neighbor_with_only_a_fill_does_not_block_the_text()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Text(Long)), (0, 1, new Cell { Style = SheetLayoutTests.Style(s => s.Fill = new Color(5, 5, 5)) }));
+        sheet.ColumnWidths[0] = 40;
+        var text = string.Concat(SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().Select(t => t.Text));
+        Assert.Equal(Long, text);
+    }
+
+    [Fact]
+    public void Right_aligned_text_spills_to_the_left()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 1, Text(Long, HorizontalAlignment.Right)));
+        sheet.ColumnWidths[0] = 200;
+        sheet.ColumnWidths[1] = 40;
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToList();
+        Assert.Equal(Long, string.Concat(items.Select(t => t.Text)));
+        Assert.True(items.Min(t => t.X) < sheet.PageSetup.Margins.Left + 200);
+        Assert.True(items.Max(Right) <= sheet.PageSetup.Margins.Left + 240 + 0.1);
+    }
+
+    [Fact]
+    public void Centered_text_spills_both_ways_but_is_limited_by_the_closer_blocker()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 1, Text(Long, HorizontalAlignment.Center)), (0, 2, Text("x")));
+        sheet.ColumnWidths[0] = 100;
+        sheet.ColumnWidths[1] = 40;
+        sheet.ColumnWidths[2] = 40;
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().Where(t => t.Text != "x").ToList();
+        double left = sheet.PageSetup.Margins.Left + 100;
+        Assert.True(items.Max(Right) <= left + 40 + 0.1); // the right neighbor is occupied, so no room on that side
+        Assert.True(items.Min(t => t.X) >= left - 0.1);
+    }
+
+    [Fact]
+    public void Wrapped_text_and_numbers_never_spill()
+    {
+        var wrapped = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text(Long, SheetLayoutTests.Style(s => s.Wrap = true))));
+        wrapped.ColumnWidths[0] = 40;
+        wrapped.ColumnWidths[1] = 200;
+        foreach (var t in SheetLayoutTests.Layout(wrapped).Pages[0].Items.OfType<TextItem>())
+            Assert.True(Right(t) <= wrapped.PageSetup.Margins.Left + 40 + 0.1);
+
+        var number = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Number("123456789")));
+        number.ColumnWidths[0] = 30;
+        number.ColumnWidths[1] = 200;
+        Assert.All(SheetLayoutTests.PageText(SheetLayoutTests.Layout(number).Pages[0]), ch => Assert.Equal('#', ch));
+    }
+
+    [Fact]
+    public void Spill_stops_at_the_page_edge()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Text(new string('w', 200))));
+        sheet.ColumnWidths[0] = 40;
+        sheet.ColumnWidths[1] = 40;
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.Single(doc.Pages);
+        var items = doc.Pages[0].Items.OfType<TextItem>().ToList();
+        Assert.True(items.Max(Right) <= 612 - sheet.PageSetup.Margins.Right + 0.1);
+        Assert.True(items.Max(Right) > sheet.PageSetup.Margins.Left + 80); // spilled past the original two columns
+    }
+}
