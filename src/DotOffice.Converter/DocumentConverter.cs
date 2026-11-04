@@ -2,6 +2,7 @@ using DotOffice.Core;
 using DotOffice.Docx;
 using DotOffice.Fonts;
 using DotOffice.Layout;
+using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
 
@@ -57,21 +58,27 @@ public static class DocumentConverter
         }
 
         ct.ThrowIfCancellationRequested();
-        var document = DocxReader.Read(source, new DocxReaderOptions
+        LayoutDocument layout;
+        if (from == DocumentFormat.Xlsx)
         {
-            Warnings = options.Warnings,
-            MaxTotalUncompressedSize = options.MaxUncompressedSize,
-        });
-
-        ct.ThrowIfCancellationRequested();
-        var resolver = (options.Fonts, options.UseSystemFonts) switch
+            var workbook = XlsxReader.Read(source, new XlsxReaderOptions
+            {
+                Warnings = options.Warnings,
+                MaxTotalUncompressedSize = options.MaxUncompressedSize,
+            });
+            ct.ThrowIfCancellationRequested();
+            layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(workbook, ct);
+        }
+        else
         {
-            (null, true) => FontResolver.CreateDefault(),
-            (not null, true) => FontResolver.CreateDefault(options.Fonts),
-            (not null, false) => new FontResolver(options.Fonts),
-            _ => throw new ArgumentException("UseSystemFonts is false but no Fonts provider was given.", nameof(options)),
-        };
-        var layout = new LayoutEngine(new LayoutOptions { Fonts = resolver, Warnings = options.Warnings }).Layout(document, ct);
+            var document = DocxReader.Read(source, new DocxReaderOptions
+            {
+                Warnings = options.Warnings,
+                MaxTotalUncompressedSize = options.MaxUncompressedSize,
+            });
+            ct.ThrowIfCancellationRequested();
+            layout = new LayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(document, ct);
+        }
 
         ct.ThrowIfCancellationRequested();
         using var pdf = new MemoryStream();
@@ -80,9 +87,17 @@ public static class DocumentConverter
         await pdf.CopyToAsync(output, ct).ConfigureAwait(false);
     }
 
+    private static FontResolver CreateResolver(ConvertOptions options) => (options.Fonts, options.UseSystemFonts) switch
+    {
+        (null, true) => FontResolver.CreateDefault(),
+        (not null, true) => FontResolver.CreateDefault(options.Fonts),
+        (not null, false) => new FontResolver(options.Fonts),
+        _ => throw new ArgumentException("UseSystemFonts is false but no Fonts provider was given.", nameof(options)),
+    };
+
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from != DocumentFormat.Docx || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 

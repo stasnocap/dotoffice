@@ -122,9 +122,11 @@ public class DocumentConverterTests
     public async Task Unsupported_conversion_throws()
     {
         await Assert.ThrowsAsync<NotSupportedException>(() =>
-            DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Xlsx, DocumentFormat.Pdf));
+            DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Pptx, DocumentFormat.Pdf));
         await Assert.ThrowsAsync<NotSupportedException>(() =>
             DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Docx, DocumentFormat.Docx));
+        await Assert.ThrowsAsync<NotSupportedException>(() =>
+            DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Xlsx, DocumentFormat.Docx));
     }
 
     [Fact]

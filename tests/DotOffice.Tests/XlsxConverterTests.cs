@@ -1,0 +1,100 @@
+using System.Text;
+using DotOffice.Converter;
+using DotOffice.Core;
+using DotOffice.Fonts;
+using DotOffice.Tests.Xlsx;
+using static DotOffice.Tests.Xlsx.XlsxBuilder;
+
+namespace DotOffice.Tests;
+
+public class XlsxConverterTests
+{
+    private static readonly FontCollection TestFonts = new FontCollection().AddFile(TestAssets.Path("NotoSans-Regular.ttf"));
+
+    private static async Task<byte[]> Convert(XlsxBuilder xlsx, ConversionWarningList? warnings = null)
+    {
+        using var output = new MemoryStream();
+        await DocumentConverter.ConvertAsync(xlsx.BuildStream(), output, DocumentFormat.Xlsx, DocumentFormat.Pdf,
+            new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false, Warnings = warnings });
+        return output.ToArray();
+    }
+
+    private static int PageCount(byte[] pdf) =>
+        System.Text.RegularExpressions.Regex.Matches(Encoding.Latin1.GetString(pdf), @"/Type\s*/Page\b").Count;
+
+    [Fact]
+    public async Task Converts_a_workbook_to_a_pdf_with_one_page_per_sheet()
+    {
+        var builder = new XlsxBuilder { SharedStrings = "<si><t>Hello</t></si>" }
+            .AddSheet("One", Row(1, S("A1", 0), C("B1", "1234.5")))
+            .AddSheet("Two", Row(1, C("A1", "7")));
+        var pdf = await Convert(builder);
+        Assert.StartsWith("%PDF-", Encoding.Latin1.GetString(pdf, 0, 5));
+        Assert.Equal(2, PageCount(pdf));
+    }
+
+    [Fact]
+    public async Task Surfaces_reader_warnings()
+    {
+        var warnings = new ConversionWarningList();
+        await Convert(new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"cellIs\" priority=\"1\"/></conditionalFormatting>"), warnings);
+        Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.conditional-formatting");
+    }
+
+    [Fact]
+    public async Task Formula_without_a_cached_value_warns()
+    {
+        var warnings = new ConversionWarningList();
+        await Convert(new XlsxBuilder().AddSheet("S", "<row r=\"1\"><c r=\"A1\"><f>1+1</f></c></row>"), warnings);
+        Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.formula-no-cache");
+    }
+
+    [Fact]
+    public async Task An_empty_workbook_still_produces_a_valid_pdf()
+    {
+        var pdf = await Convert(new XlsxBuilder().AddSheet("Empty"));
+        Assert.Equal(1, PageCount(pdf));
+        Assert.Contains("%%EOF", Encoding.Latin1.GetString(pdf));
+    }
+
+    [Fact]
+    public async Task Only_hidden_sheets_still_produce_a_valid_pdf()
+    {
+        var pdf = await Convert(new XlsxBuilder().AddSheet("H", Row(1, C("A1", "1")), state: "hidden"));
+        Assert.Equal(1, PageCount(pdf));
+    }
+
+    [Fact]
+    public async Task A_non_zip_input_throws_invalid_data()
+    {
+        using var output = new MemoryStream();
+        await Assert.ThrowsAsync<InvalidDataException>(() => DocumentConverter.ConvertAsync(
+            new MemoryStream([1, 2, 3, 4]), output, DocumentFormat.Xlsx, DocumentFormat.Pdf,
+            new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false }));
+    }
+
+    [Fact]
+    public async Task Converts_files_by_extension_and_leaves_no_output_on_failure()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"dotoffice-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var input = Path.Combine(dir, "book.xlsx");
+            var output = Path.Combine(dir, "book.pdf");
+            await File.WriteAllBytesAsync(input, new XlsxBuilder().AddSheet("S", Row(1, C("A1", "3.5"))).Build());
+            await DocumentConverter.ConvertAsync(input, output, new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false });
+            Assert.True(new FileInfo(output).Length > 100);
+
+            var bad = Path.Combine(dir, "bad.xlsx");
+            var badOut = Path.Combine(dir, "bad.pdf");
+            await File.WriteAllBytesAsync(bad, [1, 2, 3]);
+            await Assert.ThrowsAsync<InvalidDataException>(() => DocumentConverter.ConvertAsync(bad, badOut, new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false }));
+            Assert.False(File.Exists(badOut));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+}
