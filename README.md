@@ -30,7 +30,10 @@ await DocumentConverter.ConvertAsync("invoice.docx", "invoice.pdf");
 1. PDF writer + font embedding/subsetting ✓
 2. DOCX → PDF: paragraphs, styles, lists, tables, headers/footers, images ✓
 3. DOCX polish: fields, floats, columns, footnotes, complex scripts including Indic ✓ (Sinhala, Tibetan, Myanmar and Khmer shaping not yet supported)
-4. XLSX → PDF
+4. XLSX → PDF: milestone 1 ✓ (cells, styles, number formats, merges, page setup, print areas/titles, breaks, headers/footers)
+   - Not yet supported (each emits a warning): charts, images and shapes (`xlsx.drawing`), conditional formatting, pivot tables (cached values print), comments, rotated text (drawn horizontally), rich-text runs (cell style used), gradient fills, multiple print areas (only the first), unsupported paper sizes (Letter)
+   - Number formats: fractions, indexed `[ColorN]`, locale-specific built-in ids 27–36/50–58 (General), `*` fill ignored
+   - Layout: text trimmed per character at cell edges, fill alignment treated as left, print titles outside the print range not repeated, header/footer pictures ignored and headers not scaled, `&D`/`&T` use the current date/time, row autofit is approximate, `firstPageNumber` ignored, fit-to-page never enlarges and ignores manual breaks (like Excel)
 5. PPTX → PDF / PNG
 6. ODF readers, legacy DOC/XLS
 
