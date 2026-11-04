@@ -13,9 +13,17 @@ pdftotext "$pdf" all.txt
 for text in "Contents" "8. Multiple columns" "Three balanced columns end" "Back to a single column" \
             "9. Footnotes and endnotes" "Footnote text uses the FootnoteText style." "Endnotes are numbered" \
             "10. Floating images" "Square wrapping" "11. Right-to-left text" "12. Fields and links" \
-            "in roman numerals: xii" "«Customer»" "UAX #9"; do
+            "«Customer»" "UAX #9"; do
   grep -qF "$text" all.txt || fail "missing: $text"
 done
+
+# The PAGE field renders the page number it is on, in decimal and in roman numerals.
+roman_pat='This paragraph is on page ([0-9]+) \(in roman numerals: ([ivxlc]+)'
+line=$(grep -oE "$roman_pat" all.txt) || fail "missing: PAGE fields paragraph"
+n=$(sed -E "s/$roman_pat/\\1/" <<< "$line"); r=$(sed -E "s/$roman_pat/\\2/" <<< "$line")
+page_text "$n" | grep -qF "This paragraph is on page" || fail "PAGE field says $n but the paragraph is elsewhere"
+case $n in 9) want=ix;; 10) want=x;; 11) want=xi;; 12) want=xii;; 13) want=xiii;; *) want=$r;; esac
+[ "$r" = "$want" ] || fail "PAGE \\* roman gave $r for page $n"
 
 # Every TOC entry's page number must be the page its heading is on.
 grep -E '^[0-9]+\. .* \.{3,} [0-9]+$' all.txt > toc.txt || fail "no TOC entries"
