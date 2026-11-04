@@ -34,6 +34,7 @@ internal static class ShowcaseXlsx
             ("Rich text", RichTextSheet(), "visible"),
             ("Rotation", RotationSheet(), "visible"),
             ("Gradients", GradientSheet(), "visible"),
+            ("Pictures", PicturesSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -56,6 +57,7 @@ internal static class ShowcaseXlsx
             sheetEntries.Append($"<sheet name=\"{SecurityElement.Escape(name)}\" sheetId=\"{i + 1}\"{stateAttr} r:id=\"rId{i + 1}\"/>");
         }
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
+        WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         content.Append("</Types>");
 
         Entry(zip, "[Content_Types].xml", content.ToString());
@@ -272,6 +274,61 @@ internal static class ShowcaseXlsx
         rows.Append(Row(7, Str("A7", "Path from a corner", GradCorner), 54));
         var cols = "<cols><col min=\"1\" max=\"1\" width=\"26\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"34\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    // ------------------------------------------------------------------ pictures
+
+    private const string DrawingNs = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    private const string DmlNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    private const long Emu = 12700;
+
+    private static string Pic(string name, string extra = "", int rotation = 0) =>
+        $"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"rId1\"/>{extra}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>" +
+        $"<xdr:spPr><a:xfrm rot=\"{rotation}\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>";
+
+    private static string Marker(string tag, int col, int row, double colOffset = 0, double rowOffset = 0) =>
+        $"<xdr:{tag}><xdr:col>{col}</xdr:col><xdr:colOff>{(long)(colOffset * Emu)}</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>{(long)(rowOffset * Emu)}</xdr:rowOff></xdr:{tag}>";
+
+    private static string TwoCell(int c0, int r0, int c1, int r1, string content) =>
+        $"<xdr:twoCellAnchor>{Marker("from", c0, r0)}{Marker("to", c1, r1)}{content}<xdr:clientData/></xdr:twoCellAnchor>";
+
+    private static string OneCell(int col, int row, double colOffset, double rowOffset, double width, double height, string content) =>
+        $"<xdr:oneCellAnchor>{Marker("from", col, row, colOffset, rowOffset)}<xdr:ext cx=\"{(long)(width * Emu)}\" cy=\"{(long)(height * Emu)}\"/>{content}<xdr:clientData/></xdr:oneCellAnchor>";
+
+    private static string Absolute(double x, double y, double width, double height, string content) =>
+        $"<xdr:absoluteAnchor><xdr:pos x=\"{(long)(x * Emu)}\" y=\"{(long)(y * Emu)}\"/><xdr:ext cx=\"{(long)(width * Emu)}\" cy=\"{(long)(height * Emu)}\"/>{content}<xdr:clientData/></xdr:absoluteAnchor>";
+
+    private static void WritePictures(ZipArchive zip, int sheetNumber, StringBuilder content)
+    {
+        var anchors =
+            TwoCell(1, 3, 4, 8, Pic("Stretched to B4:D8")) +                                                                       // stretches with its cells
+            OneCell(5, 3, 8, 6, 120, 75, Pic("One-cell anchor")) +                                                                // fixed size
+            OneCell(5, 9, 4, 4, 120, 75, Pic("Cropped", "<a:srcRect l=\"25000\" r=\"25000\" t=\"10000\"/>")) +                          // crop
+            OneCell(1, 10, 10, 10, 120, 75, Pic("Rotated", rotation: 20 * 60000)) +                                               // rotation
+            Absolute(300, 260, 90, 56, Pic("Absolute")) +                                                                         // measured from A1
+            TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
+            "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Shape\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/></Relationships>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+        using (var media = zip.CreateEntry("xl/media/image1.png").Open()) media.Write(ShowcaseDocx.GradientPng(160, 100));
+        content.Append("<Default Extension=\"png\" ContentType=\"image/png\"/>");
+    }
+
+    private static string PicturesSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Pictures placed by drawing anchors", Bold)));
+        rows.Append(Row(3, Str("A3", "twoCell:", Default)));
+        rows.Append(Row(11, Str("A11", "Rotated 20°:", Default)));
+        rows.Append(Row(16, Str("A16", "Page break below row 20:", Default)));
+        rows.Append(Row(27, Str("A27", "End of the sheet", Default)));
+        var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(),
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +
+            "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"20\" max=\"16383\" man=\"1\"/></rowBreaks><drawing r:id=\"rId1\"/>");
     }
 
     private static string Hidden() =>

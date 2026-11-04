@@ -899,3 +899,190 @@ public class SheetGradientTests
         Assert.Equal(50.0, SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<GradientItem>().Single().Width, 3);
     }
 }
+
+public class SheetImageTests
+{
+    private static readonly ImageData Png = new(PngTestEncoder.Encode(2, 2, 2, 8, [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]), "t.png");
+
+    private static SheetImage TwoCell(int fromColumn, int fromRow, int toColumn, int toRow, double fromColumnOffset = 0, double fromRowOffset = 0) => new()
+    {
+        Image = Png, Anchor = ImageAnchorKind.TwoCell,
+        From = new AnchorPoint(fromColumn, fromRow, fromColumnOffset, fromRowOffset), To = new AnchorPoint(toColumn, toRow, 0, 0),
+    };
+
+    private static Worksheet SheetWith(params SheetImage[] images)
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("a")), (9, 9, SheetLayoutTests.Text("z")));
+        sheet.DefaultColumnWidth = 50;
+        sheet.DefaultRowHeight = 20;
+        sheet.Images.AddRange(images);
+        return sheet;
+    }
+
+    private static (double Left, double Top) Origin(Worksheet sheet) => (sheet.PageSetup.Margins.Left, sheet.PageSetup.Margins.Top);
+
+    [Fact]
+    public void A_two_cell_picture_covers_its_cells_and_is_clipped_to_them()
+    {
+        var sheet = SheetWith(TwoCell(1, 2, 3, 4));
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var (left, top) = Origin(sheet);
+        var image = page.Items.OfType<ImageItem>().Single();
+        Assert.Equal((left + 50, top + 40, 100.0, 40.0), (image.X, image.Y, image.Width, image.Height));
+        var push = Assert.IsType<PushItem>(page.Items[page.Items.IndexOf(image) - 1]);
+        Assert.Equal((left + 50, top + 40, 100.0, 40.0), push.Clip!.Value);
+        Assert.IsType<PopItem>(page.Items[page.Items.IndexOf(image) + 1]);
+    }
+
+    [Fact]
+    public void Pictures_are_painted_above_cell_text()
+    {
+        var page = SheetLayoutTests.Layout(SheetWith(TwoCell(0, 0, 2, 2))).Pages[0];
+        Assert.True(page.Items.FindIndex(i => i is ImageItem) > page.Items.FindIndex(i => i is TextItem));
+    }
+
+    [Fact]
+    public void One_cell_and_absolute_anchors_use_their_own_size_and_offsets()
+    {
+        var oneCell = new SheetImage { Image = Png, Anchor = ImageAnchorKind.OneCell, From = new AnchorPoint(2, 1, 5, 6), Width = 33, Height = 11 };
+        var absolute = new SheetImage { Image = Png, Anchor = ImageAnchorKind.Absolute, X = 120, Y = 70, Width = 22, Height = 12 };
+        var sheet = SheetWith(oneCell, absolute);
+        var images = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<ImageItem>().ToList();
+        var (left, top) = Origin(sheet);
+        Assert.Equal((left + 105, top + 26, 33.0, 11.0), (images[0].X, images[0].Y, images[0].Width, images[0].Height));
+        Assert.Equal((left + 120, top + 70, 22.0, 12.0), (images[1].X, images[1].Y, images[1].Width, images[1].Height));
+    }
+
+    [Fact]
+    public void A_picture_that_sticks_out_of_the_print_area_is_clipped_at_it()
+    {
+        var sheet = SheetWith(TwoCell(0, 0, 6, 6));
+        sheet.PageSetup.PrintArea = new CellRange(0, 0, 1, 1);
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var (left, top) = Origin(sheet);
+        var clip = page.Items.OfType<PushItem>().First().Clip!.Value;
+        Assert.Equal((left, top, 100.0, 40.0), clip);
+        var image = page.Items.OfType<ImageItem>().Single();
+        Assert.Equal((300.0, 120.0), (image.Width, image.Height)); // still drawn at full size, only clipped
+    }
+
+    [Fact]
+    public void A_picture_outside_the_print_area_is_not_drawn()
+    {
+        var sheet = SheetWith(TwoCell(5, 5, 7, 7));
+        sheet.PageSetup.PrintArea = new CellRange(0, 0, 1, 1);
+        Assert.Empty(SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<ImageItem>());
+    }
+
+    [Fact]
+    public void Pictures_extend_the_used_range_and_can_be_the_only_content()
+    {
+        var onlyImage = new Worksheet("S");
+        onlyImage.Images.Add(TwoCell(0, 0, 2, 2));
+        var page = SheetLayoutTests.Layout(onlyImage).Pages[0];
+        Assert.Single(page.Items.OfType<ImageItem>());
+
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("a")));
+        sheet.Images.Add(TwoCell(3, 0, 20, 2)); // right of the only cell, wider than a page
+        sheet.DefaultColumnWidth = 50;
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.True(doc.Pages.Count >= 2, "the picture's columns are printed too, so the sheet needs more than one page");
+    }
+
+    [Fact]
+    public void A_picture_spanning_a_page_break_continues_on_the_next_page_and_pieces_add_up()
+    {
+        var sheet = SheetWith(TwoCell(0, 3, 2, 8));
+        sheet.PageSetup.RowBreaks.Add(5); // break after row index 5
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.Equal(2, doc.Pages.Count);
+        var first = doc.Pages[0].Items.OfType<PushItem>().First().Clip!.Value;
+        var second = doc.Pages[1].Items.OfType<PushItem>().First().Clip!.Value;
+        Assert.Equal(3 * 20.0, first.Height, 3);  // rows 3-5 on the first page
+        Assert.Equal(2 * 20.0, second.Height, 3); // rows 6-7 on the second
+        var secondImage = doc.Pages[1].Items.OfType<ImageItem>().Single();
+        var firstImage = doc.Pages[0].Items.OfType<ImageItem>().Single();
+        Assert.Equal(100.0, firstImage.Width);
+        Assert.Equal(firstImage.Height, secondImage.Height);
+        double top = sheet.PageSetup.Margins.Top;
+        Assert.Equal(top + 3 * 20.0, firstImage.Y, 3);  // rows 0-5 are on the first page, the picture starts at row 3
+        Assert.Equal(top - 3 * 20.0, secondImage.Y, 3); // rows 6-9 on the second: the picture began three rows above its top
+        Assert.Equal(top, second.Y, 3);
+    }
+
+    [Fact]
+    public void A_picture_in_the_print_title_rows_repeats_on_every_page()
+    {
+        var sheet = SheetWith(TwoCell(0, 0, 1, 1));
+        sheet.PageSetup.TitleRows = (0, 0);
+        sheet.PageSetup.RowBreaks.Add(4);
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.True(doc.Pages.Count >= 2);
+        Assert.All(doc.Pages, p => Assert.Single(p.Items.OfType<ImageItem>()));
+    }
+
+    [Fact]
+    public void Rows_that_grow_to_fit_wrapped_text_push_anchored_pictures_down()
+    {
+        var wrapped = SheetLayoutTests.Text("one two three four five six seven eight nine ten", SheetLayoutTests.Style(s => s.Wrap = true));
+        var sheet = SheetLayoutTests.Sheet((0, 0, wrapped));
+        sheet.ColumnWidths[0] = 40;
+        sheet.Images.Add(TwoCell(1, 1, 2, 2));
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var image = page.Items.OfType<ImageItem>().Single();
+        var text = page.Items.OfType<TextItem>().Max(t => t.Baseline);
+        Assert.True(image.Y > text, "the picture sits below the last line of the grown row");
+        Assert.True(image.Y - sheet.PageSetup.Margins.Top > sheet.DefaultRowHeight * 2, "row 0 is taller than the default");
+    }
+
+    [Fact]
+    public void Hidden_columns_take_no_width_in_a_two_cell_picture()
+    {
+        var sheet = SheetWith(TwoCell(0, 0, 3, 1));
+        sheet.HiddenColumns.Add(1);
+        Assert.Equal(100.0, SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<ImageItem>().Single().Width, 3);
+    }
+
+    [Fact]
+    public void A_cropped_picture_is_drawn_enlarged_and_clipped_to_its_frame()
+    {
+        var image = TwoCell(1, 1, 3, 3) with { CropLeft = 0.25, CropRight = 0.25, CropTop = 0.1 };
+        var sheet = SheetWith(image);
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var (left, top) = Origin(sheet);
+        var drawn = page.Items.OfType<ImageItem>().Single();
+        Assert.Equal(200.0, drawn.Width, 3); // the kept half of the width fills 100 pt
+        Assert.Equal(40.0 / 0.9, drawn.Height, 3);
+        Assert.Equal(left + 50 - 0.25 * 200, drawn.X, 3);
+        Assert.Equal(top + 20 - 0.1 * (40 / 0.9), drawn.Y, 3);
+        Assert.Contains(page.Items.OfType<PushItem>(), p => p.Clip == (left + 50, top + 20, 100.0, 40.0));
+    }
+
+    [Fact]
+    public void A_rotated_picture_turns_about_the_center_of_its_frame()
+    {
+        var sheet = SheetWith(TwoCell(1, 1, 3, 3) with { Rotation = 30 });
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var (left, top) = Origin(sheet);
+        var turn = page.Items.OfType<PushItem>().Single(p => p.Rotation != 0);
+        Assert.Equal((30.0, left + 100, top + 40), (turn.Rotation, turn.CenterX, turn.CenterY));
+        // The corners of the turned picture reach outside its frame, so it is clipped at the printed band (here the whole used range), not at the frame.
+        var clip = page.Items.OfType<PushItem>().First().Clip!.Value;
+        Assert.True(clip.Width > 100 && clip.Height > 40);
+    }
+
+    [Fact]
+    public void Pictures_follow_the_page_scale()
+    {
+        var sheet = SheetWith(TwoCell(0, 0, 2, 2));
+        sheet.PageSetup.Scale = 0.5;
+        var image = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<ImageItem>().Single();
+        Assert.Equal((50.0, 20.0), (image.Width, image.Height));
+    }
+
+    [Fact]
+    public void Zero_sized_pictures_are_skipped()
+    {
+        Assert.Empty(SheetLayoutTests.Layout(SheetWith(TwoCell(2, 2, 2, 2))).Pages[0].Items.OfType<ImageItem>());
+    }
+}

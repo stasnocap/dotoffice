@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -77,3 +77,16 @@ if grep -E "warning xlsx\.rotation" "$log"; then fail "rotated text should not w
 for text in "Left to right" "Top to bottom" "Path from the center"; do grep -qF -- "$text" all.txt || fail "missing gradient cell: $text"; done
 if grep -E "warning xlsx\.gradient-fill" "$log"; then fail "gradient fills should not warn any more"; fi
 grep -aqE '/ShadingType 2' "$pdf" || fail "no linear shading in the PDF"
+
+# Pictures: placed by anchors, one of them continues across the manual page break, and only the shape is reported as unsupported.
+pic_pages=()
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Pictures" ] && pic_pages+=("$p"); done
+[ "${#pic_pages[@]}" -ge 2 ] || fail "the pictures sheet should span two pages (manual break)"
+for p in "${pic_pages[@]}"; do
+  n=$(pdfimages -list -f "$p" -l "$p" "$pdf" | awk 'NR > 2' | wc -l)
+  [ "$n" -ge 1 ] || fail "page $p of the pictures sheet has no picture"
+done
+first_n=$(pdfimages -list -f "${pic_pages[0]}" -l "${pic_pages[0]}" "$pdf" | awk 'NR > 2' | wc -l)
+[ "$first_n" -ge 5 ] || fail "expected at least five pictures on the first page of the pictures sheet, found $first_n"
+grep -E "warning xlsx\.drawing" "$log" | grep -qi "shape" || fail "the shape in the drawing should still be reported"
+if grep -E "warning xlsx\.drawing" "$log" | grep -qi "picture\b.*not rendered\|images"; then fail "pictures must not be reported as unsupported"; fi

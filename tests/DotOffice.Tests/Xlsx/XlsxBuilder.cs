@@ -55,6 +55,65 @@ internal sealed class XlsxBuilder
         return this;
     }
 
+    /// <summary>Adds a binary package part such as an image (path without a leading slash).</summary>
+    public XlsxBuilder AddBinaryPart(string path, byte[] data)
+    {
+        _parts[path] = data;
+        return this;
+    }
+
+    /// <summary>The element a worksheet needs (in its tail) to use the drawing added by <see cref="AddDrawing"/>.</summary>
+    public const string DrawingElement = "<drawing r:id=\"rId1\"/>";
+
+    private const string DrawingNs = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    private const string DmlNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+    /// <summary>
+    /// Adds drawing part number <paramref name="sheetNumber"/> (one-based, matching the sheet) holding <paramref name="anchors"/>,
+    /// with the given media files referred to as rId1, rId2… in order. The sheet must contain <see cref="DrawingElement"/>.
+    /// </summary>
+    public XlsxBuilder AddDrawing(int sheetNumber, string anchors, params byte[][] media)
+    {
+        AddPart($"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+        AddPart($"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{RelNs}\">{anchors}</xdr:wsDr>");
+        var rels = new StringBuilder();
+        for (int i = 0; i < media.Length; i++)
+        {
+            AddBinaryPart($"xl/media/image{sheetNumber}_{i + 1}.png", media[i]);
+            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}image\" Target=\"../media/image{sheetNumber}_{i + 1}.png\"/>");
+        }
+        AddPart($"xl/drawings/_rels/drawing{sheetNumber}.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
+        return this;
+    }
+
+    private const long Emu = 12700;
+
+    private static string Point(string tag, int column, int row, double columnOffsetPoints = 0, double rowOffsetPoints = 0) =>
+        $"<xdr:{tag}><xdr:col>{column}</xdr:col><xdr:colOff>{(long)(columnOffsetPoints * Emu)}</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>{(long)(rowOffsetPoints * Emu)}</xdr:rowOff></xdr:{tag}>";
+
+    /// <summary>A picture element referring to relationship <paramref name="embed"/>.</summary>
+    public static string Pic(string embed = "rId1", string? srcRect = null, int rotation = 0, string flip = "", string nameAttributes = "") =>
+        $"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"2\" name=\"Picture\"{nameAttributes}/><xdr:cNvPicPr/></xdr:nvPicPr>" +
+        $"<xdr:blipFill><a:blip r:embed=\"{embed}\"/>{(srcRect is null ? "" : $"<a:srcRect {srcRect}/>")}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>" +
+        $"<xdr:spPr><a:xfrm rot=\"{rotation}\"{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>";
+
+    public static string TwoCellAnchor(int fromColumn, int fromRow, int toColumn, int toRow, string content, double fromColumnOffset = 0, double fromRowOffset = 0,
+        double toColumnOffset = 0, double toRowOffset = 0, string clientData = "<xdr:clientData/>") =>
+        $"<xdr:twoCellAnchor>{Point("from", fromColumn, fromRow, fromColumnOffset, fromRowOffset)}{Point("to", toColumn, toRow, toColumnOffset, toRowOffset)}{content}{clientData}</xdr:twoCellAnchor>";
+
+    public static string OneCellAnchor(int column, int row, double widthPoints, double heightPoints, string content, double columnOffset = 0, double rowOffset = 0) =>
+        $"<xdr:oneCellAnchor>{Point("from", column, row, columnOffset, rowOffset)}<xdr:ext cx=\"{(long)(widthPoints * Emu)}\" cy=\"{(long)(heightPoints * Emu)}\"/>{content}<xdr:clientData/></xdr:oneCellAnchor>";
+
+    public static string AbsoluteAnchor(double xPoints, double yPoints, double widthPoints, double heightPoints, string content) =>
+        $"<xdr:absoluteAnchor><xdr:pos x=\"{(long)(xPoints * Emu)}\" y=\"{(long)(yPoints * Emu)}\"/><xdr:ext cx=\"{(long)(widthPoints * Emu)}\" cy=\"{(long)(heightPoints * Emu)}\"/>{content}<xdr:clientData/></xdr:absoluteAnchor>";
+
+    /// <summary>A shape with a text body, a connector-free chart frame etc. are all "not a picture" to the reader.</summary>
+    public const string Shape = "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"Rectangle\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp>";
+
+    public const string ChartFrame = "<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id=\"4\" name=\"Chart\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>" +
+                                     "<xdr:xfrm/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"/></a:graphic></xdr:graphicFrame>";
+
     public byte[] Build()
     {
         using var ms = new MemoryStream();

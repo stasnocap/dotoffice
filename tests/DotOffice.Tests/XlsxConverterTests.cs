@@ -113,4 +113,18 @@ public class XlsxConverterTests
         Assert.Contains("/Shading << /Sh1 ", text);
         Assert.DoesNotContain(warnings.Warnings, w => w.Code.StartsWith("xlsx."));
     }
+
+    [Fact]
+    public async Task Pictures_are_embedded_and_only_charts_and_shapes_warn()
+    {
+        var warnings = new ConversionWarningList();
+        var png = PngTestEncoder.Encode(2, 2, 2, 8, [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
+        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: DrawingElement)
+            .AddDrawing(1, OneCellAnchor(1, 1, 60, 40, Pic()) + OneCellAnchor(3, 3, 60, 40, Shape), png);
+        var text = Encoding.Latin1.GetString(await Convert(builder, warnings));
+        Assert.Contains("/Subtype /Image", text);
+        var warning = Assert.Single(warnings.Warnings, w => w.Code.StartsWith("xlsx."));
+        Assert.Equal("xlsx.drawing", warning.Code);
+        Assert.Contains("shape", warning.Message);
+    }
 }

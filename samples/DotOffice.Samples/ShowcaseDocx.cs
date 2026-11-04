@@ -381,7 +381,7 @@ internal static class ShowcaseDocx
     }
 
     /// <summary>RGBA PNG: a color gradient with a transparent radial hole, so alpha is visible.</summary>
-    private static byte[] GradientPng(int width, int height)
+    internal static byte[] GradientPng(int width, int height)
     {
         var raw = new byte[height * (1 + width * 4)];
         for (int y = 0; y < height; y++)

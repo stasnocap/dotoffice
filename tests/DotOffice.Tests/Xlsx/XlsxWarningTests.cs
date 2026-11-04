@@ -25,24 +25,36 @@ public class XlsxWarningTests
     }
 
     [Fact]
-    public void Drawing_relationship_warns_once()
+    public void A_drawing_relationship_without_a_drawing_element_is_ignored_like_excel_does()
     {
-        Assert.Equal(["xlsx.drawing"], Codes(WithRelationship("drawing")));
+        Assert.Empty(Codes(WithRelationship("drawing")));
     }
 
     [Fact]
-    public void Drawing_element_warns_even_without_a_relationship_part()
+    public void A_drawing_that_is_not_a_drawing_part_warns_once()
     {
-        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<drawing r:id=\"rId1\"/>");
+        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: XlsxBuilder.DrawingElement);
+        builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../x/part1.xml\"/></Relationships>");
+        builder.AddPart("xl/x/part1.xml", "<x/>");
         Assert.Equal(["xlsx.drawing"], Codes(builder));
     }
 
     [Fact]
-    public void Each_sheet_with_drawings_warns_once()
+    public void Drawing_element_without_a_relationship_part_warns()
     {
-        var builder = WithRelationship("drawing");
-        builder.AddSheet("T", Row(1, C("A1", "1")), tail: "<drawing r:id=\"rId1\"/>");
-        Assert.Equal(["xlsx.drawing", "xlsx.drawing"], Codes(builder)); // one per sheet
+        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: XlsxBuilder.DrawingElement);
+        Assert.Equal(["xlsx.drawing"], Codes(builder));
+    }
+
+    [Fact]
+    public void A_malformed_drawing_warns_instead_of_failing()
+    {
+        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: XlsxBuilder.DrawingElement);
+        builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/d.xml\"/></Relationships>");
+        builder.AddPart("xl/drawings/d.xml", "<xdr:wsDr xmlns:xdr=\"urn:x\"><xdr:oneCellAnchor>");
+        Assert.Equal(["xlsx.drawing"], Codes(builder));
     }
 
     [Fact]

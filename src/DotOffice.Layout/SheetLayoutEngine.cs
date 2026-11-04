@@ -398,6 +398,7 @@ public sealed class SheetLayoutEngine
             CenterX = dx + p.CenterX * scale, CenterY = dy + p.CenterY * scale,
         },
         GradientItem g => g with { X = dx + g.X * scale, Y = dy + g.Y * scale, Width = g.Width * scale, Height = g.Height * scale },
+        ImageItem i => i with { X = dx + i.X * scale, Y = dy + i.Y * scale, Width = i.Width * scale, Height = i.Height * scale },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
         _ => item,
     };
@@ -489,6 +490,15 @@ public sealed class SheetLayoutEngine
                 r1 = Math.Max(r1, row);
                 c1 = Math.Max(c1, column);
             }
+            // Excel prints pictures even outside the cells, so they belong to the used range.
+            foreach (var image in _sheet.Images)
+            {
+                var (ix, iy, iw, ih) = ImageRectFromA1(image);
+                if (iw <= 0 || ih <= 0) continue;
+                int firstColumn = ColumnAt(ix), lastColumn = ColumnAt(ix + iw - Epsilon), firstRow = RowAt(iy), lastRow = RowAt(iy + ih - Epsilon);
+                if (r1 < 0) (r0, c0) = (firstRow, firstColumn);
+                (r0, c0, r1, c1) = (Math.Min(r0, firstRow), Math.Min(c0, firstColumn), Math.Max(r1, lastRow), Math.Max(c1, lastColumn));
+            }
             foreach (var merge in _sheet.Merges)
             {
                 if (r1 < 0) continue;
@@ -549,6 +559,151 @@ public sealed class SheetLayoutEngine
                 reach += _sheet.ColumnWidth(c);
             }
             return c;
+        }
+
+        // ---- pictures
+
+        private double ColumnWidthOf(int column) => _sheet.ColumnWidth(column);
+
+        private double RowHeightOf(int row) =>
+            _sheet.HiddenRows.Contains(row) ? 0 : _rowHeights.TryGetValue(row, out var h) ? h : _sheet.RowHeight(row);
+
+        /// <summary>The distance from the corner of A1 to the start of an index, for sizes that differ from the default only at a few indexes.</summary>
+        private static double StartOf(int index, double defaultSize, Func<int, double> size, IEnumerable<int> overridden)
+        {
+            double total = index * defaultSize;
+            foreach (int key in overridden.Distinct())
+                if (key < index) total += size(key) - defaultSize;
+            return total;
+        }
+
+        private double ColumnStart(int column) =>
+            StartOf(column, _sheet.DefaultColumnWidth, ColumnWidthOf, _sheet.ColumnWidths.Keys.Concat(_sheet.HiddenColumns));
+
+        private double RowStart(int row) =>
+            StartOf(row, _sheet.DefaultRowHeight, RowHeightOf, _sheet.RowHeights.Keys.Concat(_sheet.HiddenRows).Concat(_rowHeights.Keys));
+
+        /// <summary>The column containing a distance from the left edge of A1.</summary>
+        private int ColumnAt(double x)
+        {
+            double edge = 0;
+            for (int c = 0; c < MaxColumns; c++)
+            {
+                edge += ColumnWidthOf(c);
+                if (x < edge - Epsilon || c == MaxColumns - 1) return c;
+            }
+            return MaxColumns - 1;
+        }
+
+        /// <summary>The row containing a distance from the top edge of A1.</summary>
+        private int RowAt(double y)
+        {
+            double edge = 0;
+            for (int r = 0; r < 1_048_576; r++)
+            {
+                edge += RowHeightOf(r);
+                if (y < edge - Epsilon || r == 1_048_575) return r;
+            }
+            return 1_048_575;
+        }
+
+        /// <summary>The rectangle of a picture measured from the corner of A1. Rotated pictures are placed by their unrotated frame.</summary>
+        private (double X, double Y, double Width, double Height) ImageRectFromA1(SheetImage image)
+        {
+            switch (image.Anchor)
+            {
+                case ImageAnchorKind.TwoCell:
+                {
+                    double x0 = ColumnStart(image.From.Column) + image.From.ColumnOffset, y0 = RowStart(image.From.Row) + image.From.RowOffset;
+                    double x1 = ColumnStart(image.To.Column) + image.To.ColumnOffset, y1 = RowStart(image.To.Row) + image.To.RowOffset;
+                    return (x0, y0, Math.Max(x1 - x0, 0), Math.Max(y1 - y0, 0));
+                }
+                case ImageAnchorKind.OneCell:
+                    return (ColumnStart(image.From.Column) + image.From.ColumnOffset, RowStart(image.From.Row) + image.From.RowOffset, image.Width, image.Height);
+                default:
+                    return (image.X, image.Y, image.Width, image.Height);
+            }
+        }
+
+        /// <summary>A run of page positions that shows a contiguous stretch of the sheet: sheet distances S0–S1 are drawn from page distance P0.</summary>
+        private readonly record struct Segment(double S0, double S1, double P0);
+
+        private static List<Segment> Segments(List<int> indexes, Func<int, double> start, Func<int, double> size, Dictionary<int, double> position)
+        {
+            var segments = new List<Segment>();
+            foreach (int index in indexes)
+            {
+                double s0 = start(index), s1 = s0 + size(index);
+                if (segments.Count > 0 && Math.Abs(segments[^1].S1 - s0) < Epsilon)
+                    segments[^1] = segments[^1] with { S1 = s1 };
+                else
+                    segments.Add(new Segment(s0, s1, position[index]));
+            }
+            return segments;
+        }
+
+        /// <summary>
+        /// Draws the pictures that fall on this page. A picture is cut into the pieces that lie over the page's column and row runs
+        /// (the repeated title rows and columns are runs of their own) and each piece is clipped to its run, so pictures that span
+        /// several pages continue on the next one and nothing reaches outside the print range.
+        /// </summary>
+        private void EmitImages(List<int> columns, List<int> rows, Dictionary<int, double> columnX, Dictionary<int, double> rowY, List<LayoutItem> items)
+        {
+            if (_sheet.Images.Count == 0) return;
+            double originX = ColumnStart(_range.FirstColumn), originY = RowStart(_range.FirstRow);
+            var columnSegments = Segments(columns, c => ColumnStart(c) - originX, ColumnWidthOf, columnX);
+            var rowSegments = Segments(rows, r => RowStart(r) - originY, RowHeightOf, rowY);
+
+            foreach (var image in _sheet.Images)
+            {
+                var (ax, ay, w, h) = ImageRectFromA1(image);
+                double x = ax - originX, y = ay - originY;
+                if (w <= 0.01 || h <= 0.01) continue;
+                // The turned bounding box of a rotated picture reaches beyond its frame by at most this much on each side.
+                double reach = image.Rotation == 0 ? 0 : (Math.Abs(w) + Math.Abs(h));
+                foreach (var columnSegment in columnSegments)
+                {
+                    double x0 = Math.Max(x - reach, columnSegment.S0), x1 = Math.Min(x + w + reach, columnSegment.S1);
+                    if (x1 - x0 <= Epsilon) continue;
+                    foreach (var rowSegment in rowSegments)
+                    {
+                        double y0 = Math.Max(y - reach, rowSegment.S0), y1 = Math.Min(y + h + reach, rowSegment.S1);
+                        if (y1 - y0 <= Epsilon) continue;
+                        double px = columnSegment.P0 + (x - columnSegment.S0), py = rowSegment.P0 + (y - rowSegment.S0);
+                        // A turned picture sticks out of its frame, so it is only cut at the edges of the printed run, not at its frame.
+                        var visible = image.Rotation != 0
+                            ? (columnSegment.P0, rowSegment.P0, columnSegment.S1 - columnSegment.S0, rowSegment.S1 - rowSegment.S0)
+                            : (columnSegment.P0 + (x0 - columnSegment.S0), rowSegment.P0 + (y0 - rowSegment.S0), x1 - x0, y1 - y0);
+                        EmitImage(image, px, py, w, h, visible, items);
+                    }
+                }
+            }
+        }
+
+        private static void EmitImage(SheetImage image, double x, double y, double width, double height,
+            (double X, double Y, double Width, double Height) visible, List<LayoutItem> items)
+        {
+            int pushed = 1;
+            items.Add(new PushItem(visible));
+            if (image.Rotation != 0)
+            {
+                items.Add(new PushItem(null, image.Rotation, x + width / 2, y + height / 2));
+                pushed++;
+            }
+            double keepX = 1 - image.CropLeft - image.CropRight, keepY = 1 - image.CropTop - image.CropBottom;
+            if (keepX > 0.001 && keepY > 0.001)
+            {
+                if (keepX < 1 || keepY < 1)
+                {
+                    // Cropped: draw the whole image so that the kept part fills the frame, and clip to the frame.
+                    items.Add(new PushItem((x, y, width, height)));
+                    pushed++;
+                    double fullWidth = width / keepX, fullHeight = height / keepY;
+                    items.Add(new ImageItem(x - image.CropLeft * fullWidth, y - image.CropTop * fullHeight, fullWidth, fullHeight, image.Image));
+                }
+                else items.Add(new ImageItem(x, y, width, height, image.Image));
+            }
+            for (int i = 0; i < pushed; i++) items.Add(new PopItem());
         }
 
         // ---- row heights
@@ -723,6 +878,7 @@ public sealed class SheetLayoutEngine
                 EmitText(d.Cell, d.Row, d.Column, d.X, d.Y, d.Width, d.Height, d.Merge is not null, columns, items);
             foreach (var d in drawn)
                 EmitBorders(d.Cell.Style.Borders, d.X, d.Y, d.Width, d.Height, items);
+            EmitImages(columns, rows, columnX, rowY, items);
 
             double offsetX = _setup.Margins.Left, offsetY = _setup.Margins.Top;
             if (_setup.CenterHorizontally)

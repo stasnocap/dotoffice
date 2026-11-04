@@ -27,6 +27,48 @@ public readonly record struct CellRange(int FirstRow, int FirstColumn, int LastR
         row >= FirstRow && row <= LastRow && column >= FirstColumn && column <= LastColumn;
 }
 
+/// <summary>A position inside a cell: the cell (zero-based) and the offset from its top-left corner in points.</summary>
+public readonly record struct AnchorPoint(int Column, int Row, double ColumnOffset, double RowOffset);
+
+public enum ImageAnchorKind
+{
+    /// <summary>Corners at <see cref="SheetImage.From"/> and <see cref="SheetImage.To"/>; the size follows the cells.</summary>
+    TwoCell,
+    /// <summary>Top-left corner at <see cref="SheetImage.From"/>, size <see cref="SheetImage.Width"/> × <see cref="SheetImage.Height"/>.</summary>
+    OneCell,
+    /// <summary>Top-left corner at (<see cref="SheetImage.X"/>, <see cref="SheetImage.Y"/>) measured from the corner of A1, with the given size.</summary>
+    Absolute,
+}
+
+/// <summary>A picture placed on a worksheet by a drawing anchor. Lengths in points.</summary>
+public sealed record SheetImage
+{
+    public required ImageData Image { get; init; }
+
+    public ImageAnchorKind Anchor { get; init; }
+
+    public AnchorPoint From { get; init; }
+
+    public AnchorPoint To { get; init; }
+
+    public double X { get; init; }
+
+    public double Y { get; init; }
+
+    public double Width { get; init; }
+
+    public double Height { get; init; }
+
+    /// <summary>Cropping as fractions of the image removed from each side.</summary>
+    public double CropLeft { get; init; }
+    public double CropTop { get; init; }
+    public double CropRight { get; init; }
+    public double CropBottom { get; init; }
+
+    /// <summary>Rotation in degrees counter-clockwise.</summary>
+    public double Rotation { get; init; }
+}
+
 public sealed class Worksheet(string name)
 {
     public string Name { get; } = name;
@@ -51,6 +93,9 @@ public sealed class Worksheet(string name)
     public double DefaultRowHeight { get; set; } = 15;
 
     public List<CellRange> Merges { get; } = [];
+
+    /// <summary>Pictures in drawing order (later ones are on top).</summary>
+    public List<SheetImage> Images { get; } = [];
 
     public SheetPageSetup PageSetup { get; set; } = new();
 

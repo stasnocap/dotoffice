@@ -72,6 +72,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             _sheetWarnings.Clear();
             using (var r = Package.OpenXml(rel.Target))
                 ReadWorksheet(r, sheet);
+            ReadDrawing(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
             workbook.Sheets.Add(sheet);
@@ -201,6 +202,44 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     // ------------------------------------------------------------------ worksheet
 
     private readonly HashSet<string> _sheetWarnings = [];
+    private string? _drawingRelationship;
+    private readonly Dictionary<string, ImageData> _images = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Loads an image part once per package.</summary>
+    internal ImageData GetImage(string partName)
+    {
+        if (_images.TryGetValue(partName, out var image)) return image;
+        return _images[partName] = new ImageData(Package.ReadAllBytes(partName), partName);
+    }
+
+    /// <summary>Reads the pictures of the sheet's drawing; charts, shapes and anything else in it are reported once.</summary>
+    private void ReadDrawing(Worksheet sheet, string sheetPart)
+    {
+        var id = _drawingRelationship;
+        _drawingRelationship = null;
+        if (id is null) return;
+        if (!Package.GetRelationships(sheetPart).TryGetValue(id, out var rel) || rel.IsExternal || !Package.Exists(rel.Target))
+        {
+            WarnOnce(sheet, "xlsx.drawing", "has a drawing whose part is missing, so its pictures, charts and shapes are not rendered.");
+            return;
+        }
+        try
+        {
+            var skipped = XlsxDrawings.Read(this, sheet, rel.Target);
+            if (skipped.Any)
+            {
+                var parts = new List<string>();
+                if (skipped.Charts > 0) parts.Add(skipped.Charts == 1 ? "a chart" : $"{skipped.Charts} charts");
+                if (skipped.Shapes > 0) parts.Add(skipped.Shapes == 1 ? "a shape" : $"{skipped.Shapes} shapes");
+                if (skipped.Other > 0) parts.Add("other drawing objects");
+                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures are).");
+            }
+        }
+        catch (XmlException)
+        {
+            WarnOnce(sheet, "xlsx.drawing", "has a malformed drawing, so its pictures, charts and shapes are not rendered.");
+        }
+    }
 
     private void WarnOnce(Worksheet sheet, string code, string message)
     {
@@ -215,9 +254,6 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             if (rel.IsExternal) continue;
             switch (rel.Kind)
             {
-                case "drawing":
-                    WarnOnce(sheet, "xlsx.drawing", "contains charts, images or shapes, which are not rendered.");
-                    break;
                 case "pivotTable":
                     WarnOnce(sheet, "xlsx.pivot", "contains a pivot table; its cached cell values are printed but it is not refreshed or styled.");
                     break;
@@ -254,7 +290,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     ReadSheetData(r, sheet, ref formulaWarned);
                     break;
                 case "drawing":
-                    WarnOnce(sheet, "xlsx.drawing", "contains charts, images or shapes, which are not rendered.");
+                    _drawingRelationship = r.RelationshipId();
                     r.Read();
                     break;
                 case "conditionalFormatting":
