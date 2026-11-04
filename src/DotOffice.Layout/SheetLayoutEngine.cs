@@ -41,14 +41,172 @@ public sealed class SheetLayoutEngine
     public LayoutDocument Layout(Workbook workbook, CancellationToken cancellationToken = default)
     {
         var document = new LayoutDocument { Title = workbook.Title, Author = workbook.Author };
+        var records = new List<PageRecord>();
         foreach (var sheet in workbook.Sheets)
         {
             if (sheet.Visibility != SheetVisibility.Visible) continue;
-            new SheetPass(this, workbook, sheet, document, cancellationToken).Run();
+            new SheetPass(this, sheet, document, records, cancellationToken).Run();
         }
         if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(612, 792));
+
+        // Page numbers continue across sheets, so headers and footers wait until the total is known.
+        for (int i = 0; i < records.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EmitHeaderFooter(records[i], i + 1, records.Count, workbook);
+        }
         return document;
     }
+
+    /// <summary>A page of a sheet, kept until headers and footers can be drawn.</summary>
+    private sealed record PageRecord(LayoutPage Page, Worksheet Sheet, int IndexInSheet);
+
+    // ------------------------------------------------------------------ headers and footers
+
+    private static readonly RunProperties HeaderFont = new() { FontFamily = "Calibri", FontSize = 11 };
+
+    private void EmitHeaderFooter(PageRecord record, int number, int total, Workbook workbook)
+    {
+        var setup = record.Sheet.PageSetup;
+        bool first = record.IndexInSheet == 0;
+        static HeaderFooterParts Pick(HeaderFooterText text, bool first, int number) =>
+            first && text.First is { } f ? f : number % 2 == 0 && text.Even is { } e ? e : text.Odd;
+        var header = Pick(setup.Header, first, number);
+        var footer = Pick(setup.Footer, first, number);
+        if (header.IsEmpty && footer.IsEmpty) return;
+        var context = new FieldContext(number, total, record.Sheet.Name, workbook.Title ?? "");
+        var page = record.Page;
+        double left = setup.Margins.Left, right = page.Width - setup.Margins.Right;
+
+        void Part(string text, double anchorLeft, double anchorRight, int alignment, bool isHeader)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var lines = text.Replace("\r\n", "\n").Split('\n').Select(l => BuildHeaderLine(l, context)).Where(l => l is not null).Select(l => l!).ToList();
+            if (lines.Count == 0) return;
+            double pitch(HeaderLine l) => l.Size * 1.2;
+            double height = lines.Sum(pitch);
+            double top = isHeader ? setup.HeaderDistance : page.Height - setup.FooterDistance - height;
+            foreach (var line in lines)
+            {
+                double x0 = alignment switch
+                {
+                    0 => anchorLeft,
+                    1 => (anchorLeft + anchorRight) / 2 - line.Width / 2,
+                    _ => anchorRight - line.Width,
+                };
+                var metrics = line.Metrics;
+                double baseline = top + (pitch(line) - (metrics.Ascent + metrics.Descent)) / 2 + metrics.Ascent;
+                var items = new List<LayoutItem>();
+                ParagraphLayouter.DrawLine(line.Line, x0, baseline, items);
+                page.Items.AddRange(items);
+                top += pitch(line);
+            }
+        }
+
+        foreach (var (parts, isHeader) in new[] { (header, true), (footer, false) })
+        {
+            Part(parts.Left, left, right, 0, isHeader);
+            Part(parts.Center, left, right, 1, isHeader);
+            Part(parts.Right, left, right, 2, isHeader);
+        }
+    }
+
+    private readonly record struct FieldContext(int Page, int Pages, string Sheet, string File);
+
+    private sealed record HeaderLine(Line Line, double Width, double Size, FontMetrics Metrics);
+
+    /// <summary>Turns one line of header/footer text (with its <c>&amp;</c> codes) into drawable atoms.</summary>
+    private HeaderLine? BuildHeaderLine(string text, FieldContext context)
+    {
+        var runs = new List<(string Text, RunProperties Props)>();
+        var buffer = new System.Text.StringBuilder();
+        var props = HeaderFont;
+        double maxSize = 0;
+
+        void Flush()
+        {
+            if (buffer.Length == 0) return;
+            runs.Add((buffer.ToString(), props));
+            maxSize = Math.Max(maxSize, props.FontSize);
+            buffer.Clear();
+        }
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c != '&' || i + 1 >= text.Length)
+            {
+                buffer.Append(c);
+                continue;
+            }
+            char code = text[++i];
+            switch (code)
+            {
+                case '&': buffer.Append('&'); break;
+                case 'P': buffer.Append(context.Page.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
+                case 'N': buffer.Append(context.Pages.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
+                case 'A': buffer.Append(context.Sheet); break;
+                case 'F': buffer.Append(context.File); break;
+                case 'D': buffer.Append(DateTime.Today.ToString("M/d/yyyy", System.Globalization.CultureInfo.InvariantCulture)); break;
+                case 'T': buffer.Append(DateTime.Now.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture)); break;
+                case 'B': Flush(); props = props with { Bold = !props.Bold }; break;
+                case 'I': Flush(); props = props with { Italic = !props.Italic }; break;
+                case 'U': Flush(); props = props with { Underline = props.Underline == UnderlineStyle.None ? UnderlineStyle.Single : UnderlineStyle.None }; break;
+                case 'E': Flush(); props = props with { Underline = UnderlineStyle.Double }; break;
+                case 'S': Flush(); props = props with { Strike = !props.Strike }; break;
+                case '"':
+                {
+                    int end = text.IndexOf('"', i + 1);
+                    if (end < 0) end = text.Length;
+                    var spec = text.Substring(i + 1, end - i - 1).Split(',');
+                    Flush();
+                    var family = spec[0].Trim();
+                    if (family.Length > 0 && family != "-") props = props with { FontFamily = family };
+                    if (spec.Length > 1)
+                    {
+                        var style = spec[1];
+                        props = props with
+                        {
+                            Bold = style.Contains("Bold", StringComparison.OrdinalIgnoreCase),
+                            Italic = style.Contains("Italic", StringComparison.OrdinalIgnoreCase),
+                        };
+                    }
+                    i = end;
+                    break;
+                }
+                case 'K' when IsHex(text, i + 1, 6):
+                    Flush();
+                    props = props with { Color = new Color(Convert.ToByte(text.Substring(i + 1, 2), 16), Convert.ToByte(text.Substring(i + 3, 2), 16), Convert.ToByte(text.Substring(i + 5, 2), 16)) };
+                    i += 6;
+                    break;
+                case >= '0' and <= '9':
+                {
+                    int digits = 1;
+                    if (i + 1 < text.Length && char.IsAsciiDigit(text[i + 1])) digits = 2;
+                    double size = double.Parse(text.AsSpan(i, digits), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture);
+                    Flush();
+                    if (size > 0) props = props with { FontSize = size };
+                    i += digits - 1;
+                    break;
+                }
+                default: break; // &G, &X, &Y, &Z … are ignored
+            }
+        }
+        Flush();
+        if (runs.Count == 0) return null;
+
+        var paragraph = new Paragraph { MarkProperties = runs[0].Props };
+        foreach (var (runText, runProps) in runs) paragraph.Inlines.Add(new TextRun(runText, runProps));
+        var atoms = _itemizer.Itemize(paragraph, _ => "");
+        var lines = LineBuilder.Build(atoms, new LineFrame(1e7, 0, 0, 0, [], 36), ParagraphAlignment.Left, false, null);
+        if (lines.Count == 0) return null;
+        var line = lines[0];
+        var metrics = FontMetrics.Of(_fonts.ForCharacter(runs[0].Props, '0').Font, maxSize);
+        return new HeaderLine(line, LineWidth(line), maxSize, metrics);
+    }
+
+    private static bool IsHex(string text, int start, int count) =>
+        start + count <= text.Length && text.AsSpan(start, count).ToString().All(char.IsAsciiHexDigit);
 
     // ------------------------------------------------------------------ text
 
@@ -176,7 +334,9 @@ public sealed class SheetLayoutEngine
         private readonly SheetLayoutEngine _engine;
         private readonly Worksheet _sheet;
         private readonly LayoutDocument _document;
+        private readonly List<PageRecord> _records;
         private readonly CancellationToken _ct;
+        private int _sheetPages;
         private readonly SheetPageSetup _setup;
 
         private CellRange _range;
@@ -184,9 +344,10 @@ public sealed class SheetLayoutEngine
         private readonly Dictionary<(int Row, int Column), TextBlock> _blocks = [];
         private readonly Dictionary<(int Row, int Column), CellRange> _anchors = [];
 
-        public SheetPass(SheetLayoutEngine engine, Workbook workbook, Worksheet sheet, LayoutDocument document, CancellationToken ct)
+        public SheetPass(SheetLayoutEngine engine, Worksheet sheet, LayoutDocument document, List<PageRecord> records, CancellationToken ct)
         {
             _engine = engine;
+            _records = records;
             _sheet = sheet;
             _document = document;
             _ct = ct;
@@ -486,6 +647,7 @@ public sealed class SheetLayoutEngine
                 offsetY += Math.Max(0, (_setup.PageHeight - _setup.Margins.Top - _setup.Margins.Bottom - bandHeight * scale) / 2);
             foreach (var item in items) page.Items.Add(Transform(item, offsetX, offsetY, scale));
             _document.Pages.Add(page);
+            _records.Add(new PageRecord(page, _sheet, _sheetPages++));
         }
 
         private void EmitGridLines(List<int> columns, List<int> rows, Dictionary<int, double> columnX, Dictionary<int, double> rowY,

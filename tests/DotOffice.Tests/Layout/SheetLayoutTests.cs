@@ -511,3 +511,113 @@ public class SheetPaginationTests
         Assert.True(doc.Pages[0].Items.OfType<TextItem>().First().FontSize < 10);
     }
 }
+
+public class SheetHeaderFooterTests
+{
+    private static Worksheet WithText(string name, int rows = 1)
+    {
+        var sheet = new Worksheet(name);
+        for (int r = 0; r < rows; r++) sheet.Cells[(r, 0)] = SheetLayoutTests.Text($"{name}{r}");
+        return sheet;
+    }
+
+    private static string Joined(LayoutPage page, double? aboveY = null, double? belowY = null) =>
+        string.Concat(page.Items.OfType<TextItem>()
+            .Where(t => (aboveY is null || t.Baseline < aboveY) && (belowY is null || t.Baseline > belowY)).Select(t => t.Text));
+
+    [Fact]
+    public void Fields_are_substituted_and_page_numbers_continue_across_sheets()
+    {
+        var workbook = new Workbook { Title = "Book" };
+        var first = WithText("One", 80); // two pages
+        first.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "&A", "") };
+        first.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("", "Page &P of &N", "") };
+        var second = WithText("Two");
+        second.PageSetup.Header = first.PageSetup.Header;
+        second.PageSetup.Footer = first.PageSetup.Footer;
+        workbook.Sheets.Add(first);
+        workbook.Sheets.Add(second);
+        var doc = SheetLayoutTests.Layout(workbook);
+        Assert.Equal(3, doc.Pages.Count);
+        for (int i = 0; i < 3; i++)
+        {
+            var footer = Joined(doc.Pages[i], belowY: 740);
+            Assert.Equal($"Page {i + 1} of 3", footer);
+        }
+        Assert.Contains("One", Joined(doc.Pages[1], aboveY: 40));
+        Assert.Contains("Two", Joined(doc.Pages[2], aboveY: 40));
+    }
+
+    [Fact]
+    public void Left_center_and_right_parts_are_anchored_to_the_margins()
+    {
+        var sheet = WithText("S");
+        sheet.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("L", "C", "R") };
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().Where(t => t.Baseline > 740).ToDictionary(t => t.Text);
+        var m = sheet.PageSetup.Margins;
+        Assert.Equal(m.Left, items["L"].X, 1);
+        Assert.True(Math.Abs(items["C"].X + items["C"].FontSize * 0.3 - 306) < 6);
+        Assert.True(items["R"].X + 10 > 612 - m.Right - 10 && items["R"].X < 612 - m.Right);
+    }
+
+    [Fact]
+    public void Footers_sit_above_the_bottom_edge_and_headers_below_the_top_edge()
+    {
+        var sheet = WithText("S");
+        sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "head", "") };
+        sheet.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("", "foot", "") };
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToList();
+        var head = items.First(t => t.Text == "head");
+        var foot = items.First(t => t.Text == "foot");
+        Assert.InRange(head.Baseline, sheet.PageSetup.HeaderDistance, sheet.PageSetup.HeaderDistance + 15);
+        Assert.InRange(foot.Baseline, 792 - sheet.PageSetup.FooterDistance - 15, 792 - sheet.PageSetup.FooterDistance);
+    }
+
+    [Fact]
+    public void Font_codes_change_size_and_weight_and_double_ampersand_is_literal()
+    {
+        var sheet = WithText("S");
+        sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "&\"Arial,Bold\"&20Big&B plain &&", "") };
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().Where(t => t.Baseline < 52).ToList();
+        var big = items.First(t => t.Text == "Big");
+        Assert.Equal(20, big.FontSize);
+        Assert.Contains("&", string.Concat(items.Select(t => t.Text)));
+        Assert.Contains("plain", string.Concat(items.Select(t => t.Text)));
+    }
+
+    [Fact]
+    public void First_page_and_even_page_variants_are_used()
+    {
+        var sheet = WithText("S", 80);
+        sheet.PageSetup.Header = new HeaderFooterText
+        {
+            Odd = new HeaderFooterParts("", "odd", ""),
+            Even = new HeaderFooterParts("", "even", ""),
+            First = new HeaderFooterParts("", "first", ""),
+        };
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.Equal(2, doc.Pages.Count);
+        Assert.Equal("first", Joined(doc.Pages[0], aboveY: 40));
+        Assert.Equal("even", Joined(doc.Pages[1], aboveY: 40));
+    }
+
+    [Fact]
+    public void Multiple_lines_stack_downwards_in_a_header()
+    {
+        var sheet = WithText("S");
+        sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "one\ntwo", "") };
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToDictionary(t => t.Text);
+        Assert.True(items["two"].Baseline > items["one"].Baseline + 10);
+    }
+
+    [Fact]
+    public void Header_and_footer_are_not_scaled_with_the_sheet()
+    {
+        var sheet = WithText("S");
+        sheet.PageSetup.Scale = 0.5;
+        sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "head", "") };
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToDictionary(t => t.Text);
+        Assert.Equal(11, items["head"].FontSize);
+        Assert.Equal(5, items["S0"].FontSize);
+    }
+}
