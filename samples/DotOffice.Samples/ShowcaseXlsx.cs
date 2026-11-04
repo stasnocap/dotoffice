@@ -1,0 +1,222 @@
+using System.Globalization;
+using System.IO.Compression;
+using System.Security;
+using System.Text;
+
+namespace DotOffice.Samples;
+
+/// <summary>
+/// Generates a self-contained showcase XLSX (raw SpreadsheetML) exercising the XLSX → PDF converter: number and date formats,
+/// styles with fills and borders, merged cells, print titles and manual breaks, fit-to-width, wrapping, overflow, alignment,
+/// indentation, headers and footers, and a hidden sheet whose text must not be printed. Everything in it is generated.
+/// </summary>
+internal static class ShowcaseXlsx
+{
+    private const string Main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    private const string Rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string RelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+
+    // cellXfs indexes (see Styles)
+    private const int Default = 0, Title = 1, Header = 2, Money = 3, Percent = 4, IsoDate = 5, Time = 6, Accounting = 7, Wrap = 8,
+        Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16;
+
+    public const string HiddenMarker = "HIDDENSHEETMARKER";
+
+    public static void Write(string path)
+    {
+        var sheets = new List<(string Name, string Xml, string State)>
+        {
+            ("Formats", Formats(), "visible"),
+            ("Long table", LongTable(), "visible"),
+            ("Wide", Wide(), "visible"),
+            ("Text", TextSheet(), "visible"),
+            ("Secret", Hidden(), "hidden"),
+        };
+
+        using var stream = File.Create(path);
+        using var zip = new ZipArchive(stream, ZipArchiveMode.Create);
+        var content = new StringBuilder("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+            "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
+            "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
+            "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>");
+        var rels = new StringBuilder();
+        var sheetEntries = new StringBuilder();
+        for (int i = 0; i < sheets.Count; i++)
+        {
+            var (name, xml, state) = sheets[i];
+            Entry(zip, $"xl/worksheets/sheet{i + 1}.xml", xml);
+            content.Append($"<Override PartName=\"/xl/worksheets/sheet{i + 1}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>");
+            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}worksheet\" Target=\"worksheets/sheet{i + 1}.xml\"/>");
+            var stateAttr = state == "visible" ? "" : $" state=\"{state}\"";
+            sheetEntries.Append($"<sheet name=\"{SecurityElement.Escape(name)}\" sheetId=\"{i + 1}\"{stateAttr} r:id=\"rId{i + 1}\"/>");
+        }
+        rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
+        content.Append("</Types>");
+
+        Entry(zip, "[Content_Types].xml", content.ToString());
+        Entry(zip, "_rels/.rels",
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+            $"<Relationship Id=\"rId1\" Type=\"{RelType}officeDocument\" Target=\"xl/workbook.xml\"/>" +
+            "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>");
+        Entry(zip, "docProps/core.xml",
+            "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">" +
+            "<dc:title>DotOffice XLSX showcase</dc:title><dc:creator>DotOffice</dc:creator></cp:coreProperties>");
+        Entry(zip, "xl/_rels/workbook.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
+        Entry(zip, "xl/workbook.xml",
+            $"<workbook xmlns=\"{Main}\" xmlns:r=\"{Rel}\"><sheets>{sheetEntries}</sheets>" +
+            "<definedNames><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName></definedNames></workbook>");
+        Entry(zip, "xl/styles.xml", Styles);
+    }
+
+    // ------------------------------------------------------------------ styles
+
+    private const string Styles =
+        $"<styleSheet xmlns=\"{Main}\">" +
+        "<numFmts count=\"3\"><numFmt numFmtId=\"164\" formatCode=\"yyyy\\-mm\\-dd\"/><numFmt numFmtId=\"165\" formatCode=\"#,##0;[Red]\\(#,##0\\)\"/>" +
+        "<numFmt numFmtId=\"166\" formatCode=\"dddd, mmmm d, yyyy\"/></numFmts>" +
+        "<fonts count=\"4\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font>" +
+        "<font><b/><sz val=\"16\"/><color rgb=\"FFFFFFFF\"/><name val=\"Calibri\"/></font><font><i/><sz val=\"11\"/><color rgb=\"FF7F7F7F\"/><name val=\"Calibri\"/></font></fonts>" +
+        "<fills count=\"4\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>" +
+        "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF1F3864\"/></patternFill></fill>" +
+        "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFD9E1F2\"/></patternFill></fill></fills>" +
+        "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
+        "<border><left/><right/><top/><bottom style=\"medium\"><color rgb=\"FF1F3864\"/></bottom><diagonal/></border>" +
+        "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border></borders>" +
+        "<cellXfs count=\"17\">" +
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 0 default
+        "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"2\" borderId=\"0\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 1 title
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"1\"><alignment horizontal=\"center\"/></xf>" +                                                   // 2 header
+        "<xf numFmtId=\"4\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 3 #,##0.00
+        "<xf numFmtId=\"9\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                        // 4 0%
+        "<xf numFmtId=\"164\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 5 yyyy-mm-dd
+        "<xf numFmtId=\"18\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 6 h:mm AM/PM
+        "<xf numFmtId=\"165\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 7 accounting-ish
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment vertical=\"top\" wrapText=\"1\"/></xf>" +                                          // 8 wrap
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"><alignment horizontal=\"right\"/></xf>" +                                                   // 9 right
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"><alignment horizontal=\"center\"/></xf>" +                                                  // 10 center
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"><alignment horizontal=\"left\" indent=\"2\"/></xf>" +                                        // 11 indent
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"/>" +                                                                                        // 12 boxed
+        "<xf numFmtId=\"11\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 13 0.00E+00
+        "<xf numFmtId=\"10\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 14 0.00%
+        "<xf numFmtId=\"166\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 15 long date
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\"/>" +                                                                                        // 16 bold
+        "</cellXfs></styleSheet>";
+
+    // ------------------------------------------------------------------ cell helpers
+
+    private static string Str(string reference, string text, int style = Default) =>
+        $"<c r=\"{reference}\" t=\"inlineStr\" s=\"{style}\"><is><t xml:space=\"preserve\">{SecurityElement.Escape(text)}</t></is></c>";
+
+    private static string Num(string reference, double value, int style = Default) =>
+        $"<c r=\"{reference}\" s=\"{style}\"><v>{value.ToString("R", CultureInfo.InvariantCulture)}</v></c>";
+
+    private static string Row(int row, string cells, double? height = null) =>
+        $"<row r=\"{row}\"{(height is { } h ? $" ht=\"{h.ToString(CultureInfo.InvariantCulture)}\" customHeight=\"1\"" : "")}>{cells}</row>";
+
+    private static string ColumnName(int index)
+    {
+        var name = "";
+        for (index++; index > 0; index = (index - 1) / 26) name = (char)('A' + (index - 1) % 26) + name;
+        return name;
+    }
+
+    private const string HeaderFooter =
+        "<headerFooter><oddHeader>&amp;C&amp;A</oddHeader><oddFooter>&amp;CPage &amp;P of &amp;N</oddFooter></headerFooter>";
+
+    private static string Sheet(string head, string rows, string tail = "") =>
+        $"<worksheet xmlns=\"{Main}\" xmlns:r=\"{Rel}\">{head}<sheetData>{rows}</sheetData>{tail}</worksheet>";
+
+    // ------------------------------------------------------------------ sheets
+
+    private static string Formats()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Number and date formats", Title) + Str("B1", "", Title) + Str("C1", "", Title) + Str("D1", "", Title), 30));
+        rows.Append(Row(3, Str("A3", "Description", Header) + Str("B3", "Value", Header) + Str("C3", "Format code", Header) + Str("D3", "Notes", Header)));
+        var samples = new (string Name, double Value, int Style, string Code, string Note)[]
+        {
+            ("Thousands separator", 1234.5, Money, "#,##0.00", "1,234.50"),
+            ("Percentage", 0.25, Percent, "0%", "25%"),
+            ("Percentage, two decimals", 0.2567, Percent2, "0.00%", "25.67%"),
+            ("ISO date", 45000, IsoDate, "yyyy-mm-dd", "2023-03-15"),
+            ("Long date", 45000, LongDate, "dddd, mmmm d, yyyy", "weekday and month names"),
+            ("Time of day", 0.5, Time, "h:mm AM/PM", "noon"),
+            ("Negative in red", -1234567, Accounting, "#,##0;[Red](#,##0)", "parentheses"),
+            ("Scientific", 12345.678, Scientific, "0.00E+00", "1.23E+04"),
+            ("General", 0.1 + 0.2, Default, "General", "no float noise"),
+        };
+        int r = 4;
+        foreach (var (name, value, style, code, note) in samples)
+        {
+            rows.Append(Row(r, Str($"A{r}", name, Boxed) + Num($"B{r}", value, style) + Str($"C{r}", code, Boxed) + Str($"D{r}", note, Boxed)));
+            r++;
+        }
+        rows.Append(Row(r + 1, Str($"A{r + 1}", "Text, boolean and error values are not number-formatted:", Bold)));
+        rows.Append(Row(r + 2, Str($"A{r + 2}", "Text", Default) + $"<c r=\"B{r + 2}\" t=\"b\"><v>1</v></c>" + $"<c r=\"C{r + 2}\" t=\"e\"><v>#N/A</v></c>"));
+
+        var cols = "<cols><col min=\"1\" max=\"1\" width=\"24\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"28\" customWidth=\"1\"/>" +
+                   "<col min=\"3\" max=\"3\" width=\"20\" customWidth=\"1\"/><col min=\"4\" max=\"4\" width=\"14\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(),
+            "<mergeCells count=\"1\"><mergeCell ref=\"A1:D1\"/></mergeCells><printOptions horizontalCentered=\"1\"/>" +
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string LongTable()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Long table report", Title) + Str("B1", "", Title) + Str("C1", "", Title), 26));
+        rows.Append(Row(2, Str("A2", "Item", Header) + Str("B2", "Name", Header) + Str("C2", "Amount", Header)));
+        for (int i = 1; i <= 200; i++)
+        {
+            int r = i + 2;
+            rows.Append(Row(r, Num($"A{r}", i, Center) + Str($"B{r}", $"Row {i} of the long table") + Num($"C{r}", i * 37.5 % 1000, Money)));
+        }
+        var cols = "<cols><col min=\"1\" max=\"1\" width=\"10\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"36\" customWidth=\"1\"/><col min=\"3\" max=\"3\" width=\"16\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(),
+            "<mergeCells count=\"1\"><mergeCell ref=\"A1:C1\"/></mergeCells>" +
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +
+            "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"60\" max=\"16383\" man=\"1\"/></rowBreaks>");
+    }
+
+    private static string Wide()
+    {
+        var header = new StringBuilder();
+        var body = new StringBuilder();
+        for (int c = 0; c < 30; c++)
+            header.Append(Str($"{ColumnName(c)}1", $"Col {c + 1:00}", Header));
+        var rows = new StringBuilder(Row(1, header.ToString()));
+        for (int r = 2; r <= 12; r++)
+        {
+            body.Clear();
+            for (int c = 0; c < 30; c++) body.Append(Num($"{ColumnName(c)}{r}", (r - 1) * (c + 1), Default));
+            rows.Append(Row(r, body.ToString()));
+        }
+        return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"30\" width=\"10\" customWidth=\"1\"/></cols>", rows.ToString(),
+            "<pageMargins left=\"0.5\" right=\"0.5\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>" +
+            "<pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
+    }
+
+    private static string TextSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Wrapping, overflow, alignment and indentation", Bold)));
+        rows.Append(Row(3, Str("A3", "Wrapped text in a narrow column grows the row to fit all of its words.", Wrap) + Str("C3", "Overflow: this long text spills over the empty cells on its right until it meets a value.") + Str("H3", "stop")));
+        rows.Append(Row(5, Str("A5", "Left", Boxed) + Str("B5", "Center", Center) + Str("C5", "Right", Right)));
+        rows.Append(Row(6, Str("A6", "Indent 0") ));
+        rows.Append(Row(7, Str("A7", "Indent 2", Indent)));
+        rows.Append(Row(8, Str("A8", "Too wide for its column:") + Num("B8", 123456789012345, Default)));
+        rows.Append(Row(9, Str("A9", "Numbers never spill into neighbors; they show hashes instead.", Default)));
+        var cols = "<cols><col min=\"1\" max=\"1\" width=\"24\" customWidth=\"1\"/><col min=\"2\" max=\"7\" width=\"10\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string Hidden() =>
+        Sheet("", Row(1, Str("A1", HiddenMarker)), "<pageSetup paperSize=\"9\"/>" + HeaderFooter);
+
+    private static void Entry(ZipArchive zip, string name, string content)
+    {
+        using var s = zip.CreateEntry(name).Open();
+        s.Write(Encoding.UTF8.GetBytes(content));
+    }
+}

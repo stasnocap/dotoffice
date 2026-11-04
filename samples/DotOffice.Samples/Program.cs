@@ -5,13 +5,15 @@ using DotOffice.Pdf;
 using DotOffice.Samples;
 
 // Usage:
-//   DotOffice.Samples convert <input.docx> <output.pdf> [--fonts <dir>] [--no-system-fonts]
+//   DotOffice.Samples convert <input.docx|input.xlsx> <output.pdf> [--fonts <dir>] [--no-system-fonts]
 //   DotOffice.Samples showcase <output.docx> [image.jpg]
+//   DotOffice.Samples showcase-xlsx <output.xlsx>
 //   DotOffice.Samples <font.ttf> [image.jpg] [output.pdf]      (low-level PDF writer demo)
 if (args.Length < 1)
 {
-    Console.Error.WriteLine("Usage: DotOffice.Samples convert <input.docx> <output.pdf> [--fonts <dir>] [--no-system-fonts]");
+    Console.Error.WriteLine("Usage: DotOffice.Samples convert <input.docx|input.xlsx> <output.pdf> [--fonts <dir>] [--no-system-fonts]");
     Console.Error.WriteLine("       DotOffice.Samples showcase <output.docx> [image.jpg]");
+    Console.Error.WriteLine("       DotOffice.Samples showcase-xlsx <output.xlsx>");
     Console.Error.WriteLine("       DotOffice.Samples <font.ttf> [image.jpg] [output.pdf]");
     return 1;
 }
@@ -22,6 +24,10 @@ switch (args[0])
         return await Convert(args[1], args[2], args[3..]);
     case "showcase" when args.Length >= 2:
         ShowcaseDocx.Write(args[1], args.Length > 2 ? File.ReadAllBytes(args[2]) : null);
+        Console.WriteLine($"Wrote {args[1]}");
+        return 0;
+    case "showcase-xlsx" when args.Length >= 2:
+        ShowcaseXlsx.Write(args[1]);
         Console.WriteLine($"Wrote {args[1]}");
         return 0;
     default:
