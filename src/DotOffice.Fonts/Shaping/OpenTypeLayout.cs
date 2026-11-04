@@ -39,6 +39,9 @@ internal struct GlyphInfo
     /// <summary>Shaper-specific character category and position (Indic shaping).</summary>
     public byte ShaperCategory, ShaperPosition;
 
+    /// <summary>Glyph class guessed from Unicode (1 base, 2 ligature, 3 mark, 0 none) for fonts whose GDEF has no glyph classes.</summary>
+    public byte Guess;
+
     /// <summary>Made from a default-ignorable character (ZWJ, ZWNJ…), hidden after shaping.</summary>
     public bool Ignorable;
 
@@ -258,6 +261,13 @@ internal sealed class OpenTypeLayout
     public int GlyphClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 4), glyph) : 0;
 
     private int MarkAttachClass(int glyph) => _gdef.Length >= 12 ? ClassOf(_gdef, U16(_gdef, 10), glyph) : 0;
+
+    private int MarkSetCount()
+    {
+        if (_gdef.Length < 14 || U16(_gdef, 2) < 2) return 0;
+        int sets = U16(_gdef, 12);
+        return sets == 0 ? 0 : U16(_gdef, sets + 2);
+    }
 
     private bool InMarkSet(int set, int glyph)
     {
@@ -481,14 +491,14 @@ internal sealed class OpenTypeLayout
             for (int i = 0; i < glyphs.Count;)
             {
                 if (++ctx.Operations > MaxOperations) return;
-                if ((glyphs[i].Mask & ctx.Mask) == 0 || Ignored(ctx, glyphs[i].Glyph)) { i++; continue; }
+                if ((glyphs[i].Mask & ctx.Mask) == 0 || Ignored(ctx, glyphs[i])) { i++; continue; }
                 i = ApplyLookup(ctx, lookup, i) is { } next && next > i ? next : i + 1;
             }
         }
     }
 
     /// <summary>Loads lookup flags into the context; false for a lookup index out of range.</summary>
-    private static bool SetLookup(Context ctx, int lookup)
+    private bool SetLookup(Context ctx, int lookup)
     {
         var t = ctx.Table;
         int list = U16(t, 8);
@@ -496,14 +506,20 @@ internal sealed class OpenTypeLayout
         int table = list + U16(t, list + 2 + lookup * 2);
         ctx.Flags = U16(t, table + 2);
         ctx.MarkSet = (ctx.Flags & 0x10) != 0 ? U16(t, table + 6 + U16(t, table + 4) * 2) : -1;
+        // HarfBuzz's sanitize_lookup_props: an out-of-range mark filtering set (or none at all) is ignored.
+        if (ctx.MarkSet >= MarkSetCount()) { ctx.Flags &= ~0x10; ctx.MarkSet = -1; }
         return true;
     }
 
-    private bool Ignored(Context ctx, int glyph)
+    /// <summary>The glyph's class: from GDEF, or guessed from Unicode when the font has none (hb_synthesize_glyph_classes).</summary>
+    internal int ClassOf(in GlyphInfo g) => HasGlyphClasses ? GlyphClass(g.Glyph) : g.Guess;
+
+    private bool Ignored(Context ctx, in GlyphInfo g)
     {
+        int glyph = g.Glyph;
         int flags = ctx.Flags;
         if ((flags & 0x0E) == 0 && (flags & 0xFF10) == 0) return false;
-        int cls = GlyphClass(glyph);
+        int cls = ClassOf(g);
         if (cls == 1 && (flags & 0x2) != 0) return true;
         if (cls == 2 && (flags & 0x4) != 0) return true;
         if (cls != 3) return false;
@@ -547,7 +563,7 @@ internal sealed class OpenTypeLayout
     private Step Test(Context ctx, int from, int i, bool input, Func<int, bool>? matches)
     {
         var g = ctx.Glyphs[i];
-        if (Ignored(ctx, g.Glyph)) return Step.Skip;
+        if (Ignored(ctx, g)) return Step.Skip;
         bool maybeSkip = MaySkip(ctx, g, context: !input);
         bool? match = (input && (g.Mask & ctx.Mask) == 0) || (ctx.PerSyllable && !ctx.Gpos && g.Syllable != ctx.Glyphs[from].Syllable)
             ? false
@@ -656,12 +672,13 @@ internal sealed class OpenTypeLayout
                     int ligatureId = glyphs.Max(g => g.LigatureId) + 1;
                     for (int c = 1; c < matched.Count; c++)
                         for (int k = matched[c - 1] + 1; k < matched[c]; k++)
-                            if (GlyphClass(glyphs[k].Glyph) == 3)
+                            if (ClassOf(glyphs[k]) == 3)
                                 glyphs[k] = glyphs[k] with { LigatureId = ligatureId, LigatureComponent = c };
                     var ligature = glyphs[i];
                     ligature.LigatureId = ligatureId;
                     ligature.LigatureComponent = 0;
                     ligature.Glyph = (ushort)U16(t, lig);
+                    ligature.Guess = 2;
                     ligature.Flags = (ligature.Flags | GlyphFlags.Substituted | GlyphFlags.Ligated) & ~GlyphFlags.Multiplied;
                     ligature.Text = string.Concat(matched.Select(k => glyphs[k].Text));
                     glyphs[i] = ligature;
@@ -797,7 +814,7 @@ internal sealed class OpenTypeLayout
                 if (target < 0) return null;
                 if (type == 6)
                 {
-                    if (GlyphClass(glyphs[target].Glyph) != 3) return null;
+                    if (ClassOf(glyphs[target]) != 3) return null;
                     // Only marks on the same base, or the same ligature component, attach to each other.
                     var (a, b) = (glyphs[i], glyphs[target]);
                     bool good = a.LigatureId == b.LigatureId

@@ -117,7 +117,7 @@ public static class TextShaper
             {
                 // Marks do not advance the pen; GPOS positions them relative to their base.
                 for (int i = 0; i < glyphs.Count; i++)
-                    if (layout.GlyphClass(glyphs[i].Glyph) == 3) glyphs[i] = glyphs[i] with { XAdvance = 0 };
+                    if (layout.ClassOf(glyphs[i]) == 3) glyphs[i] = glyphs[i] with { XAdvance = 0 };
                 if (kerning || complex)
                     layout.Apply(true, glyphs, layout.Lookups(true, script, joining ? [("kern", Kern), ("dist", Kern), ("curs", Common)] : [("kern", Kern)]), rightToLeft);
                 layout.Apply(true, glyphs, layout.Lookups(true, script,
@@ -211,6 +211,10 @@ public static class TextShaper
         "sogo", "sogd", "elym", "chrs", "yezi", "ougr", "gara",
     ];
 
+    /// <summary>HarfBuzz's synthesized glyph class: Mn is a mark unless default-ignorable, everything else a base.</summary>
+    internal static byte GuessClass(int cp) =>
+        cp > 0 && !IsDefaultIgnorable(cp) && CharUnicodeInfo.GetUnicodeCategory(cp) == UnicodeCategory.NonSpacingMark ? (byte)3 : (byte)1;
+
     private static List<GlyphInfo> Nominal(TrueTypeFont font, List<NormalizedChar> chars, uint mask) =>
         chars.Select(c =>
         {
@@ -219,7 +223,7 @@ public static class TextShaper
             {
                 Glyph = gid, Cluster = c.Cluster, Text = c.Text, Mask = mask,
                 XAdvance = font.GetAdvanceWidth(gid), AttachTo = -1, CursiveTo = -1, CodePoint = c.CodePoint,
-                Ignorable = IsDefaultIgnorable(c.CodePoint), Hidden = c.Hidden,
+                Ignorable = IsDefaultIgnorable(c.CodePoint), Hidden = c.Hidden, Guess = GuessClass(c.CodePoint),
             };
         }).ToList();
 

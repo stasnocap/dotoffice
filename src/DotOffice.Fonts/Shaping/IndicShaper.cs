@@ -245,7 +245,7 @@ internal static class IndicShaper
             {
                 Glyph = Normalizer.NominalGlyph(font, cp), Cluster = cluster, Text = text, Mask = Global,
                 XAdvance = 0, AttachTo = -1, CursiveTo = -1, CodePoint = cp, ShaperCategory = (byte)category,
-                ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp), Hidden = hidden,
+                ShaperPosition = (byte)position, Ignorable = TextShaper.IsDefaultIgnorable(cp), Hidden = hidden, Guess = TextShaper.GuessClass(cp),
             });
         }
         return glyphs;
@@ -371,7 +371,7 @@ internal static class IndicShaper
             glyphs.Insert(at, g with
             {
                 Glyph = (ushort)circle, Text = "", CodePoint = 0x25CC, ShaperCategory = (byte)IndicCategory.DottedCircle,
-                ShaperPosition = (byte)IndicPosition.End, Flags = GlyphFlags.None, Ignorable = false,
+                ShaperPosition = (byte)IndicPosition.End, Flags = GlyphFlags.None, Ignorable = false, Guess = 1,
             });
         }
     }
