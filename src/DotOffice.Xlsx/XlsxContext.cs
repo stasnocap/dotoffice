@@ -15,6 +15,7 @@ internal sealed record DefinedName(string Name, int? LocalSheetId, string Formul
 internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options, string workbookPart)
 {
     private readonly List<string> _sharedStrings = [];
+    private List<CellFormat> _formats = [];
     private long _cellCount;
     private bool _richTextWarned;
 
@@ -43,6 +44,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             using var r = Package.OpenXml(shared.Target);
             ReadSharedStrings(r);
         }
+
+        ReadStyles();
 
         var rels = Package.GetRelationships(WorkbookPart);
         for (int index = 0; index < sheets.Count; index++)
@@ -141,6 +144,36 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     }
 
     private static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
+
+    // ------------------------------------------------------------------ styles.xml and theme
+
+    private void ReadStyles()
+    {
+        var theme = XlsxTheme.Default;
+        var themeRel = Package.FindRelationship(WorkbookPart, "theme");
+        if (themeRel is not null && Package.Exists(themeRel.Target))
+        {
+            try
+            {
+                using var r = Package.OpenXml(themeRel.Target);
+                theme = XlsxTheme.Read(r);
+            }
+            catch (XmlException)
+            {
+                Options.Warnings.Warn("xlsx.theme", "The theme part is malformed; default theme colors are used.");
+            }
+        }
+
+        var stylesRel = Package.FindRelationship(WorkbookPart, "styles");
+        if (stylesRel is null || !Package.Exists(stylesRel.Target)) return;
+        using var styles = Package.OpenXml(stylesRel.Target);
+        _formats = XlsxStyles.Read(styles, theme, Options.Warnings);
+    }
+
+    private CellFormat FormatOf(string? styleAttribute) =>
+        int.TryParse(styleAttribute, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < _formats.Count
+            ? _formats[index]
+            : CellFormat.Default;
 
     // ------------------------------------------------------------------ sharedStrings.xml
 
@@ -254,10 +287,11 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private Cell? ReadCell(XmlReader r, Worksheet sheet, ref bool formulaWarned)
     {
         var type = r.GetAttribute("t") ?? "n";
+        var format = FormatOf(r.GetAttribute("s"));
         if (r.IsEmptyElement)
         {
             r.Read();
-            return null;
+            return BuildEmpty(format);
         }
 
         int depth = r.Depth;
@@ -292,13 +326,18 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
         }
         r.Read();
-        return Build(type, value, inline, hasFormula, sheet, ref formulaWarned);
+        return Build(type, value, inline, hasFormula, format, sheet, ref formulaWarned);
     }
 
-    private Cell? Build(string type, string? value, string? inline, bool hasFormula, Worksheet sheet, ref bool formulaWarned)
+    /// <summary>An empty cell only matters when it paints something (fill or border).</summary>
+    private static Cell? BuildEmpty(CellFormat format) =>
+        format.Style.Fill is not null || format.Style.Borders.HasAny ? new Cell { Style = format.Style } : null;
+
+    private Cell? Build(string type, string? value, string? inline, bool hasFormula, CellFormat format, Worksheet sheet, ref bool formulaWarned)
     {
+        var style = format.Style;
         if (type == "inlineStr")
-            return inline is null ? null : new Cell { Text = inline, Kind = CellValueKind.Text };
+            return inline is null ? BuildEmpty(format) : new Cell { Text = inline, Kind = CellValueKind.Text, Style = style };
         if (value is null)
         {
             if (hasFormula && !formulaWarned)
@@ -306,27 +345,27 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                 formulaWarned = true;
                 Options.Warnings.Warn("xlsx.formula-no-cache", $"Sheet '{sheet.Name}' has formulas without a cached value; those cells are shown empty.");
             }
-            return null;
+            return BuildEmpty(format);
         }
 
         switch (type)
         {
             case "s":
                 if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < _sharedStrings.Count)
-                    return new Cell { Text = _sharedStrings[index], Kind = CellValueKind.Text };
+                    return new Cell { Text = _sharedStrings[index], Kind = CellValueKind.Text, Style = style };
                 Options.Warnings.Warn("xlsx.bad-shared-string", $"Sheet '{sheet.Name}' refers to a shared string that does not exist.");
-                return null;
+                return BuildEmpty(format);
             case "str":
             case "d":
-                return new Cell { Text = XlsxXml.DecodeEscapes(value), Kind = CellValueKind.Text };
+                return new Cell { Text = XlsxXml.DecodeEscapes(value), Kind = CellValueKind.Text, Style = style };
             case "b":
-                return new Cell { Text = value.Trim() is "1" or "true" ? "TRUE" : "FALSE", Kind = CellValueKind.Bool };
+                return new Cell { Text = value.Trim() is "1" or "true" ? "TRUE" : "FALSE", Kind = CellValueKind.Bool, Style = style };
             case "e":
-                return new Cell { Text = value, Kind = CellValueKind.Error };
+                return new Cell { Text = value, Kind = CellValueKind.Error, Style = style };
             default:
                 if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number))
-                    return new Cell { Text = NumberFormatter.General(number), Kind = CellValueKind.Number };
-                return value.Length == 0 ? null : new Cell { Text = value, Kind = CellValueKind.Text };
+                    return new Cell { Text = NumberFormatter.General(number), Kind = CellValueKind.Number, Style = style };
+                return value.Length == 0 ? BuildEmpty(format) : new Cell { Text = value, Kind = CellValueKind.Text, Style = style };
         }
     }
 

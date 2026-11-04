@@ -214,3 +214,190 @@ public class XlsxReaderTests
         Assert.Throws<InvalidDataException>(() => XlsxReader.Read(builder.BuildStream()));
     }
 }
+
+public class XlsxStyleTests
+{
+    private const string Fonts =
+        "<fonts count=\"4\">" +
+        "<font><sz val=\"11\"/><color theme=\"1\"/><name val=\"Calibri\"/></font>" +
+        "<font><b/><i/><u/><strike/><sz val=\"14\"/><color rgb=\"FFFF0000\"/><name val=\"Arial\"/></font>" +
+        "<font><u val=\"double\"/><vertAlign val=\"superscript\"/><sz val=\"9\"/><color indexed=\"2\"/><name val=\"Verdana\"/></font>" +
+        "<font><b val=\"0\"/><u val=\"none\"/><color theme=\"4\" tint=\"-0.25\"/><name val=\"Times New Roman\"/></font>" +
+        "</fonts>";
+
+    private const string Fills =
+        "<fills count=\"4\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>" +
+        "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF00FF00\"/><bgColor indexed=\"64\"/></patternFill></fill>" +
+        "<fill><gradientFill><stop position=\"0\"><color rgb=\"FF000000\"/></stop></gradientFill></fill></fills>";
+
+    private const string Borders =
+        "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
+        "<border><left style=\"thin\"><color rgb=\"FF0000FF\"/></left><right style=\"medium\"/><top style=\"double\"/><bottom style=\"thick\"><color indexed=\"2\"/></bottom></border>" +
+        "<border><left style=\"hair\"/><right style=\"dotted\"/><top style=\"dashed\"/><bottom style=\"mediumDashed\"/></border></borders>";
+
+    private static Workbook ReadWith(string cellXfs, string cells, XlsxBuilder? builder = null, ConversionWarningList? warnings = null)
+    {
+        builder ??= new XlsxBuilder();
+        builder.Styles = Fonts + Fills + Borders + $"<cellXfs>{cellXfs}</cellXfs>";
+        builder.AddSheet("S", cells);
+        return XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings });
+    }
+
+    private static CellStyle StyleOf(Workbook wb, string cellRef = "A1")
+    {
+        XlsxBuilderRefs.Parse(cellRef, out var r, out var c);
+        return wb.Sheets[0].Cells[(r, c)].Style;
+    }
+
+    [Fact]
+    public void Resolves_font_properties()
+    {
+        var wb = ReadWith("<xf fontId=\"0\"/><xf fontId=\"1\"/><xf fontId=\"2\"/><xf fontId=\"3\"/>",
+            Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1), C("C1", "1", style: 2), C("D1", "1", style: 3)));
+        var plain = StyleOf(wb, "A1").Font;
+        Assert.Equal(("Calibri", 11.0, false), (plain.FontFamily, plain.FontSize, plain.Bold));
+        Assert.Equal(Color.Black, plain.Color);
+
+        var rich = StyleOf(wb, "B1").Font;
+        Assert.Equal(("Arial", 14.0), (rich.FontFamily, rich.FontSize));
+        Assert.True(rich.Bold && rich.Italic && rich.Strike);
+        Assert.Equal(UnderlineStyle.Single, rich.Underline);
+        Assert.Equal(new Color(255, 0, 0), rich.Color);
+
+        var other = StyleOf(wb, "C1").Font;
+        Assert.Equal(UnderlineStyle.Double, other.Underline);
+        Assert.Equal(VerticalPosition.Superscript, other.VerticalPosition);
+        Assert.Equal(new Color(255, 0, 0), other.Color); // indexed 2
+
+        var off = StyleOf(wb, "D1").Font;
+        Assert.False(off.Bold);
+        Assert.Equal(UnderlineStyle.None, off.Underline);
+    }
+
+    [Fact]
+    public void Resolves_theme_colors_with_tint()
+    {
+        var theme = "<a:dk1><a:sysClr val=\"windowText\" lastClr=\"000000\"/></a:dk1><a:lt1><a:sysClr val=\"window\" lastClr=\"FFFFFF\"/></a:lt1>" +
+                    "<a:dk2><a:srgbClr val=\"1F497D\"/></a:dk2><a:lt2><a:srgbClr val=\"EEECE1\"/></a:lt2>" +
+                    "<a:accent1><a:srgbClr val=\"4F81BD\"/></a:accent1>";
+        var wb = ReadWith("<xf fontId=\"0\"/><xf fontId=\"3\"/>", Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1)),
+            new XlsxBuilder { ThemeColors = theme });
+        Assert.Equal(Color.Black, StyleOf(wb, "A1").Font.Color); // theme 1 = dk1
+        // Excel's "Blue, Accent 1, Darker 25%" (4F81BD, tint -0.25) is 366092.
+        Assert.Equal(new Color(0x36, 0x60, 0x92), StyleOf(wb, "B1").Font.Color!.Value, new ColorTolerance(2));
+    }
+
+    [Fact]
+    public void Applies_positive_tint_as_lighter()
+    {
+        var builder = new XlsxBuilder { ThemeColors = "<a:accent1><a:srgbClr val=\"4F81BD\"/></a:accent1>" };
+        builder.Styles = "<fonts><font><color theme=\"4\" tint=\"0.4\"/></font><font><color theme=\"4\" tint=\"0.8\"/></font><font><color theme=\"4\" tint=\"-1\"/></font></fonts>" +
+                         "<cellXfs><xf fontId=\"0\"/><xf fontId=\"1\"/><xf fontId=\"2\"/></cellXfs>";
+        builder.AddSheet("S", Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1), C("C1", "1", style: 2)));
+        var wb = XlsxReader.Read(builder.BuildStream());
+        // "Blue, Accent 1, Lighter 40%" is 95B3D7, "Lighter 80%" is DCE6F1.
+        Assert.Equal(new Color(0x95, 0xB3, 0xD7), StyleOf(wb, "A1").Font.Color!.Value, new ColorTolerance(2));
+        Assert.Equal(new Color(0xDC, 0xE6, 0xF1), StyleOf(wb, "B1").Font.Color!.Value, new ColorTolerance(2));
+        Assert.Equal(Color.Black, StyleOf(wb, "C1").Font.Color!.Value);
+    }
+
+    [Fact]
+    public void Resolves_fills_and_skips_gradients_with_a_warning()
+    {
+        var warnings = new ConversionWarningList();
+        var wb = ReadWith("<xf fillId=\"0\"/><xf fillId=\"1\"/><xf fillId=\"2\"/><xf fillId=\"3\"/>",
+            Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1), C("C1", "1", style: 2), C("D1", "1", style: 3)), warnings: warnings);
+        Assert.Null(StyleOf(wb, "A1").Fill);
+        Assert.Null(StyleOf(wb, "B1").Fill);
+        Assert.Equal(new Color(0, 255, 0), StyleOf(wb, "C1").Fill);
+        Assert.Null(StyleOf(wb, "D1").Fill);
+        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.gradient-fill");
+    }
+
+    [Fact]
+    public void Resolves_borders()
+    {
+        var wb = ReadWith("<xf borderId=\"1\"/><xf borderId=\"2\"/>", Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1)));
+        var b = StyleOf(wb, "A1").Borders;
+        Assert.Equal((BorderStyle.Single, 0.75, new Color(0, 0, 255)), (b.Left.Style, b.Left.Width, b.Left.Color!.Value));
+        Assert.Equal(BorderStyle.Single, b.Right.Style);
+        Assert.Equal(1.5, b.Right.Width);
+        Assert.Null(b.Right.Color);
+        Assert.Equal(BorderStyle.Double, b.Top.Style);
+        Assert.Equal(BorderStyle.Thick, b.Bottom.Style);
+        Assert.Equal(new Color(255, 0, 0), b.Bottom.Color);
+
+        var d = StyleOf(wb, "B1").Borders;
+        Assert.Equal(0.25, d.Left.Width);
+        Assert.Equal(BorderStyle.Dotted, d.Right.Style);
+        Assert.Equal(BorderStyle.Dashed, d.Top.Style);
+        Assert.Equal(1.5, d.Bottom.Width);
+    }
+
+    [Fact]
+    public void Resolves_alignment()
+    {
+        var wb = ReadWith(
+            "<xf><alignment horizontal=\"center\" vertical=\"top\" wrapText=\"1\" indent=\"2\" textRotation=\"45\"/></xf>" +
+            "<xf><alignment horizontal=\"right\" vertical=\"center\" textRotation=\"135\"/></xf>" +
+            "<xf><alignment horizontal=\"left\" textRotation=\"255\"/></xf><xf/>",
+            Row(1, C("A1", "1", style: 0), C("B1", "1", style: 1), C("C1", "1", style: 2), C("D1", "1", style: 3)));
+        var a = StyleOf(wb, "A1");
+        Assert.Equal((HorizontalAlignment.Center, CellVerticalAlignment.Top, true, 2, 45.0),
+            (a.HorizontalAlignment, a.VerticalAlignment, a.Wrap, a.Indent, a.Rotation));
+        var b = StyleOf(wb, "B1");
+        Assert.Equal((HorizontalAlignment.Right, CellVerticalAlignment.Center, -45.0), (b.HorizontalAlignment, b.VerticalAlignment, b.Rotation));
+        Assert.Equal(90.0, StyleOf(wb, "C1").Rotation);
+        var d = StyleOf(wb, "D1");
+        Assert.Equal((HorizontalAlignment.General, CellVerticalAlignment.Bottom, false), (d.HorizontalAlignment, d.VerticalAlignment, d.Wrap));
+    }
+
+    [Fact]
+    public void Custom_indexed_palette_overrides_the_legacy_one()
+    {
+        var builder = new XlsxBuilder();
+        builder.Styles = "<colors><indexedColors><rgbColor rgb=\"FF010203\"/><rgbColor rgb=\"FF0A0B0C\"/></indexedColors></colors>" +
+                         "<fonts><font><color indexed=\"1\"/></font></fonts><cellXfs><xf fontId=\"0\"/></cellXfs>";
+        builder.AddSheet("S", Row(1, C("A1", "1", style: 0)));
+        var wb = XlsxReader.Read(builder.BuildStream());
+        Assert.Equal(new Color(0x0A, 0x0B, 0x0C), StyleOf(wb).Font.Color);
+    }
+
+    [Fact]
+    public void Empty_cells_are_kept_only_when_they_paint_something()
+    {
+        var wb = ReadWith("<xf/><xf fillId=\"2\"/><xf borderId=\"1\"/>",
+            "<row r=\"1\"><c r=\"A1\" s=\"0\"/><c r=\"B1\" s=\"1\"/><c r=\"C1\" s=\"2\"/><c r=\"D1\" s=\"1\"><v></v></c></row>");
+        var cells = wb.Sheets[0].Cells;
+        Assert.False(cells.ContainsKey((0, 0)));
+        Assert.Equal(new Color(0, 255, 0), cells[(0, 1)].Style.Fill);
+        Assert.True(cells[(0, 2)].Style.Borders.HasAny);
+        Assert.Equal("", cells[(0, 3)].Text);
+    }
+
+    [Fact]
+    public void Out_of_range_style_and_font_indexes_fall_back_to_defaults()
+    {
+        var wb = ReadWith("<xf fontId=\"99\" fillId=\"99\" borderId=\"99\"/>", Row(1, C("A1", "1", style: 0), C("B1", "1", style: 50)));
+        Assert.Equal(CellStyle.Default.Font, StyleOf(wb, "A1").Font);
+        Assert.Null(StyleOf(wb, "A1").Fill);
+        Assert.Equal(CellStyle.Default, StyleOf(wb, "B1"));
+    }
+
+    private static class XlsxBuilderRefs
+    {
+        public static void Parse(string reference, out int row, out int column)
+        {
+            column = reference[0] - 'A';
+            row = int.Parse(reference[1..]) - 1;
+        }
+    }
+
+    private sealed class ColorTolerance(int tolerance) : IEqualityComparer<Color>
+    {
+        public bool Equals(Color a, Color b) =>
+            Math.Abs(a.R - b.R) <= tolerance && Math.Abs(a.G - b.G) <= tolerance && Math.Abs(a.B - b.B) <= tolerance;
+
+        public int GetHashCode(Color c) => 0;
+    }
+}
