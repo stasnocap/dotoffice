@@ -513,7 +513,8 @@ public sealed class SheetLayoutEngine
             {
                 if (cell.Kind != CellValueKind.Text || cell.Style.Wrap || cell.Text.Length == 0 || IsRotated(cell.Style)) continue;
                 double own = _sheet.ColumnWidth(column);
-                if (cell.Text.Length * cell.LargestFontSize * 0.25 <= own) continue;
+                // Cheap filter: skip texts that cannot be wider than the column even at an (over)generous 1.2 em per character.
+                if (cell.Text.Length * cell.LargestFontSize * 1.2 <= own) continue;
                 if (_anchors.ContainsKey((row, column)) || _sheet.Merges.Any(m => m.Contains(row, column))) continue;
                 double width = _engine.BuildBlock(cell, cell.Text, 1e7).Width + 2 * CellPadding;
                 if (width <= own + Epsilon) continue;

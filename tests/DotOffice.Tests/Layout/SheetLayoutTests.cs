@@ -312,6 +312,15 @@ public class SheetLayoutTests
 
 public class SheetOverflowTests
 {
+    [Fact]
+    public void Text_wider_than_a_wide_column_still_extends_the_printed_range_past_the_last_used_column()
+    {
+        const string text = "thirty characters of overflow.";
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text(text)));
+        sheet.ColumnWidths[0] = 100; // 30 characters at 10 pt need about 135 pt: a length-based lower bound would call this a fit
+        Assert.Contains(text, SheetLayoutTests.PageText(SheetLayoutTests.Layout(sheet).Pages[0]));
+    }
+
     private static Cell Text(string text, HorizontalAlignment align = HorizontalAlignment.General) =>
         SheetLayoutTests.Text(text, SheetLayoutTests.Style(s => s.Horizontal = align));
 
