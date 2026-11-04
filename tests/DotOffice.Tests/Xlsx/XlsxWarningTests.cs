@@ -72,11 +72,11 @@ public class XlsxWarningTests
     }
 
     [Fact]
-    public void Rotated_text_warns()
+    public void Rotated_text_no_longer_warns()
     {
         var builder = new XlsxBuilder { Styles = "<fonts><font/></fonts><fills><fill/></fills><borders><border/></borders><cellXfs><xf fontId=\"0\" fillId=\"0\" borderId=\"0\"><alignment textRotation=\"45\"/></xf></cellXfs>" }
             .AddSheet("S", Row(1, C("A1", "1", style: 0)));
-        Assert.Equal(["xlsx.rotation"], Codes(builder));
+        Assert.Empty(Codes(builder));
     }
 
     [Fact]

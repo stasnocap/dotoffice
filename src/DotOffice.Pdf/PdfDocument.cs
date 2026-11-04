@@ -34,6 +34,7 @@ public sealed class PdfDocument
     private readonly List<PdfPage> _pages = [];
     private readonly List<PdfFont> _fonts = [];
     private readonly List<PdfImage> _images = [];
+    private readonly List<PdfShading> _shadings = [];
 
     public string? Title { get; set; }
     public string? Author { get; set; }
@@ -68,6 +69,13 @@ public sealed class PdfDocument
         return image;
     }
 
+    public PdfShading AddShading(PdfShading shading)
+    {
+        shading.ResourceName = $"Sh{_shadings.Count + 1}";
+        _shadings.Add(shading);
+        return shading;
+    }
+
     public void Save(Stream output)
     {
         if (_pages.Count == 0) throw new InvalidOperationException("A PDF document needs at least one page.");
@@ -78,6 +86,7 @@ public sealed class PdfDocument
         int infoId = writer.Allocate();
         var fontIds = _fonts.ToDictionary(f => f, _ => writer.Allocate());
         var imageIds = _images.ToDictionary(i => i, _ => writer.Allocate());
+        var shadingIds = _shadings.ToDictionary(sh => sh, _ => writer.Allocate());
         var pageIds = _pages.Select(_ => (Page: writer.Allocate(), Content: writer.Allocate())).ToList();
         var pageIndex = _pages.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => x.i);
 
@@ -96,6 +105,10 @@ public sealed class PdfDocument
             if (page.Canvas.Images.Count > 0)
                 resources.Append(" /XObject <<")
                          .AppendJoin("", page.Canvas.Images.Select(img => $" /{img.ResourceName} {IdOf(imageIds, img)} 0 R"))
+                         .Append(" >>");
+            if (page.Canvas.Shadings.Count > 0)
+                resources.Append(" /Shading <<")
+                         .AppendJoin("", page.Canvas.Shadings.Select(sh => $" /{sh.ResourceName} {shadingIds[sh]} 0 R"))
                          .Append(" >>");
             resources.Append(" >>");
 
@@ -119,6 +132,7 @@ public sealed class PdfDocument
         }
 
         foreach (var (image, id) in imageIds) image.Write(writer, id);
+        foreach (var (shading, id) in shadingIds) shading.Write(writer, id);
         foreach (var (font, id) in fontIds) font.Write(writer, id);
 
         var info = new StringBuilder($"<< /Producer {PdfFormat.TextString(Producer)}");

@@ -18,7 +18,8 @@ internal static class ShowcaseXlsx
 
     // cellXfs indexes (see Styles)
     private const int Default = 0, Title = 1, Header = 2, Money = 3, Percent = 4, IsoDate = 5, Time = 6, Accounting = 7, Wrap = 8,
-        Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16;
+        Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16,
+        Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21;
 
     public const string HiddenMarker = "HIDDENSHEETMARKER";
 
@@ -31,6 +32,7 @@ internal static class ShowcaseXlsx
             ("Wide", Wide(), "visible"),
             ("Text", TextSheet(), "visible"),
             ("Rich text", RichTextSheet(), "visible"),
+            ("Rotation", RotationSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -84,7 +86,7 @@ internal static class ShowcaseXlsx
         "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
         "<border><left/><right/><top/><bottom style=\"medium\"><color rgb=\"FF1F3864\"/></bottom><diagonal/></border>" +
         "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border></borders>" +
-        "<cellXfs count=\"17\">" +
+        "<cellXfs count=\"22\">" +
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 0 default
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"2\" borderId=\"0\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 1 title
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"1\"><alignment horizontal=\"center\"/></xf>" +                                                   // 2 header
@@ -102,6 +104,11 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"10\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 14 0.00%
         "<xf numFmtId=\"166\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 15 long date
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\"/>" +                                                                                        // 16 bold
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" textRotation=\"45\"/></xf>" +                                  // 17 rotated 45°
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\" textRotation=\"90\"/></xf>" +                  // 18 rotated 90°
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\" textRotation=\"180\"/></xf>" +                 // 19 reading down
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\" textRotation=\"255\"/></xf>" +                 // 20 stacked
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment vertical=\"center\" wrapText=\"1\" textRotation=\"30\"/></xf>" +                      // 21 rotated and wrapped
         "</cellXfs></styleSheet>";
 
     // ------------------------------------------------------------------ cell helpers
@@ -231,6 +238,17 @@ internal static class ShowcaseXlsx
             ("larger", "<sz val=\"16\"/><color rgb=\"FF548235\"/><rFont val=\"Calibri\"/>"), (" word.", Base))));
         rows.Append(Row(9, Rich("A9", Default, ("Overflow: ", "<b/>" + Base), ("rich text spills into empty neighbors until a value stops it.", Base)) + Str("G9", "stop")));
         var cols = "<cols><col min=\"1\" max=\"1\" width=\"30\" customWidth=\"1\"/><col min=\"2\" max=\"7\" width=\"10\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string RotationSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Rotated and stacked text", Bold)));
+        rows.Append(Row(3, Str("A3", "Rotate 45", Rot45) + Str("B3", "Rotate 90", Rot90) + Str("C3", "Reading down", RotDown) + Str("D3", "Stacked", Stacked) +
+            Str("E3", "A rotated cell that wraps its text onto several lines", RotWrap)));
+        rows.Append(Row(4, Str("A4", "Rows grow to fit rotated headings; the text is clipped at the cell edges.")));
+        var cols = "<cols><col min=\"1\" max=\"4\" width=\"12\" customWidth=\"1\"/><col min=\"5\" max=\"5\" width=\"22\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 

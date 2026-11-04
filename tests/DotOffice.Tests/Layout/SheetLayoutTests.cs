@@ -23,11 +23,14 @@ public class SheetLayoutTests
         public CellVerticalAlignment Vertical = CellVerticalAlignment.Bottom;
         public bool Wrap;
         public int Indent;
+        public double Rotation;
+        public bool Stacked;
         public RunProperties Font = SheetLayoutTests.Font;
 
         public CellStyle Build() => new()
         {
             Font = Font, Fill = Fill, Borders = Borders, HorizontalAlignment = Horizontal, VerticalAlignment = Vertical, Wrap = Wrap, Indent = Indent,
+            Rotation = Rotation, Stacked = Stacked,
         };
     }
 
@@ -698,5 +701,119 @@ public class SheetRichTextTests
         var cell = SheetLayoutTests.Rich(SheetLayoutTests.Style(s => s.Wrap = true), ("one\n", Base), ("two", Base with { Italic = true }));
         var items = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, cell))).Pages[0].Items.OfType<TextItem>().ToList();
         Assert.True(items.Single(t => t.Text == "two").Baseline > items.Single(t => t.Text == "one").Baseline + 5);
+    }
+}
+
+public class SheetRotationTests
+{
+    private static (LayoutPage Page, Worksheet Sheet) Run(Cell cell, Action<Worksheet>? configure = null)
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, cell));
+        sheet.ColumnWidths[0] = 100;
+        configure?.Invoke(sheet);
+        return (SheetLayoutTests.Layout(sheet).Pages[0], sheet);
+    }
+
+    private static Cell Rotated(string text, double degrees, Action<SheetLayoutTests.CellStyleBuilder>? configure = null) =>
+        SheetLayoutTests.Text(text, SheetLayoutTests.Style(s => { s.Rotation = degrees; configure?.Invoke(s); }));
+
+    [Fact]
+    public void Rotated_text_is_drawn_inside_a_group_turned_about_its_center_and_clipped_to_the_cell()
+    {
+        var (page, sheet) = Run(Rotated("Hello", 45), s => s.RowHeights[0] = 80);
+        var push = page.Items.OfType<PushItem>().Single();
+        Assert.Equal(45, push.Rotation);
+        double left = sheet.PageSetup.Margins.Left, top = sheet.PageSetup.Margins.Top;
+        Assert.Equal((left, top, 100.0, 80.0), push.Clip!.Value);
+        Assert.InRange(push.CenterX, left, left + 100);
+        Assert.InRange(push.CenterY, top, top + 80);
+        var items = page.Items.ToList();
+        int pushAt = items.IndexOf(push), popAt = items.FindIndex(i => i is PopItem);
+        Assert.True(pushAt < items.FindIndex(i => i is TextItem) && items.FindIndex(i => i is TextItem) < popAt);
+    }
+
+    [Fact]
+    public void Unrotated_text_creates_no_groups()
+    {
+        var (page, _) = Run(SheetLayoutTests.Text("Hello"));
+        Assert.Empty(page.Items.OfType<PushItem>());
+    }
+
+    [Fact]
+    public void Rotating_to_90_degrees_grows_an_autofit_row_to_the_text_length()
+    {
+        const string text = "A fairly long heading";
+        var (page, sheet) = Run(Rotated(text, 90));
+        double length = LayoutTestHelpers.Noto.MeasureText(text, 10);
+        var push = page.Items.OfType<PushItem>().Single();
+        Assert.Equal(length, push.Clip!.Value.Height, 0); // the row is as tall as the text is long (the cell is clipped to it)
+        Assert.True(push.Clip!.Value.Height > sheet.DefaultRowHeight * 3);
+    }
+
+    [Fact]
+    public void An_explicit_row_height_is_kept_and_text_is_clipped_not_enlarged()
+    {
+        var (page, _) = Run(Rotated("A fairly long heading", 90), s => s.RowHeights[0] = 20);
+        Assert.Equal(20.0, page.Items.OfType<PushItem>().Single().Clip!.Value.Height, 3);
+    }
+
+    [Fact]
+    public void Rotation_of_45_needs_width_times_sine_plus_height_times_cosine()
+    {
+        const string text = "Sample text";
+        var (page, _) = Run(Rotated(text, 45));
+        double w = LayoutTestHelpers.Noto.MeasureText(text, 10), h = 10 * 15.0 / 11;
+        double expected = (w + h) * Math.Sin(Math.PI / 4);
+        Assert.Equal(expected, page.Items.OfType<PushItem>().Single().Clip!.Value.Height, 1);
+    }
+
+    [Fact]
+    public void Clockwise_rotation_uses_a_negative_angle()
+    {
+        var (page, _) = Run(Rotated("Down", -90));
+        Assert.Equal(-90, page.Items.OfType<PushItem>().Single().Rotation);
+    }
+
+    [Fact]
+    public void Rotated_text_is_placed_by_its_bounding_box_per_alignment()
+    {
+        Cell At(HorizontalAlignment h, CellVerticalAlignment v) => Rotated("Hi", 90, s => { s.Horizontal = h; s.Vertical = v; });
+        var (leftTop, sheet) = Run(At(HorizontalAlignment.Left, CellVerticalAlignment.Top), s => s.RowHeights[0] = 60);
+        var (rightBottom, _) = Run(At(HorizontalAlignment.Right, CellVerticalAlignment.Bottom), s => s.RowHeights[0] = 60);
+        var a = leftTop.Items.OfType<PushItem>().Single();
+        var b = rightBottom.Items.OfType<PushItem>().Single();
+        double left = sheet.PageSetup.Margins.Left, top = sheet.PageSetup.Margins.Top;
+        Assert.True(a.CenterX < left + 20 && b.CenterX > left + 80);
+        Assert.True(a.CenterY < top + 20 && b.CenterY > top + 40);
+    }
+
+    [Fact]
+    public void Stacked_text_puts_each_character_on_its_own_upright_line()
+    {
+        var cell = SheetLayoutTests.Text("ABC", SheetLayoutTests.Style(s => s.Stacked = true));
+        var (page, sheet) = Run(cell);
+        var texts = page.Items.OfType<TextItem>().ToList();
+        Assert.Equal(["A", "B", "C"], texts.Select(t => t.Text));
+        Assert.True(texts[1].Baseline > texts[0].Baseline + 10 && texts[2].Baseline > texts[1].Baseline + 10);
+        Assert.Equal(0, page.Items.OfType<PushItem>().Single().Rotation);
+        Assert.Equal(3 * 10 * 15.0 / 11, page.Items.OfType<PushItem>().Single().Clip!.Value.Height, 1); // the row grew to fit three lines
+        Assert.Equal(sheet.PageSetup.Margins.Top, page.Items.OfType<PushItem>().Single().Clip!.Value.Y, 3);
+    }
+
+    [Fact]
+    public void Wrapped_rotated_text_breaks_at_the_cell_width_over_the_cosine()
+    {
+        var (page, _) = Run(Rotated("alpha beta gamma delta epsilon zeta eta theta", 30, s => s.Wrap = true), s => s.ColumnWidths[0] = 60);
+        var lines = page.Items.OfType<TextItem>().Select(t => Math.Round(t.Baseline, 2)).Distinct().Count();
+        Assert.True(lines >= 2, "the text should wrap onto several lines");
+    }
+
+    [Fact]
+    public void Rotated_cells_do_not_spill_into_neighbors()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Rotated("a very long rotated heading that cannot spill", 15)), (0, 3, SheetLayoutTests.Text("x")));
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        Assert.Single(page.Items.OfType<PushItem>());
+        Assert.Equal(sheet.DefaultColumnWidth, page.Items.OfType<PushItem>().Single().Clip!.Value.Width, 3); // clipped to its own column
     }
 }

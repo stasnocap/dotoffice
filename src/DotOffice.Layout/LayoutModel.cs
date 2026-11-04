@@ -66,6 +66,23 @@ public sealed record ImageItem(double X, double Y, double Width, double Height, 
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
 }
 
+/// <summary>
+/// Starts a group: everything up to the matching <see cref="PopItem"/> is clipped to <see cref="Clip"/> (when set) and rotated by
+/// <see cref="Rotation"/> degrees counter-clockwise about (<see cref="CenterX"/>, <see cref="CenterY"/>). Groups nest.
+/// </summary>
+public sealed record PushItem((double X, double Y, double Width, double Height)? Clip, double Rotation = 0, double CenterX = 0, double CenterY = 0)
+    : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) =>
+        this with { Clip = Clip is { } c ? (c.X + dx, c.Y + dy, c.Width, c.Height) : null, CenterX = CenterX + dx, CenterY = CenterY + dy };
+}
+
+/// <summary>Ends the innermost <see cref="PushItem"/> group.</summary>
+public sealed record PopItem : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this;
+}
+
 /// <summary>A clickable area linking to a URI or to a bookmark (<see cref="AnchorItem"/>).</summary>
 public sealed record LinkItem(double X, double Y, double Width, double Height, Hyperlink Link) : LayoutItem
 {

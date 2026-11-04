@@ -142,6 +142,7 @@ internal static class XlsxStyles
                     Wrap = Bool(alignment, "wrapText"),
                     Indent = Math.Clamp(Int(alignment, "indent") ?? 0, 0, 250),
                     Rotation = Rotation(Int(alignment, "textRotation") ?? 0),
+                    Stacked = Int(alignment, "textRotation") == 255,
                 };
             }
             string? code = numberFormats.GetValueOrDefault(numFmtId);
@@ -150,12 +151,11 @@ internal static class XlsxStyles
         return new Result(formats, Resolve);
     }
 
-    /// <summary>Converts the file's textRotation (0–90 counter-clockwise, 91–180 clockwise, 255 stacked) to degrees counter-clockwise.</summary>
+    /// <summary>Converts the file's textRotation (0–90 counter-clockwise, 91–180 clockwise) to degrees counter-clockwise; 255 (stacked) is no rotation.</summary>
     private static double Rotation(int value) => value switch
     {
         >= 0 and <= 90 => value,
         > 90 and <= 180 => 90 - value,
-        255 => 90,
         _ => 0,
     };
 

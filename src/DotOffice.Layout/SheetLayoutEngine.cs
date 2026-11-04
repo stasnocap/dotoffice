@@ -254,6 +254,16 @@ public sealed class SheetLayoutEngine
             ? r.Select(x => (x.Text, x.Font)).ToList()
             : [(text, cell.Style.Font)];
         var paragraphs = new List<List<TextRun>> { new() };
+        if (cell.Style.Stacked)
+        {
+            // Stacked text: every character is a line of its own.
+            paragraphs.Clear();
+            foreach (var (runText, font) in runs)
+                foreach (var rune in runText.EnumerateRunes())
+                    if (rune.Value is not ('\r' or '\n')) paragraphs.Add([new TextRun(rune.ToString(), font)]);
+            if (paragraphs.Count == 0) paragraphs.Add([]);
+            return paragraphs;
+        }
         foreach (var (runText, font) in runs)
         {
             var normalized = runText.Replace("\r\n", "\n").Replace('\r', '\n');
@@ -309,6 +319,29 @@ public sealed class SheetLayoutEngine
         return block;
     }
 
+    private static bool IsRotated(CellStyle style) => style.Rotation != 0 || style.Stacked;
+
+    /// <summary>
+    /// The text of a rotated or stacked cell, laid out unrotated, and the size of its bounding box once rotated.
+    /// Rotated text is only wrapped when the cell wraps; Excel measures the line against the cell's width (divided by the cosine
+    /// of the angle) and, for upright vertical text, against its height. When <paramref name="height"/> is null (row autofit) such
+    /// vertical text is not wrapped, so the row grows to the longest line instead.
+    /// </summary>
+    private (TextBlock Block, double Width, double Height) RotatedBlock(Cell cell, double width, double? height)
+    {
+        var style = cell.Style;
+        double radians = style.Rotation * Math.PI / 180, cos = Math.Abs(Math.Cos(radians)), sin = Math.Abs(Math.Sin(radians));
+        double wrapLength = 1e7;
+        if (style.Wrap && !style.Stacked)
+        {
+            if (cos > 0.01) wrapLength = Math.Max((width - 2 * CellPadding) / cos, 1);
+            else if (height is { } h) wrapLength = Math.Max(h - 2 * CellPadding, 1);
+        }
+        var block = BuildBlock(cell, cell.Text, wrapLength);
+        double w = block.Width, h2 = block.Height;
+        return style.Stacked ? (block, w, h2) : (block, w * cos + h2 * sin, w * sin + h2 * cos);
+    }
+
     /// <summary>A copy of a text atom with different text (used to clip text to a cell).</summary>
     private Atom Trimmed(Atom atom, string text, double x) => new()
     {
@@ -359,6 +392,11 @@ public sealed class SheetLayoutEngine
     {
         TextItem t => t with { X = dx + t.X * scale, Baseline = dy + t.Baseline * scale, FontSize = t.FontSize * scale, CharacterSpacing = t.CharacterSpacing * scale },
         LineItem l => l with { X1 = dx + l.X1 * scale, X2 = dx + l.X2 * scale, Y1 = dy + l.Y1 * scale, Y2 = dy + l.Y2 * scale, Width = l.Width * scale },
+        PushItem p => p with
+        {
+            Clip = p.Clip is { } c ? (dx + c.X * scale, dy + c.Y * scale, c.Width * scale, c.Height * scale) : null,
+            CenterX = dx + p.CenterX * scale, CenterY = dy + p.CenterY * scale,
+        },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
         _ => item,
     };
@@ -472,7 +510,7 @@ public sealed class SheetLayoutEngine
             int first = range.FirstColumn, last = range.LastColumn;
             foreach (var ((row, column), cell) in _sheet.Cells)
             {
-                if (cell.Kind != CellValueKind.Text || cell.Style.Wrap || cell.Text.Length == 0) continue;
+                if (cell.Kind != CellValueKind.Text || cell.Style.Wrap || cell.Text.Length == 0 || IsRotated(cell.Style)) continue;
                 double own = _sheet.ColumnWidth(column);
                 if (cell.Text.Length * cell.LargestFontSize * 0.25 <= own) continue;
                 if (_anchors.ContainsKey((row, column)) || _sheet.Merges.Any(m => m.Contains(row, column))) continue;
@@ -539,6 +577,11 @@ public sealed class SheetLayoutEngine
                         if (_anchors.ContainsKey((row, column)) || _sheet.ColumnWidth(column) <= 0) continue;
                         var cell = _sheet.Cells[(row, column)];
                         if (cell.Text.Length == 0) continue;
+                        if (IsRotated(cell.Style))
+                        {
+                            height = Math.Max(height, _engine.RotatedBlock(cell, _sheet.ColumnWidth(column), null).Height);
+                            continue;
+                        }
                         double pitch = cell.LargestFontSize * LineHeightRatio;
                         int lines = 1;
                         if (cell.Style.Wrap && cell.Kind == CellValueKind.Text)
@@ -737,10 +780,56 @@ public sealed class SheetLayoutEngine
             return room;
         }
 
+        /// <summary>
+        /// Draws rotated or stacked text: the unrotated block is positioned so that its rotated bounding box sits in the cell
+        /// according to the cell's alignment (Excel aligns the box, not the text), turned about the box center and clipped to the cell.
+        /// </summary>
+        private void EmitRotated(Cell cell, double x, double y, double width, double height, List<LayoutItem> items)
+        {
+            var style = cell.Style;
+            var (block, boxWidth, boxHeight) = _engine.RotatedBlock(cell, width, height);
+            double textWidth = block.Width, textHeight = block.Height;
+            var alignment = AlignmentOf(cell);
+            double indent = style.Indent * IndentWidth;
+            double left = alignment switch
+            {
+                ParagraphAlignment.Right => x + width - CellPadding - boxWidth,
+                ParagraphAlignment.Center => x + (width - boxWidth) / 2,
+                _ => x + CellPadding + indent,
+            };
+            double top = style.VerticalAlignment switch
+            {
+                CellVerticalAlignment.Top => y,
+                CellVerticalAlignment.Center => y + (height - boxHeight) / 2,
+                _ => y + height - boxHeight,
+            };
+            double cx = left + boxWidth / 2, cy = top + boxHeight / 2;
+            items.Add(new PushItem((x, y, width, height), style.Stacked ? 0 : style.Rotation, cx, cy));
+            double lineTop = cy - textHeight / 2, blockLeft = cx - textWidth / 2;
+            for (int i = 0; i < block.Lines.Count; i++)
+            {
+                var (pitch, ascent, descent) = block.Metrics[i];
+                var line = block.Lines[i];
+                if (line.Atoms.Count > 0)
+                {
+                    double baseline = lineTop + (pitch - (ascent + descent)) / 2 + ascent;
+                    double x0 = style.Stacked ? blockLeft + (textWidth - LineWidth(line)) / 2 : blockLeft;
+                    _engine.EmitLine(line, x0, baseline, double.NegativeInfinity, double.PositiveInfinity, items);
+                }
+                lineTop += pitch;
+            }
+            items.Add(new PopItem());
+        }
+
         private void EmitText(Cell cell, int row, int column, double x, double y, double width, double height, bool merged, List<int> columns, List<LayoutItem> items)
         {
             if (cell.Text.Length == 0) return;
             var style = cell.Style;
+            if (IsRotated(style))
+            {
+                EmitRotated(cell, x, y, width, height, items);
+                return;
+            }
             bool wrap = style.Wrap && cell.Kind == CellValueKind.Text;
             double textWidth = TextWidth(cell, width);
 

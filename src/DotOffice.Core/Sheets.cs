@@ -111,8 +111,11 @@ public sealed record CellStyle
     /// <summary>Indent in levels (each is about three spaces).</summary>
     public int Indent { get; init; }
 
-    /// <summary>Text rotation in degrees. Read but not rendered yet.</summary>
+    /// <summary>Text rotation in degrees counter-clockwise (−90 reads downwards, 90 upwards).</summary>
     public double Rotation { get; init; }
+
+    /// <summary>Vertical stacked text (textRotation 255): upright letters one below the other.</summary>
+    public bool Stacked { get; init; }
 }
 
 /// <summary>Left, center and right strings of one header or footer, still containing Excel's <c>&amp;</c> codes.</summary>

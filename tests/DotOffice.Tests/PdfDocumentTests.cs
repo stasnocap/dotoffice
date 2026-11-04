@@ -99,4 +99,30 @@ public class PdfDocumentTests
         }
         return result;
     }
+
+    [Fact]
+    public void Clip_transform_and_shading_operators_are_written_with_a_shading_resource()
+    {
+        var doc = new PdfDocument();
+        var shading = doc.AddShading(PdfShading.Axial(0, 0, 100, 0,
+            [new ShadingStop(0, 1, 0, 0), new ShadingStop(0.5, 1, 1, 0), new ShadingStop(1, 0, 0, 1)]));
+        var radial = doc.AddShading(PdfShading.Radial(50, 50, 0, 50, 50, 40, [new ShadingStop(0.2, 1, 1, 1), new ShadingStop(0.8, 0, 0, 0)]));
+        var canvas = doc.AddPage(PageSize.A4).Canvas;
+        canvas.SaveState().Rectangle(10, 10, 100, 50).Clip().Transform(0, 1, -1, 0, 5, 6).PaintShading(shading).PaintShading(radial)
+            .CurveTo(1, 2, 3, 4, 5, 6).RestoreState();
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var text = Encoding.Latin1.GetString(ms.ToArray());
+        Assert.Contains("/Shading << /Sh1 ", text);
+        Assert.Contains("/ShadingType 2", text);
+        Assert.Contains("/ShadingType 3", text);
+        Assert.Contains("/FunctionType 3", text);
+        Assert.Contains("/Extend [true true]", text);
+        // The stream is compressed; inflate it to check the operators.
+        var stream = Regex.Matches(text, @"stream\n(.*?)\nendstream", RegexOptions.Singleline).Select(m => m.Groups[1].Value).First();
+        using var zlib = new ZLibStream(new MemoryStream(Encoding.Latin1.GetBytes(stream)), CompressionMode.Decompress);
+        using var reader = new StreamReader(zlib, Encoding.Latin1);
+        var content = reader.ReadToEnd();
+        Assert.Contains("10 10 100 50 re\nW n\n0 1 -1 0 5 6 cm\n/Sh1 sh\n/Sh2 sh\n1 2 3 4 5 6 c", content);
+    }
 }

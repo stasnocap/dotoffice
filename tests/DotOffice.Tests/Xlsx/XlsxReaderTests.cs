@@ -399,7 +399,8 @@ public class XlsxStyleTests
             (a.HorizontalAlignment, a.VerticalAlignment, a.Wrap, a.Indent, a.Rotation));
         var b = StyleOf(wb, "B1");
         Assert.Equal((HorizontalAlignment.Right, CellVerticalAlignment.Center, -45.0), (b.HorizontalAlignment, b.VerticalAlignment, b.Rotation));
-        Assert.Equal(90.0, StyleOf(wb, "C1").Rotation);
+        Assert.Equal((0.0, true), (StyleOf(wb, "C1").Rotation, StyleOf(wb, "C1").Stacked)); // 255 = stacked, not rotated
+        Assert.False(StyleOf(wb, "A1").Stacked);
         var d = StyleOf(wb, "D1");
         Assert.Equal((HorizontalAlignment.General, CellVerticalAlignment.Bottom, false), (d.HorizontalAlignment, d.VerticalAlignment, d.Wrap));
     }

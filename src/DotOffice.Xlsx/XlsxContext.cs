@@ -226,8 +226,6 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     break;
             }
         }
-        if (sheet.Cells.Values.Any(c => c.Style.Rotation != 0))
-            WarnOnce(sheet, "xlsx.rotation", "contains rotated text, which is drawn horizontally.");
     }
 
     private void ReadWorksheet(XmlReader r, Worksheet sheet)

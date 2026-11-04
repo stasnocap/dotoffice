@@ -26,6 +26,7 @@ public sealed class PdfCanvas
 
     internal HashSet<PdfFont> Fonts { get; } = [];
     internal HashSet<PdfImage> Images { get; } = [];
+    internal HashSet<PdfShading> Shadings { get; } = [];
 
     public PdfCanvas SaveState()
     {
@@ -54,7 +55,23 @@ public sealed class PdfCanvas
     public PdfCanvas LineTo(double x, double y) => Op($"{N(x)} {N(y)} l");
     public PdfCanvas Rectangle(double x, double y, double width, double height) =>
         Op($"{N(x)} {N(y)} {N(width)} {N(height)} re");
+    public PdfCanvas CurveTo(double x1, double y1, double x2, double y2, double x3, double y3) =>
+        Op($"{N(x1)} {N(y1)} {N(x2)} {N(y2)} {N(x3)} {N(y3)} c");
     public PdfCanvas ClosePath() => Op("h");
+
+    /// <summary>Intersects the clip with the current path (use inside <see cref="SaveState"/>/<see cref="RestoreState"/>).</summary>
+    public PdfCanvas Clip() => Op("W n");
+
+    /// <summary>Multiplies the current transformation matrix; points map as x' = a·x + c·y + e, y' = b·x + d·y + f.</summary>
+    public PdfCanvas Transform(double a, double b, double c, double d, double e, double f) =>
+        Op($"{N(a)} {N(b)} {N(c)} {N(d)} {N(e)} {N(f)} cm");
+
+    /// <summary>Paints a shading over the whole current clip.</summary>
+    public PdfCanvas PaintShading(PdfShading shading)
+    {
+        Shadings.Add(shading);
+        return Op($"/{shading.ResourceName} sh");
+    }
     public PdfCanvas Stroke() => Op("S");
     public PdfCanvas Fill() => Op("f");
     public PdfCanvas FillAndStroke() => Op("B");

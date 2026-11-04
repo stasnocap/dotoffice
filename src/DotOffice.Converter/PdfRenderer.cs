@@ -57,6 +57,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
         double h = page.Height;
         var items = page.Items;
         Color? fill = null, stroke = null;
+        var saved = new Stack<(Color? Fill, Color? Stroke)>();
 
         void Fill(Color c)
         {
@@ -94,6 +95,21 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     if (text.SyntheticBold) Stroke(text.Color);
                     canvas.DrawTextSegments(Font(text.Font), text.FontSize, h - text.Baseline, segments,
                         new TextStyle(text.SyntheticBold, text.SyntheticItalic, text.CharacterSpacing));
+                    break;
+                case PushItem push:
+                    // q/Q also save and restore the colors, so the cached ones must follow.
+                    saved.Push((fill, stroke));
+                    canvas.SaveState();
+                    if (push.Clip is { } clip) canvas.Rectangle(clip.X, h - clip.Y - clip.Height, clip.Width, clip.Height).Clip();
+                    if (push.Rotation != 0)
+                    {
+                        double radians = push.Rotation * Math.PI / 180, cos = Math.Cos(radians), sin = Math.Sin(radians), cy = h - push.CenterY;
+                        canvas.Transform(cos, sin, -sin, cos, push.CenterX - push.CenterX * cos + cy * sin, cy - push.CenterX * sin - cy * cos);
+                    }
+                    break;
+                case PopItem when saved.Count > 0:
+                    canvas.RestoreState();
+                    (fill, stroke) = saved.Pop();
                     break;
                 case RectItem rect:
                     Fill(rect.Fill);

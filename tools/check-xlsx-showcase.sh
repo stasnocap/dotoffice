@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -67,3 +67,8 @@ grep -qE 'Bold, italic, underlined, struck and red' all.txt || fail "rich text r
 grep -qE 'H2O and E = mc2' all.txt || fail "sub/superscript runs are missing"
 grep -qF "the runs flow" all.txt || fail "wrapped rich text is missing"
 if grep -E "warning xlsx\.rich-text" "$log"; then fail "rich text should not warn any more"; fi
+
+# Rotation: the sheet is laid out (pdftotext cannot read turned text reliably, so only the upright text is checked) and nothing warns.
+grep -qF "Rotated and stacked text" all.txt || fail "the rotation sheet is missing"
+grep -qF "Rows grow to fit rotated headings" all.txt || fail "the row under the rotated headings is missing"
+if grep -E "warning xlsx\.rotation" "$log"; then fail "rotated text should not warn any more"; fi
