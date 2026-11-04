@@ -1,7 +1,10 @@
 using System.IO.Compression;
 using System.Xml;
 
-namespace DotOffice.Docx;
+namespace DotOffice.Opc;
+
+/// <summary>Zip-bomb guards applied while reading a package.</summary>
+internal sealed record OpcLimits(long MaxPartSize, long MaxTotalUncompressedSize, int MaxPartCount);
 
 internal sealed record Relationship(string Id, string Type, string Target, bool IsExternal)
 {
@@ -18,10 +21,10 @@ internal sealed class OpcPackage : IDisposable
     private readonly ZipArchive _zip;
     private readonly Dictionary<string, ZipArchiveEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, Relationship>> _relationships = new(StringComparer.OrdinalIgnoreCase);
-    private readonly DocxReaderOptions _options;
+    private readonly OpcLimits _options;
     private long _bytesRead;
 
-    public OpcPackage(Stream stream, DocxReaderOptions options)
+    public OpcPackage(Stream stream, OpcLimits options)
     {
         _options = options;
         try
@@ -30,7 +33,7 @@ internal sealed class OpcPackage : IDisposable
         }
         catch (InvalidDataException e)
         {
-            throw new InvalidDataException("The input is not a valid DOCX (zip) package.", e);
+            throw new InvalidDataException("The input is not a valid Office Open XML (zip) package.", e);
         }
         if (_zip.Entries.Count > options.MaxPartCount)
             throw new InvalidDataException($"Package has {_zip.Entries.Count} parts, more than the limit of {options.MaxPartCount}.");
@@ -59,7 +62,18 @@ internal sealed class OpcPackage : IDisposable
     }
 
     public XmlReader OpenXml(string partName) =>
-        XmlReader.Create(Open(partName), WordXml.Settings(_options.MaxPartSize));
+        XmlReader.Create(Open(partName), Settings(_options.MaxPartSize));
+
+    private static XmlReaderSettings Settings(long maxCharacters) => new()
+    {
+        DtdProcessing = DtdProcessing.Prohibit,
+        XmlResolver = null,
+        IgnoreComments = true,
+        IgnoreProcessingInstructions = true,
+        MaxCharactersInDocument = maxCharacters,
+        MaxCharactersFromEntities = 1024,
+        CloseInput = true,
+    };
 
     /// <summary>Relationships of a part ("" for package-level relationships), keyed by id.</summary>
     public IReadOnlyDictionary<string, Relationship> GetRelationships(string partName)

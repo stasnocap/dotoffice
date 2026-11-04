@@ -1,6 +1,7 @@
 using System.Text;
 using System.Xml;
 using DotOffice.Core;
+using DotOffice.Opc;
 
 namespace DotOffice.Docx;
 
@@ -21,7 +22,7 @@ public static class DocxReader
 
         try
         {
-            using var package = new OpcPackage(stream, options);
+            using var package = new OpcPackage(stream, new OpcLimits(options.MaxPartSize, options.MaxTotalUncompressedSize, options.MaxPartCount));
             var main = package.FindRelationship("", "officeDocument")
                        ?? throw new InvalidDataException("Package has no main document (officeDocument relationship).");
             if (!package.Exists(main.Target))

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using DotOffice.Core;
 using DotOffice.Docx;
+using DotOffice.Opc;
 using static DotOffice.Tests.Docx.DocxBuilder;
 
 namespace DotOffice.Tests.Docx;
