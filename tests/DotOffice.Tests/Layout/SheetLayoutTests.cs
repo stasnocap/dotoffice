@@ -31,6 +31,12 @@ public class SheetLayoutTests
         };
     }
 
+    internal static Cell Rich(CellStyle style, params (string Text, RunProperties Font)[] runs) => new()
+    {
+        Text = string.Concat(runs.Select(r => r.Text)), Kind = CellValueKind.Text, Style = style,
+        Runs = runs.Select(r => new CellTextRun(r.Text, r.Font)).ToList(),
+    };
+
     internal static Cell Text(string text, CellStyle? style = null) => new() { Text = text, Kind = CellValueKind.Text, Style = style ?? Style() };
 
     internal static Cell Number(string text, CellStyle? style = null) => new() { Text = text, Kind = CellValueKind.Number, Style = style ?? Style() };
@@ -619,5 +625,78 @@ public class SheetHeaderFooterTests
         var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToDictionary(t => t.Text);
         Assert.Equal(11, items["head"].FontSize);
         Assert.Equal(5, items["S0"].FontSize);
+    }
+}
+
+public class SheetRichTextTests
+{
+    private static readonly RunProperties Base = new() { FontFamily = "Noto Sans", FontSize = 10 };
+
+    [Fact]
+    public void Each_run_is_drawn_with_its_own_size_weight_and_color()
+    {
+        var red = Base with { FontSize = 16, Color = new Color(255, 0, 0) };
+        var cell = SheetLayoutTests.Rich(SheetLayoutTests.Style(), ("Big", red), (" small", Base with { Underline = UnderlineStyle.Single }));
+        var sheet = SheetLayoutTests.Sheet((0, 0, cell));
+        sheet.ColumnWidths[0] = 200;
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var big = page.Items.OfType<TextItem>().Single(t => t.Text == "Big");
+        var small = page.Items.OfType<TextItem>().Single(t => t.Text.Contains("small"));
+        Assert.Equal((16.0, new Color(255, 0, 0)), (big.FontSize, big.Color));
+        Assert.Equal(10.0, small.FontSize);
+        Assert.True(small.X >= big.X + LayoutTestHelpers.Noto.MeasureText("Big", 16) - 0.5);
+        Assert.Equal(big.Baseline, small.Baseline, 3); // same baseline
+        Assert.Contains(page.Items.OfType<LineItem>(), l => l.Y1 > small.Baseline); // underline under the small run only
+    }
+
+    [Fact]
+    public void Superscript_runs_are_smaller_and_raised()
+    {
+        var cell = SheetLayoutTests.Rich(SheetLayoutTests.Style(), ("m", Base), ("2", Base with { VerticalPosition = VerticalPosition.Superscript }));
+        var items = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, cell))).Pages[0].Items.OfType<TextItem>().ToList();
+        var m = items.Single(t => t.Text == "m");
+        var two = items.Single(t => t.Text == "2");
+        Assert.True(two.FontSize < m.FontSize);
+        Assert.True(two.Baseline < m.Baseline);
+    }
+
+    [Fact]
+    public void The_largest_run_sets_the_autofit_row_height()
+    {
+        var cell = SheetLayoutTests.Rich(SheetLayoutTests.Style(), ("a", Base), ("b", Base with { FontSize = 30 }));
+        var sheet = SheetLayoutTests.Sheet((0, 0, cell), (1, 0, SheetLayoutTests.Text("below")));
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToList();
+        double rowBottom = items.Single(t => t.Text == "below").Baseline - sheet.PageSetup.Margins.Top;
+        Assert.True(rowBottom > 30 * 15.0 / 11, $"row 0 should be about 41 pt tall, 'below' sits {rowBottom} pt down");
+    }
+
+    [Fact]
+    public void Rich_text_wraps_across_runs_and_still_overflows_when_not_wrapping()
+    {
+        var bold = Base with { Bold = true };
+        var wrapStyle = SheetLayoutTests.Style(s => s.Wrap = true);
+        var wrapped = SheetLayoutTests.Rich(wrapStyle, ("alpha beta ", Base), ("gamma delta epsilon", bold));
+        var sheet = SheetLayoutTests.Sheet((0, 0, wrapped));
+        sheet.ColumnWidths[0] = 60;
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var baselines = page.Items.OfType<TextItem>().Select(t => Math.Round(t.Baseline, 2)).Distinct().ToList();
+        Assert.True(baselines.Count >= 3, "text should wrap onto several lines");
+
+        const string tail = " keeps going until a value stops it";
+        var overflow = SheetLayoutTests.Rich(SheetLayoutTests.Style(), ("Start", bold), (tail, Base));
+        var sheet2 = SheetLayoutTests.Sheet((0, 0, overflow), (0, 3, SheetLayoutTests.Text("STOP")));
+        var text = SheetLayoutTests.PageText(SheetLayoutTests.Layout(sheet2).Pages[0]);
+        Assert.Contains("Start", text);
+        Assert.Contains("STOP", text);
+        Assert.DoesNotContain("stops it", text); // cut at the occupied neighbour
+        Assert.Contains("keeps", text); // but spilled into the empty cells first
+    }
+
+    [Fact]
+    public void Newlines_inside_runs_start_new_lines_in_wrapping_cells()
+    {
+        var cell = SheetLayoutTests.Rich(SheetLayoutTests.Style(s => s.Wrap = true), ("one\n", Base), ("two", Base with { Italic = true }));
+        var items = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, cell))).Pages[0].Items.OfType<TextItem>().ToList();
+        Assert.True(items.Single(t => t.Text == "two").Baseline > items.Single(t => t.Text == "one").Baseline + 5);
     }
 }

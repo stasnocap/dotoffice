@@ -88,19 +88,19 @@ internal static class XlsxXml
         };
 
     /// <summary>
-    /// Reads the text of a rich-text container (<c>si</c> or <c>is</c>): all <c>t</c> elements, in order, except the
-    /// phonetic <c>rPh</c> runs. Leaves the reader after the container's end tag.
+    /// Reads a rich-text container (<c>si</c> or <c>is</c>): the text of all <c>t</c> elements in order, except the phonetic
+    /// <c>rPh</c> runs, plus the formatting of each <c>r</c> run when there are any. Leaves the reader after the container's end tag.
     /// </summary>
-    public static string ReadRichText(this XmlReader r, out bool hadRuns)
+    public static RichString ReadRichText(this XmlReader r)
     {
-        hadRuns = false;
         if (r.IsEmptyElement)
         {
             r.Read();
-            return "";
+            return new RichString("", null);
         }
         int depth = r.Depth;
         var sb = new StringBuilder();
+        List<RichRun>? runs = null;
         r.Read();
         while (!r.EOF && !(r.NodeType == XmlNodeType.EndElement && r.Depth == depth))
         {
@@ -115,14 +115,21 @@ internal static class XlsxXml
                         sb.Append(r.ReadElementContentAsString());
                         continue;
                     case "r":
-                        hadRuns = true;
-                        break;
+                    {
+                        var run = (System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r);
+                        var text = new StringBuilder();
+                        foreach (var t in run.Elements().Where(e => e.Name.LocalName == "t")) text.Append(t.Value);
+                        sb.Append(text);
+                        runs ??= [];
+                        runs.Add(new RichRun(DecodeEscapes(text.ToString()), run.Elements().FirstOrDefault(e => e.Name.LocalName == "rPr")));
+                        continue;
+                    }
                 }
             }
             r.Read();
         }
         r.Read(); // past the end tag
-        return DecodeEscapes(sb.ToString());
+        return new RichString(DecodeEscapes(sb.ToString()), runs);
     }
 
     /// <summary>Decodes <c>_xHHHH_</c> escapes that Excel uses for control characters in strings.</summary>
@@ -146,3 +153,9 @@ internal static class XlsxXml
         return sb.ToString();
     }
 }
+
+/// <summary>A formatted run of a rich string; <see cref="Properties"/> is the raw <c>rPr</c> element, if any.</summary>
+internal sealed record RichRun(string Text, System.Xml.Linq.XElement? Properties);
+
+/// <summary>A shared or inline string: its plain text and, when it has formatted runs, the runs.</summary>
+internal sealed record RichString(string Text, List<RichRun>? Runs);

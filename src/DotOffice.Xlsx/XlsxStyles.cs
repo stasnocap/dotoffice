@@ -70,21 +70,26 @@ internal static class XlsxStyles
         "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333",
     ];
 
-    public static List<CellFormat> Read(XmlReader reader, XlsxTheme theme, IConversionWarningSink? warnings)
+    /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
+    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve);
+
+    public static Result Read(XmlReader reader, XlsxTheme theme, IConversionWarningSink? warnings)
     {
         var doc = XDocument.Load(reader);
         var root = doc.Root;
         var formats = new List<CellFormat>();
-        if (root is null) return formats;
-
-        var palette = ReadPalette(root);
+        var palette = new Color?[LegacyPalette.Length];
+        for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(LegacyPalette[i]);
         Color? Resolve(XElement? color) => ResolveColor(color, theme, palette);
+        if (root is null) return new Result(formats, Resolve);
+
+        ReadPalette(root, palette);
 
         var numberFormats = new Dictionary<int, string>();
         foreach (var f in Children(Child(root, "numFmts"), "numFmt"))
             if (Int(f, "numFmtId") is { } id && (string?)f.Attribute("formatCode") is { } code) numberFormats[id] = code;
 
-        var fonts = Children(Child(root, "fonts"), "font").Select(f => ReadFont(f, Resolve)).ToList();
+        var fonts = Children(Child(root, "fonts"), "font").Select(f => ApplyFont(f, CellStyle.Default.Font, Resolve)).ToList();
 
         bool gradientWarned = false;
         var fills = new List<Color?>();
@@ -142,7 +147,7 @@ internal static class XlsxStyles
             string? code = numberFormats.GetValueOrDefault(numFmtId);
             formats.Add(new CellFormat(style, numFmtId, code));
         }
-        return formats;
+        return new Result(formats, Resolve);
     }
 
     /// <summary>Converts the file's textRotation (0–90 counter-clockwise, 91–180 clockwise, 255 stacked) to degrees counter-clockwise.</summary>
@@ -154,16 +159,23 @@ internal static class XlsxStyles
         _ => 0,
     };
 
-    private static RunProperties ReadFont(XElement font, Func<XElement?, Color?> resolve)
+    /// <summary>
+    /// Applies the properties found in a <c>font</c> or rich-text <c>rPr</c> element on top of <paramref name="props"/>.
+    /// Properties the element does not mention are inherited (for a rich-text run: from the cell's font, which is what Excel shows).
+    /// </summary>
+    internal static RunProperties ApplyFont(XElement font, RunProperties props, Func<XElement?, Color?> resolve)
     {
-        var props = CellStyle.Default.Font;
-        if (Child(font, "name") is { } name && (string?)name.Attribute("val") is { Length: > 0 } family) props = props with { FontFamily = family };
+        if ((Child(font, "name") ?? Child(font, "rFont")) is { } name && (string?)name.Attribute("val") is { Length: > 0 } family) props = props with { FontFamily = family };
         if (Child(font, "sz") is { } size && Double(size, "val") is { } points and > 0) props = props with { FontSize = Math.Min(points, 409) };
         if (Child(font, "b") is { } b) props = props with { Bold = Flag(b) };
         if (Child(font, "i") is { } i) props = props with { Italic = Flag(i) };
         if (Child(font, "strike") is { } strike) props = props with { Strike = Flag(strike) };
-        if (Child(font, "u") is { } u && Flag(u, "none"))
-            props = props with { Underline = ((string?)u.Attribute("val")) is "double" or "doubleAccounting" ? UnderlineStyle.Double : UnderlineStyle.Single };
+        if (Child(font, "u") is { } u)
+            props = props with
+            {
+                Underline = !Flag(u, "none") ? UnderlineStyle.None
+                    : ((string?)u.Attribute("val")) is "double" or "doubleAccounting" ? UnderlineStyle.Double : UnderlineStyle.Single,
+            };
         if (Child(font, "vertAlign") is { } v)
             props = props with
             {
@@ -205,17 +217,14 @@ internal static class XlsxStyles
         return new BorderSet { Left = Edge("left", "start"), Right = Edge("right", "end"), Top = Edge("top"), Bottom = Edge("bottom") };
     }
 
-    private static Color?[] ReadPalette(XElement root)
+    private static void ReadPalette(XElement root, Color?[] palette)
     {
-        var palette = new Color?[LegacyPalette.Length];
-        for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(LegacyPalette[i]);
         int index = 0;
         foreach (var rgb in Children(Child(Child(root, "colors"), "indexedColors"), "rgbColor"))
         {
             if (index < palette.Length && Color.TryParseHex(Argb((string?)rgb.Attribute("rgb"))) is { } color) palette[index] = color;
             index++;
         }
-        return palette;
     }
 
     private static Color? ResolveColor(XElement? element, XlsxTheme theme, Color?[] palette)

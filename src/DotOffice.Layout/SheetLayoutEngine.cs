@@ -214,11 +214,12 @@ public sealed class SheetLayoutEngine
     private sealed class TextBlock
     {
         public List<Line> Lines { get; } = [];
-        public double Pitch { get; init; }
-        public double Ascent { get; init; }
-        public double Descent { get; init; }
+
+        /// <summary>Per line: its height, and the ascent and descent of its tallest font (Excel sizes each line by its largest run).</summary>
+        public List<(double Pitch, double Ascent, double Descent)> Metrics { get; } = [];
+
         public double Width { get; set; }
-        public double Height => Lines.Count * Pitch;
+        public double Height => Metrics.Sum(m => m.Pitch);
     }
 
     private static double LineWidth(Line line)
@@ -243,32 +244,66 @@ public sealed class SheetLayoutEngine
         _ => ParagraphAlignment.Left,
     };
 
+    /// <summary>
+    /// The paragraphs (each a list of formatted runs) of a cell's text. Rich-text runs are kept when the text is the cell's own;
+    /// for wrapping cells a newline starts a new paragraph, otherwise newlines are dropped.
+    /// </summary>
+    private static List<List<TextRun>> Paragraphs(Cell cell, string text, bool wrap)
+    {
+        var runs = cell.Runs is { Count: > 0 } r && text == cell.Text
+            ? r.Select(x => (x.Text, x.Font)).ToList()
+            : [(text, cell.Style.Font)];
+        var paragraphs = new List<List<TextRun>> { new() };
+        foreach (var (runText, font) in runs)
+        {
+            var normalized = runText.Replace("\r\n", "\n").Replace('\r', '\n');
+            if (!wrap) normalized = normalized.Replace("\n", "");
+            var parts = normalized.Split('\n');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i > 0) paragraphs.Add([]);
+                if (parts[i].Length > 0) paragraphs[^1].Add(new TextRun(parts[i], font));
+            }
+        }
+        return paragraphs;
+    }
+
     /// <summary>Breaks a cell's text into lines; <paramref name="wrapWidth"/> is the text width for wrapping cells.</summary>
     private TextBlock BuildBlock(Cell cell, string text, double wrapWidth)
     {
         var font = cell.Style.Font;
         bool wrap = cell.Style.Wrap && cell.Kind == CellValueKind.Text;
-        var metrics = FontMetrics.Of(_fonts.ForCharacter(font, '0').Font, font.FontSize);
-        var block = new TextBlock { Pitch = Math.Max(font.FontSize * LineHeightRatio, 1), Ascent = metrics.Ascent, Descent = metrics.Descent };
+        var paragraphs = Paragraphs(cell, text, wrap);
 
-        IEnumerable<string> segments = wrap
-            ? text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
-            : [text.Replace("\r", "").Replace("\n", "")];
+        var block = new TextBlock();
+        (double Pitch, double Ascent, double Descent) Measure(RunProperties props)
+        {
+            var m = FontMetrics.Of(_fonts.ForCharacter(props, '0').Font, props.FontSize);
+            return (Math.Max(props.FontSize * LineHeightRatio, 1), m.Ascent, m.Descent);
+        }
+        var firstRun = paragraphs.SelectMany(p => p).Select(r => r.Properties).FirstOrDefault() ?? font;
+
         var alignment = wrap ? AlignmentOf(cell) : ParagraphAlignment.Left;
         var frame = new LineFrame(wrap ? Math.Max(wrapWidth, 1) : 1e7, 0, 0, 0, [], 36);
-        foreach (var segment in segments)
+        foreach (var runs in paragraphs)
         {
-            if (segment.Length == 0)
+            var tallest = runs.Select(r => r.Properties).DefaultIfEmpty(firstRun).MaxBy(p => p.FontSize)!;
+            var lines = new List<Line>();
+            if (runs.Count > 0)
             {
-                block.Lines.Add(new Line { Atoms = [] });
-                continue;
+                var paragraph = new Paragraph { MarkProperties = font };
+                foreach (var run in runs) paragraph.Inlines.Add(run);
+                var atoms = _itemizer.Itemize(paragraph, _ => "");
+                lines = LineBuilder.Build(atoms, frame, alignment, false, null);
             }
-            var paragraph = new Paragraph { MarkProperties = font };
-            paragraph.Inlines.Add(new TextRun(segment, font));
-            var atoms = _itemizer.Itemize(paragraph, _ => "");
-            var lines = LineBuilder.Build(atoms, frame, alignment, false, null);
-            if (lines.Count == 0) block.Lines.Add(new Line { Atoms = [] });
-            else block.Lines.AddRange(lines);
+            if (lines.Count == 0) lines.Add(new Line { Atoms = [] });
+            // A wrapped paragraph's lines are sized by the tallest run on them; the paragraph's tallest run is a close upper bound.
+            foreach (var line in lines)
+            {
+                var props = line.Atoms.Take(line.VisibleCount).Where(a => a.Font is not null).Select(a => a.Props).DefaultIfEmpty(tallest).MaxBy(p => p.FontSize)!;
+                block.Lines.Add(line);
+                block.Metrics.Add(Measure(props));
+            }
         }
         foreach (var line in block.Lines) block.Width = Math.Max(block.Width, LineWidth(line));
         return block;
@@ -439,7 +474,7 @@ public sealed class SheetLayoutEngine
             {
                 if (cell.Kind != CellValueKind.Text || cell.Style.Wrap || cell.Text.Length == 0) continue;
                 double own = _sheet.ColumnWidth(column);
-                if (cell.Text.Length * cell.Style.Font.FontSize * 0.25 <= own) continue;
+                if (cell.Text.Length * cell.LargestFontSize * 0.25 <= own) continue;
                 if (_anchors.ContainsKey((row, column)) || _sheet.Merges.Any(m => m.Contains(row, column))) continue;
                 double width = _engine.BuildBlock(cell, cell.Text, 1e7).Width + 2 * CellPadding;
                 if (width <= own + Epsilon) continue;
@@ -504,13 +539,14 @@ public sealed class SheetLayoutEngine
                         if (_anchors.ContainsKey((row, column)) || _sheet.ColumnWidth(column) <= 0) continue;
                         var cell = _sheet.Cells[(row, column)];
                         if (cell.Text.Length == 0) continue;
-                        double pitch = cell.Style.Font.FontSize * LineHeightRatio;
+                        double pitch = cell.LargestFontSize * LineHeightRatio;
                         int lines = 1;
                         if (cell.Style.Wrap && cell.Kind == CellValueKind.Text)
                         {
                             var block = _engine.BuildBlock(cell, cell.Text, TextWidth(cell, _sheet.ColumnWidth(column)));
                             _blocks[(row, column)] = block;
-                            lines = Math.Max(block.Lines.Count, 1);
+                            height = Math.Max(height, block.Height);
+                            continue;
                         }
                         height = Math.Max(height, lines * pitch);
                     }
@@ -749,13 +785,14 @@ public sealed class SheetLayoutEngine
                 CellVerticalAlignment.Center => y + (height - blockHeight) / 2,
                 _ => y + height - blockHeight,
             };
-            for (int i = 0; i < block.Lines.Count; i++)
+            double lineTop = top;
+            for (int i = 0; i < block.Lines.Count; i++, lineTop += block.Metrics[i - 1].Pitch)
             {
-                double lineTop = top + i * block.Pitch;
-                if (lineTop < y - 0.5 || lineTop + block.Pitch > y + height + 0.5) continue; // outside the cell vertically
+                var (pitch, ascent, descent) = block.Metrics[i];
+                if (lineTop < y - 0.5 || lineTop + pitch > y + height + 0.5) continue; // outside the cell vertically
                 var line = block.Lines[i];
                 if (line.Atoms.Count == 0) continue;
-                double baseline = lineTop + (block.Pitch - (block.Ascent + block.Descent)) / 2 + block.Ascent;
+                double baseline = lineTop + (pitch - (ascent + descent)) / 2 + ascent;
                 double x0;
                 if (wrap) x0 = left;
                 else

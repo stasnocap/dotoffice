@@ -15,10 +15,10 @@ internal sealed record DefinedName(string Name, int? LocalSheetId, string Formul
 /// <summary>Package-wide state while reading one workbook.</summary>
 internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options, string workbookPart)
 {
-    private readonly List<string> _sharedStrings = [];
+    private readonly List<RichString> _sharedStrings = [];
     private List<CellFormat> _formats = [];
+    private Func<System.Xml.Linq.XElement?, Color?> _resolveColor = _ => null;
     private long _cellCount;
-    private bool _richTextWarned;
 
     public OpcPackage Package { get; } = package;
 
@@ -39,14 +39,14 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         using (var r = Package.OpenXml(WorkbookPart))
             ReadWorkbookXml(r, sheets, names);
 
+        ReadStyles();
+
         var shared = Package.FindRelationship(WorkbookPart, "sharedStrings");
         if (shared is not null && Package.Exists(shared.Target))
         {
             using var r = Package.OpenXml(shared.Target);
             ReadSharedStrings(r);
         }
-
-        ReadStyles();
 
         var rels = Package.GetRelationships(WorkbookPart);
         for (int index = 0; index < sheets.Count; index++)
@@ -170,7 +170,9 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         var stylesRel = Package.FindRelationship(WorkbookPart, "styles");
         if (stylesRel is null || !Package.Exists(stylesRel.Target)) return;
         using var styles = Package.OpenXml(stylesRel.Target);
-        _formats = XlsxStyles.Read(styles, theme, Options.Warnings);
+        var table = XlsxStyles.Read(styles, theme, Options.Warnings);
+        _formats = table.Formats;
+        _resolveColor = table.Resolve;
     }
 
     private CellFormat FormatOf(string? styleAttribute) =>
@@ -187,21 +189,13 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         {
             if (r.NodeType == XmlNodeType.Element && r.LocalName == "si")
             {
-                _sharedStrings.Add(r.ReadRichText(out var rich));
-                if (rich) WarnRichText();
+                _sharedStrings.Add(r.ReadRichText());
             }
             else
             {
                 r.Read();
             }
         }
-    }
-
-    private void WarnRichText()
-    {
-        if (_richTextWarned) return;
-        _richTextWarned = true;
-        Options.Warnings.Warn("xlsx.rich-text", "Rich text formatting inside cells is not supported; the text is shown with the cell's own style.");
     }
 
     // ------------------------------------------------------------------ worksheet
@@ -561,7 +555,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
         int depth = r.Depth;
         string? value = null;
-        string? inline = null;
+        RichString? inline = null;
         bool hasFormula = false;
         r.Read();
         while (!r.EOF && !(r.NodeType == XmlNodeType.EndElement && r.Depth == depth))
@@ -582,8 +576,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     r.Skip();
                     break;
                 case "is":
-                    inline = r.ReadRichText(out var rich);
-                    if (rich) WarnRichText();
+                    inline = r.ReadRichText();
                     break;
                 default:
                     r.Skip();
@@ -602,15 +595,36 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     private static CellStyle WithColor(CellStyle style, Color? color) => color is { } c ? style with { Font = style.Font with { Color = c } } : style;
 
-    private static Cell TextCell(string text, CellFormat format)
+    private Cell TextCell(RichString rich, CellFormat format)
     {
         var code = CodeOf(format);
-        if (code == "General") return new Cell { Text = text, Kind = CellValueKind.Text, Style = format.Style };
+        // Runs are kept only when the text is shown as it is; a text format (e.g. "@" with literals) rewrites it.
+        if (code == "General") return new Cell { Text = rich.Text, Runs = ResolveRuns(rich, format.Style.Font), Kind = CellValueKind.Text, Style = format.Style };
+        var text = rich.Text;
         var shown = NumberFormat.Parse(code).FormatText(text);
         return new Cell { Text = shown.Text, Kind = CellValueKind.Text, Style = WithColor(format.Style, shown.Color) };
     }
 
-    private Cell? Build(string type, string? value, string? inline, bool hasFormula, CellFormat format, Worksheet sheet, ref bool formulaWarned)
+    private Cell TextCell(string text, CellFormat format) => TextCell(new RichString(text, null), format);
+
+    /// <summary>
+    /// Resolves each run on top of the cell's font. A run property that is not mentioned is inherited from the cell (Excel's
+    /// own files always spell the properties out, so this only matters for hand-made workbooks).
+    /// </summary>
+    private List<CellTextRun>? ResolveRuns(RichString rich, RunProperties cellFont)
+    {
+        if (rich.Runs is not { Count: > 0 } runs) return null;
+        var result = new List<CellTextRun>(runs.Count);
+        foreach (var run in runs)
+        {
+            if (run.Text.Length == 0) continue;
+            var font = run.Properties is { } rPr ? XlsxStyles.ApplyFont(rPr, cellFont, _resolveColor) : cellFont;
+            result.Add(new CellTextRun(run.Text, font));
+        }
+        return result.Count == 0 ? null : result;
+    }
+
+    private Cell? Build(string type, string? value, RichString? inline, bool hasFormula, CellFormat format, Worksheet sheet, ref bool formulaWarned)
     {
         var style = format.Style;
         if (type == "inlineStr")

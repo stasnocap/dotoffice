@@ -30,6 +30,7 @@ internal static class ShowcaseXlsx
             ("Long table", LongTable(), "visible"),
             ("Wide", Wide(), "visible"),
             ("Text", TextSheet(), "visible"),
+            ("Rich text", RichTextSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -121,6 +122,12 @@ internal static class ShowcaseXlsx
         return name;
     }
 
+    /// <summary>An inline string made of formatted runs: each run is its text and the inner XML of its rPr.</summary>
+    private static string Rich(string reference, int style, params (string Text, string Properties)[] runs) =>
+        $"<c r=\"{reference}\" t=\"inlineStr\" s=\"{style}\"><is>" +
+        string.Concat(runs.Select(r => $"<r>{(r.Properties.Length == 0 ? "" : $"<rPr>{r.Properties}</rPr>")}<t xml:space=\"preserve\">{SecurityElement.Escape(r.Text)}</t></r>")) +
+        "</is></c>";
+
     private const string HeaderFooter =
         "<headerFooter><oddHeader>&amp;C&amp;A</oddHeader><oddFooter>&amp;CPage &amp;P of &amp;N</oddFooter></headerFooter>";
 
@@ -208,6 +215,22 @@ internal static class ShowcaseXlsx
         rows.Append(Row(8, Str("A8", "Too wide for its column:") + Num("B8", 123456789012345, Default)));
         rows.Append(Row(9, Str("A9", "Numbers never spill into neighbors; they show hashes instead.", Default)));
         var cols = "<cols><col min=\"1\" max=\"1\" width=\"24\" customWidth=\"1\"/><col min=\"2\" max=\"7\" width=\"10\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string RichTextSheet()
+    {
+        const string Base = "<sz val=\"11\"/><rFont val=\"Calibri\"/>";
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Rich text runs inside one cell", Bold)));
+        rows.Append(Row(3, Rich("A3", Default, ("Bold", "<b/>" + Base), (", ", Base), ("italic", "<i/>" + Base), (", ", Base), ("underlined", "<u/>" + Base), (", ", Base),
+            ("struck", "<strike/>" + Base), (" and ", Base), ("red", "<color rgb=\"FFC00000\"/>" + Base))));
+        rows.Append(Row(4, Rich("A4", Default, ("Sizes: ", Base), ("small ", "<sz val=\"8\"/><rFont val=\"Calibri\"/>"), ("LARGE", "<b/><sz val=\"20\"/><color rgb=\"FF1F3864\"/><rFont val=\"Calibri\"/>"))));
+        rows.Append(Row(5, Rich("A5", Default, ("H", Base), ("2", "<vertAlign val=\"subscript\"/>" + Base), ("O and E = mc", Base), ("2", "<vertAlign val=\"superscript\"/>" + Base))));
+        rows.Append(Row(7, Rich("A7", Wrap, ("Wrapped rich text: ", "<b/>" + Base), ("the runs flow across lines and the row grows to fit them, including a ", Base),
+            ("larger", "<sz val=\"16\"/><color rgb=\"FF548235\"/><rFont val=\"Calibri\"/>"), (" word.", Base))));
+        rows.Append(Row(9, Rich("A9", Default, ("Overflow: ", "<b/>" + Base), ("rich text spills into empty neighbors until a value stops it.", Base)) + Str("G9", "stop")));
+        var cols = "<cols><col min=\"1\" max=\"1\" width=\"30\" customWidth=\"1\"/><col min=\"2\" max=\"7\" width=\"10\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 

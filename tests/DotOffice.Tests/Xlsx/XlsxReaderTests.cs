@@ -44,7 +44,7 @@ public class XlsxReaderTests
     }
 
     [Fact]
-    public void Concatenates_rich_text_runs_ignores_phonetics_and_warns_once()
+    public void Concatenates_rich_text_runs_and_ignores_phonetics_without_warning()
     {
         var warnings = new ConversionWarningList();
         var wb = Read(new XlsxBuilder
@@ -54,7 +54,59 @@ public class XlsxReaderTests
         }.AddSheet("S", Row(1, S("A1", 0), S("B1", 1))), warnings);
         Assert.Equal("Hello", At(wb.Sheets[0], 0, 0).Text);
         Assert.Equal("xy", At(wb.Sheets[0], 0, 1).Text);
-        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.rich-text");
+        Assert.Empty(warnings.Warnings);
+    }
+
+    private const string RichStyles =
+        "<fonts><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills><fill/></fills><borders><border/></borders>" +
+        "<cellXfs><xf fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellXfs>";
+
+    [Fact]
+    public void Reads_formatting_of_shared_string_runs_and_inherits_the_rest_from_the_cell_font()
+    {
+        var wb = Read(new XlsxBuilder
+        {
+            Styles = RichStyles,
+            SharedStrings = "<si><r><rPr><b/><i/><u/><strike/><sz val=\"14\"/><color rgb=\"FFFF0000\"/><rFont val=\"Arial\"/></rPr><t>Big</t></r>" +
+                            "<r><t xml:space=\"preserve\"> plain </t></r>" +
+                            "<r><rPr><vertAlign val=\"superscript\"/><u val=\"none\"/></rPr><t>2</t></r>" +
+                            "<r><rPr><vertAlign val=\"subscript\"/></rPr><t>i</t></r></si>",
+        }.AddSheet("S", Row(1, S("A1", 0, 0))));
+        var runs = At(wb.Sheets[0], 0, 0).Runs!;
+        Assert.Equal(["Big", " plain ", "2", "i"], runs.Select(r => r.Text));
+        var big = runs[0].Font;
+        Assert.Equal(("Arial", 14.0), (big.FontFamily, big.FontSize));
+        Assert.True(big.Bold && big.Italic && big.Strike);
+        Assert.Equal(UnderlineStyle.Single, big.Underline);
+        Assert.Equal(new Color(255, 0, 0), big.Color);
+        Assert.Equal(("Calibri", 11.0, false), (runs[1].Font.FontFamily, runs[1].Font.FontSize, runs[1].Font.Bold));
+        Assert.Equal(VerticalPosition.Superscript, runs[2].Font.VerticalPosition);
+        Assert.Equal(VerticalPosition.Subscript, runs[3].Font.VerticalPosition);
+        Assert.Equal(14.0, At(wb.Sheets[0], 0, 0).LargestFontSize);
+    }
+
+    [Fact]
+    public void Reads_inline_string_runs_with_theme_colors()
+    {
+        var wb = Read(new XlsxBuilder { Styles = RichStyles, ThemeColors = "<a:dk1><a:srgbClr val=\"000000\"/></a:dk1><a:lt1><a:srgbClr val=\"FFFFFF\"/></a:lt1><a:accent1><a:srgbClr val=\"112233\"/></a:accent1>" }
+            .AddSheet("S", Row(1, "<c r=\"A1\" t=\"inlineStr\"><is><r><rPr><color theme=\"4\"/></rPr><t>A</t></r><r><t>B</t></r></is></c>")));
+        var runs = At(wb.Sheets[0], 0, 0).Runs!;
+        Assert.Equal(new Color(0x11, 0x22, 0x33), runs[0].Font.Color);
+        Assert.Null(runs[1].Font.Color);
+    }
+
+    [Fact]
+    public void Plain_strings_have_no_runs_and_text_formats_drop_them()
+    {
+        var wb = Read(new XlsxBuilder
+        {
+            Styles = "<numFmts><numFmt numFmtId=\"164\" formatCode=\"&quot;&lt;&quot;@&quot;&gt;&quot;\"/></numFmts><fonts><font/></fonts><fills><fill/></fills><borders><border/></borders>" +
+                     "<cellXfs><xf fontId=\"0\" fillId=\"0\" borderId=\"0\"/><xf numFmtId=\"164\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellXfs>",
+            SharedStrings = "<si><t>plain</t></si><si><r><rPr><b/></rPr><t>a</t></r><r><t>b</t></r></si>",
+        }.AddSheet("S", Row(1, S("A1", 0, 0), S("B1", 1, 1))));
+        Assert.Null(At(wb.Sheets[0], 0, 0).Runs);
+        Assert.Equal("<ab>", At(wb.Sheets[0], 0, 1).Text);
+        Assert.Null(At(wb.Sheets[0], 0, 1).Runs);
     }
 
     [Fact]

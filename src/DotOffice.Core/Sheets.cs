@@ -66,10 +66,21 @@ public sealed class Worksheet(string name)
 
 public enum CellValueKind { Text, Number, Bool, Error }
 
+/// <summary>One formatted run of a rich-text cell; its <see cref="Font"/> is fully resolved (cell font plus the run's overrides).</summary>
+public sealed record CellTextRun(string Text, RunProperties Font);
+
 public sealed class Cell
 {
     /// <summary>The display text, with number/date formatting already applied.</summary>
     public string Text { get; init; } = "";
+
+    /// <summary>
+    /// Rich-text runs whose texts concatenate to <see cref="Text"/>; null for cells that use the cell style's font throughout.
+    /// </summary>
+    public IReadOnlyList<CellTextRun>? Runs { get; init; }
+
+    /// <summary>The largest font size used by the cell's text (it decides the line height).</summary>
+    public double LargestFontSize => Runs is { Count: > 0 } runs ? runs.Max(r => r.Font.FontSize) : Style.Font.FontSize;
 
     public CellStyle Style { get; init; } = CellStyle.Default;
 

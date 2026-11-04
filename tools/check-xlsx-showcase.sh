@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -61,3 +61,9 @@ last_col=$(for p in $(seq 1 "$pages"); do [[ $(page_text "$p") == *"Col 30"* ]] 
 [ -n "$first_col" ] && [ "$first_col" = "$last_col" ] || fail "'Col 01' (page ${first_col:-none}) and 'Col 30' (page ${last_col:-none}) are not on the same page"
 read -r width height < <(pdfinfo -f "$first_col" -l "$first_col" "$pdf" | awk '/size:/ {print $4, $6; exit}')
 awk -v w="$width" -v h="$height" 'BEGIN { exit !(w > h) }' || fail "the wide sheet is not landscape (${width}x${height})"
+
+# Rich text: runs keep their text in order, in one line, and none of the features warns.
+grep -qE 'Bold, italic, underlined, struck and red' all.txt || fail "rich text runs were not laid out in one line"
+grep -qE 'H2O and E = mc2' all.txt || fail "sub/superscript runs are missing"
+grep -qF "the runs flow" all.txt || fail "wrapped rich text is missing"
+if grep -E "warning xlsx\.rich-text" "$log"; then fail "rich text should not warn any more"; fi
