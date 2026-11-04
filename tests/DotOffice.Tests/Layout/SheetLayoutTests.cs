@@ -392,3 +392,122 @@ public class SheetOverflowTests
         Assert.True(items.Max(Right) > sheet.PageSetup.Margins.Left + 80); // spilled past the original two columns
     }
 }
+
+public class SheetPaginationTests
+{
+    private static Worksheet Grid(int rows, int columns, double columnWidth = 100)
+    {
+        var sheet = SheetLayoutTests.Sheet();
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < columns; c++)
+                sheet.Cells[(r, c)] = SheetLayoutTests.Text($"r{r}c{c}");
+        for (int c = 0; c < columns; c++) sheet.ColumnWidths[c] = columnWidth;
+        return sheet;
+    }
+
+    private static string[] Pages(Worksheet sheet) =>
+        SheetLayoutTests.Layout(sheet).Pages.Select(p => string.Join(" ", p.Items.OfType<TextItem>().Select(t => t.Text))).ToArray();
+
+    [Fact]
+    public void Manual_row_breaks_start_a_new_page()
+    {
+        var sheet = Grid(10, 1);
+        sheet.PageSetup.RowBreaks.Add(3); // break after the fourth row
+        var pages = Pages(sheet);
+        Assert.Equal(2, pages.Length);
+        Assert.Contains("r3c0", pages[0]);
+        Assert.DoesNotContain("r4c0", pages[0]);
+        Assert.StartsWith("r4c0", pages[1]);
+    }
+
+    [Fact]
+    public void Manual_column_breaks_start_a_new_page()
+    {
+        var sheet = Grid(2, 4);
+        sheet.PageSetup.ColumnBreaks.Add(1);
+        var pages = Pages(sheet);
+        Assert.Equal(2, pages.Length);
+        Assert.Contains("r1c1", pages[0]);
+        Assert.DoesNotContain("r0c2", pages[0]);
+        Assert.Contains("r0c2", pages[1]);
+    }
+
+    [Fact]
+    public void A_break_before_a_hidden_row_applies_to_the_next_visible_row()
+    {
+        var sheet = Grid(6, 1);
+        sheet.HiddenRows.Add(3);
+        sheet.PageSetup.RowBreaks.Add(2);
+        var pages = Pages(sheet);
+        Assert.Equal(2, pages.Length);
+        Assert.StartsWith("r4c0", pages[1]);
+    }
+
+    [Fact]
+    public void Title_rows_repeat_on_every_following_page()
+    {
+        var sheet = Grid(100, 1);
+        sheet.PageSetup.TitleRows = (0, 1);
+        var pages = Pages(sheet);
+        Assert.True(pages.Length >= 2);
+        foreach (var page in pages)
+        {
+            Assert.StartsWith("r0c0 r1c0", page);
+        }
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(pages[0], @"\br0c0\b"));
+        Assert.Contains("r99c0", pages[^1]);
+        // every data row appears exactly once
+        var all = string.Join(" ", pages);
+        for (int r = 2; r < 100; r++) Assert.Single(System.Text.RegularExpressions.Regex.Matches(all, $@"\br{r}c0\b"));
+    }
+
+    [Fact]
+    public void Title_columns_repeat_on_every_column_band()
+    {
+        var sheet = Grid(2, 12);
+        sheet.PageSetup.TitleColumns = (0, 0);
+        var pages = Pages(sheet);
+        Assert.True(pages.Length >= 2);
+        foreach (var page in pages) Assert.Contains("r0c0", page);
+        Assert.Contains("r0c11", pages[^1]);
+    }
+
+    [Fact]
+    public void Fit_to_one_page_wide_shrinks_the_sheet()
+    {
+        var sheet = Grid(3, 12); // 1200 pt wide on a 504 pt text area
+        sheet.PageSetup.FitToWidth = 1;
+        sheet.PageSetup.FitToHeight = 0;
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.Single(doc.Pages);
+        Assert.Equal(10 * 504.0 / 1200, doc.Pages[0].Items.OfType<TextItem>().First().FontSize, 0.5);
+        var text = SheetLayoutTests.PageText(doc.Pages[0]);
+        Assert.Contains("r0c0", text);
+        Assert.Contains("r2c11", text);
+        foreach (var t in doc.Pages[0].Items.OfType<TextItem>())
+            Assert.True(t.X + 1 <= 612 - sheet.PageSetup.Margins.Right + 0.5);
+    }
+
+    [Fact]
+    public void Fit_to_page_never_enlarges_and_ignores_manual_breaks()
+    {
+        var sheet = Grid(3, 2);
+        sheet.PageSetup.FitToWidth = 1;
+        sheet.PageSetup.FitToHeight = 1;
+        sheet.PageSetup.RowBreaks.Add(0);
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.Single(doc.Pages);
+        Assert.Equal(10, doc.Pages[0].Items.OfType<TextItem>().First().FontSize);
+    }
+
+    [Fact]
+    public void Fit_to_two_pages_tall_produces_at_most_two_pages()
+    {
+        var sheet = Grid(120, 1);
+        sheet.PageSetup.FitToWidth = 0;
+        sheet.PageSetup.FitToHeight = 2;
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.True(doc.Pages.Count <= 2);
+        Assert.True(doc.Pages[0].Items.OfType<TextItem>().First().FontSize < 10);
+    }
+}

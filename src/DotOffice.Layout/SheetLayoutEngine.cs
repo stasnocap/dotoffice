@@ -23,6 +23,8 @@ public sealed class SheetLayoutEngine
 
     private const int MaxColumns = 16384;
 
+    private const double MinScale = 0.1;
+
     private static readonly Color GridColor = new(0xA6, 0xA6, 0xA6);
 
     private readonly FontSelector _fonts;
@@ -202,11 +204,34 @@ public sealed class SheetLayoutEngine
             var rows = Enumerable.Range(_range.FirstRow, _range.RowCount).Where(r => RowHeight(r) > 0).ToList();
             if (columns.Count == 0 || rows.Count == 0) return;
 
+            var titleColumns = _setup.TitleColumns is { } tc ? columns.Where(c => c >= tc.From && c <= tc.To).ToList() : [];
+            var titleRows = _setup.TitleRows is { } tr ? rows.Where(r => r >= tr.From && r <= tr.To).ToList() : [];
+
+            double pageWidth = _setup.PageWidth - _setup.Margins.Left - _setup.Margins.Right;
+            double pageHeight = _setup.PageHeight - _setup.Margins.Top - _setup.Margins.Bottom;
             double scale = _setup.Scale;
-            double availWidth = (_setup.PageWidth - _setup.Margins.Left - _setup.Margins.Right) / scale;
-            double availHeight = (_setup.PageHeight - _setup.Margins.Top - _setup.Margins.Bottom) / scale;
-            var columnBands = Bands(columns, c => _sheet.ColumnWidth(c), availWidth);
-            var rowBands = Bands(rows, RowHeight, availHeight);
+            var columnBreaks = new SortedSet<int>(_setup.ColumnBreaks);
+            var rowBreaks = new SortedSet<int>(_setup.RowBreaks);
+            if (_setup.FitToWidth is { } fitWidth && _setup.FitToHeight is { } fitHeight)
+            {
+                // Fit to page only shrinks, ignores manual breaks, and is re-checked against the real band count.
+                columnBreaks.Clear();
+                rowBreaks.Clear();
+                double totalWidth = columns.Sum(c => _sheet.ColumnWidth(c)), totalHeight = rows.Sum(RowHeight);
+                scale = 1;
+                if (fitWidth > 0 && totalWidth > 0) scale = Math.Min(scale, pageWidth * fitWidth / totalWidth);
+                if (fitHeight > 0 && totalHeight > 0) scale = Math.Min(scale, pageHeight * fitHeight / totalHeight);
+                scale = Math.Max(scale, MinScale);
+                for (int attempt = 0; attempt < 60 && scale > MinScale; attempt++)
+                {
+                    int across = Bands(columns, c => _sheet.ColumnWidth(c), pageWidth / scale, columnBreaks, titleColumns).Count;
+                    int down = Bands(rows, RowHeight, pageHeight / scale, rowBreaks, titleRows).Count;
+                    if ((fitWidth == 0 || across <= fitWidth) && (fitHeight == 0 || down <= fitHeight)) break;
+                    scale = Math.Max(scale * 0.97, MinScale);
+                }
+            }
+            var columnBands = Bands(columns, c => _sheet.ColumnWidth(c), pageWidth / scale, columnBreaks, titleColumns);
+            var rowBands = Bands(rows, RowHeight, pageHeight / scale, rowBreaks, titleRows);
 
             foreach (var (columnBand, rowBand) in PageOrder(columnBands, rowBands))
             {
@@ -341,25 +366,41 @@ public sealed class SheetLayoutEngine
 
         // ---- bands
 
-        /// <summary>Splits the visible indexes into runs whose total size fits <paramref name="available"/>.</summary>
-        private static List<List<int>> Bands(List<int> indexes, Func<int, double> size, double available)
+        /// <summary>
+        /// Splits the visible indexes into runs whose total size fits <paramref name="available"/>. A manual break after
+        /// index b starts a new run at the next visible index; every run after the first starts with the title indexes before it.
+        /// </summary>
+        private static List<List<int>> Bands(List<int> indexes, Func<int, double> size, double available, SortedSet<int> breaks, List<int> titles)
         {
+            double PrependSize(int first) => titles.Where(t => t < first).Sum(size);
+
             var bands = new List<List<int>>();
             var current = new List<int>();
             double used = 0;
+            int previous = -1;
             foreach (int index in indexes)
             {
                 double s = size(index);
-                if (current.Count > 0 && used + s > available + Epsilon)
+                bool manual = current.Count > 0 && breaks.Count > 0 && breaks.GetViewBetween(previous, index - 1).Count > 0;
+                if (current.Count > 0 && (manual || used + s > available + Epsilon))
                 {
                     bands.Add(current);
                     current = [];
-                    used = 0;
                 }
+                if (current.Count == 0) used = PrependSize(index);
                 current.Add(index);
                 used += s;
+                previous = index;
             }
             if (current.Count > 0) bands.Add(current);
+
+            // Titles are repeated in front of every run they precede.
+            for (int i = 0; i < bands.Count; i++)
+            {
+                int first = bands[i][0];
+                var repeated = titles.Where(t => t < first).ToList();
+                if (repeated.Count > 0) bands[i] = [.. repeated, .. bands[i]];
+            }
             return bands;
         }
 
