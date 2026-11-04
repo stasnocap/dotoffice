@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Xml;
 using DotOffice.Core;
 using DotOffice.Opc;
@@ -207,6 +208,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     {
         bool formulaWarned = false;
         sheet.DefaultColumnWidth = 48; // Excel's 8.43-character default (64 px)
+        bool fitToPage = false;
+        bool breaksAreRows = true;
         r.MoveToContent();
         while (!r.EOF)
         {
@@ -226,11 +229,148 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                 case "sheetData":
                     ReadSheetData(r, sheet, ref formulaWarned);
                     break;
+                case "pageSetUpPr":
+                    fitToPage = r.BoolAttr("fitToPage");
+                    r.Read();
+                    break;
+                case "printOptions":
+                    sheet.PageSetup.CenterHorizontally = r.BoolAttr("horizontalCentered");
+                    sheet.PageSetup.CenterVertically = r.BoolAttr("verticalCentered");
+                    sheet.PageSetup.PrintGridLines = r.BoolAttr("gridLines");
+                    r.Read();
+                    break;
+                case "pageMargins":
+                    ReadMargins(r, sheet.PageSetup);
+                    r.Read();
+                    break;
+                case "pageSetup":
+                    ReadPageSetup(r, sheet, fitToPage);
+                    r.Read();
+                    break;
+                case "headerFooter":
+                    ReadHeaderFooter(r, sheet.PageSetup);
+                    break;
+                case "rowBreaks":
+                case "colBreaks":
+                    breaksAreRows = r.LocalName == "rowBreaks";
+                    r.Read();
+                    break;
+                case "brk":
+                    if (r.IntAttr("id") is { } breakId && breakId >= 1)
+                        (breaksAreRows ? sheet.PageSetup.RowBreaks : sheet.PageSetup.ColumnBreaks).Add(breakId - 1);
+                    r.Read();
+                    break;
                 default:
                     r.Read();
                     break;
             }
         }
+    }
+
+    private static void ReadMargins(XmlReader r, SheetPageSetup setup)
+    {
+        double Inches(string name, double fallback) => (r.DoubleAttr(name) is { } v && v >= 0 ? v : fallback) * 72;
+        setup.Margins = new Thickness(Inches("top", 0.75), Inches("right", 0.7), Inches("bottom", 0.75), Inches("left", 0.7));
+        setup.HeaderDistance = Inches("header", 0.3);
+        setup.FooterDistance = Inches("footer", 0.3);
+    }
+
+    private void ReadPageSetup(XmlReader r, Worksheet sheet, bool fitToPage)
+    {
+        var setup = sheet.PageSetup;
+        double width, height;
+        switch (r.IntAttr("paperSize") ?? 1)
+        {
+            case 1: (width, height) = (612, 792); break;
+            case 3: (width, height) = (792, 1224); break;
+            case 5: (width, height) = (612, 1008); break;
+            case 7: (width, height) = (522, 756); break;
+            case 8: (width, height) = (841.89, 1190.55); break;
+            case 9: (width, height) = (595.28, 841.89); break;
+            case 11: (width, height) = (419.53, 595.28); break;
+            default:
+                Options.Warnings.Warn("xlsx.paper-size", $"Sheet '{sheet.Name}' uses an unsupported paper size; Letter is used instead.");
+                (width, height) = (612, 792);
+                break;
+        }
+        bool landscape = r.GetAttribute("orientation") == "landscape";
+        setup.Orientation = landscape ? Orientation.Landscape : Orientation.Portrait;
+        // PageWidth/PageHeight are the effective (oriented) page size.
+        (setup.PageWidth, setup.PageHeight) = landscape ? (height, width) : (width, height);
+        if (r.IntAttr("scale") is { } scale) setup.Scale = Math.Clamp(scale, 10, 400) / 100.0;
+        if (fitToPage)
+        {
+            setup.FitToWidth = Math.Max(r.IntAttr("fitToWidth") ?? 1, 0);
+            setup.FitToHeight = Math.Max(r.IntAttr("fitToHeight") ?? 1, 0);
+        }
+        setup.PageOrderOverThenDown = r.GetAttribute("pageOrder") == "overThenDown";
+    }
+
+    private static void ReadHeaderFooter(XmlReader r, SheetPageSetup setup)
+    {
+        bool different = r.BoolAttr("differentFirst");
+        bool oddEven = r.BoolAttr("differentOddEven");
+        var texts = new Dictionary<string, string>();
+        if (r.IsEmptyElement) { r.Read(); return; }
+        int depth = r.Depth;
+        r.Read();
+        while (!r.EOF && !(r.NodeType == XmlNodeType.EndElement && r.Depth == depth))
+        {
+            if (r.NodeType == XmlNodeType.Element && r.LocalName is "oddHeader" or "oddFooter" or "evenHeader" or "evenFooter" or "firstHeader" or "firstFooter")
+            {
+                string name = r.LocalName;
+                if (r.IsEmptyElement) { texts[name] = ""; r.Read(); }
+                else texts[name] = r.ReadElementContentAsString();
+            }
+            else r.Read();
+        }
+        r.Read();
+
+        HeaderFooterParts Parts(string key) => SplitHeaderFooter(texts.GetValueOrDefault(key, ""));
+        setup.Header = new HeaderFooterText
+        {
+            Odd = Parts("oddHeader"),
+            First = different ? Parts("firstHeader") : null,
+            Even = oddEven ? Parts("evenHeader") : null,
+        };
+        setup.Footer = new HeaderFooterText
+        {
+            Odd = Parts("oddFooter"),
+            First = different ? Parts("firstFooter") : null,
+            Even = oddEven ? Parts("evenFooter") : null,
+        };
+    }
+
+    /// <summary>Splits header/footer text at <c>&amp;L</c>, <c>&amp;C</c> and <c>&amp;R</c>; other codes stay in the strings. Text before any section code is centered.</summary>
+    internal static HeaderFooterParts SplitHeaderFooter(string text)
+    {
+        var parts = new[] { new StringBuilder(), new StringBuilder(), new StringBuilder() };
+        int current = 1;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c != '&' || i + 1 >= text.Length) { parts[current].Append(c); continue; }
+            char next = text[i + 1];
+            switch (next)
+            {
+                case 'L': current = 0; i++; break;
+                case 'C': current = 1; i++; break;
+                case 'R': current = 2; i++; break;
+                case '"':
+                {
+                    int end = text.IndexOf('"', i + 2);
+                    if (end < 0) end = text.Length - 1;
+                    parts[current].Append(text, i, end - i + 1);
+                    i = end;
+                    break;
+                }
+                default:
+                    parts[current].Append(c).Append(next);
+                    i++;
+                    break;
+            }
+        }
+        return new HeaderFooterParts(parts[0].ToString(), parts[1].ToString(), parts[2].ToString());
     }
 
     private const double MaxDigitWidth = 7;
