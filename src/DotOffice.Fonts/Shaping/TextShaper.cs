@@ -105,10 +105,18 @@ public static class TextShaper
                 : layout.Lookups(false, script, [Feature("rclt")]).Count > 0
                     ? [["ccmp", "locl"], ["isol"], ["fina"], ["medi"], ["init"], ["rlig"], ["calt", "clig", "liga", "rclt"]]
                     : [["ccmp", "locl"], ["isol"], ["fina"], ["medi"], ["init"], ["rlig"], ["calt"], ["clig", "liga"]];
-            if (layout.HasSubstitutions)
+            // HarfBuzz synthesizes joining and rlig substitutions from the presentation forms when the font has none.
+            var fallback = script == "arab" && new[] { "isol", "fina", "medi", "init", "rlig" }
+                .All(f => layout.Lookups(false, script, [Feature(f)]).Count == 0)
+                ? ArabicFallback.Create(font, Isol, Fina, Medi, Init) : null;
+            if (layout.HasSubstitutions || fallback is not null)
                 foreach (var stage in stages)
-                    layout.Apply(false, glyphs, layout.Lookups(false, script,
-                        stage.Where(f => ligatures || f is not ("liga" or "clig")).Select(Feature).ToList()));
+                {
+                    if (layout.HasSubstitutions)
+                        layout.Apply(false, glyphs, layout.Lookups(false, script,
+                            stage.Where(f => ligatures || f is not ("liga" or "clig")).Select(Feature).ToList()));
+                    if (fallback is not null && stage[0] == "rlig") fallback.Apply(layout, glyphs, Common);
+                }
 
             for (int i = 0; i < glyphs.Count; i++)
                 glyphs[i] = glyphs[i] with { XAdvance = font.GetAdvanceWidth(glyphs[i].Glyph) };
