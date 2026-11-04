@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Checks the converted XLSX showcase (see .github/workflows/ci.yml). Page numbers and counts are derived from the PDF,
+# never hardcoded: only stable markers (sheet names, formatted values, repeated title rows) are looked for.
+# Usage: tools/check-xlsx-showcase.sh showcase-xlsx.pdf convert-xlsx.log
+set -euo pipefail
+pdf=$1 log=$2
+fail() { echo "FAIL: $*"; exit 1; }
+page_text() { pdftotext -layout -f "$1" -l "$1" "$pdf" -; }
+header_of() { page_text "$1" | grep -m1 -E '\S' | sed -E 's/^\s+//; s/\s+$//'; }
+
+pages=$(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}')
+[ "$pages" -ge 4 ] || fail "expected several pages, got $pages"
+pdftotext -layout "$pdf" all.txt
+
+# The footer counts pages across the whole workbook: every "Page N of M" has M = total, and page p says "Page p of M".
+grep -qF "Page $pages of $pages" all.txt || fail "missing: Page $pages of $pages"
+bad=$(grep -oE 'Page [0-9]+ of [0-9]+' all.txt | grep -vE " of $pages\$" || true)
+[ -z "$bad" ] || fail "footer total is not $pages: $bad"
+for p in $(seq 1 "$pages"); do
+  [[ $(page_text "$p") =~ Page\ $p\ of\ $pages ]] || fail "page $p does not say 'Page $p of $pages'"
+done
+
+# Every visible sheet shows up as a page header; the hidden sheet is never printed.
+for sheet in "Formats" "Long table" "Wide" "Text"; do
+  found=0
+  for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
+  [ "$found" = 1 ] || fail "no page has the header '$sheet'"
+done
+if grep -q "HIDDENSHEETMARKER" all.txt; then fail "the hidden sheet was printed"; fi
+if grep -E "warning xlsx\.formula-no-cache" "$log"; then fail "cached values were not used"; fi
+
+# Number and date formats.
+for text in "Number and date formats" "1,234.50" "25%" "25.67%" "2023-03-15" "Wednesday, March 15, 2023" "12:00 PM" "(1,234,567)" "1.23E+04" "#N/A"; do
+  grep -qF -- "$text" all.txt || fail "missing formatted value: $text"
+done
+grep -qE '^\s*Too wide for its column:\s+#+\s*$' all.txt || fail "an overly wide number should show hashes"
+grep -qF "until a value stops it" all.txt || fail "overflowing text was cut off"
+
+# Long table: the title and header rows repeat on every page of that sheet, and the manual break is honored.
+long_pages=()
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Long table" ] && long_pages+=("$p"); done
+[ "${#long_pages[@]}" -ge 2 ] || fail "the long table should span several pages"
+for p in "${long_pages[@]}"; do
+  text=$(page_text "$p")
+  for marker in "Long table report" "Item" "Name" "Amount"; do
+    grep -qF "$marker" <<< "$text" || fail "title row text '$marker' missing on page $p"
+  done
+done
+page_of() { for p in "${long_pages[@]}"; do [[ $(page_text "$p") == *"$1"* ]] && { echo "$p"; return; }; done; echo 0; }
+last_page=$(page_of "Row 200 of the long table"); [ "$last_page" != 0 ] || fail "the last row is missing"
+[ "$last_page" = "${long_pages[-1]}" ] || fail "the last row is not on the last page of the sheet"
+before=$(page_of "Row 58 of the long table"); after=$(page_of "Row 59 of the long table")
+[ "$before" != 0 ] && [ "$after" != 0 ] || fail "rows around the manual break are missing"
+[ "$before" -lt "$after" ] || fail "the manual break after row 58 did not start a new page"
+first_row=$(page_text "$after" | grep -oE 'Row [0-9]+ of the long table' | head -1)
+[ "$first_row" = "Row 59 of the long table" ] || fail "the page after the break starts with '$first_row'"
+
+# Wide: fit-to-width puts the first and the last column on the same landscape page.
+first_col=$(for p in $(seq 1 "$pages"); do [[ $(page_text "$p") == *"Col 01"* ]] && echo "$p" || true; done)
+last_col=$(for p in $(seq 1 "$pages"); do [[ $(page_text "$p") == *"Col 30"* ]] && echo "$p" || true; done)
+[ -n "$first_col" ] && [ "$first_col" = "$last_col" ] || fail "'Col 01' (page ${first_col:-none}) and 'Col 30' (page ${last_col:-none}) are not on the same page"
+read -r width height < <(pdfinfo -f "$first_col" -l "$first_col" "$pdf" | awk '/size:/ {print $4, $6; exit}')
+awk -v w="$width" -v h="$height" 'BEGIN { exit !(w > h) }' || fail "the wide sheet is not landscape (${width}x${height})"

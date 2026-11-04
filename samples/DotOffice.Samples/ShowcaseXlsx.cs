@@ -201,7 +201,7 @@ internal static class ShowcaseXlsx
     {
         var rows = new StringBuilder();
         rows.Append(Row(1, Str("A1", "Wrapping, overflow, alignment and indentation", Bold)));
-        rows.Append(Row(3, Str("A3", "Wrapped text in a narrow column grows the row to fit all of its words.", Wrap) + Str("C3", "Overflow: this long text spills over the empty cells on its right until it meets a value.") + Str("H3", "stop")));
+        rows.Append(Row(3, Str("A3", "Wrapped text in a narrow column grows the row to fit all of its words.", Wrap) + Str("C3", "Overflow: spills right until a value stops it.") + Str("H3", "stop")));
         rows.Append(Row(5, Str("A5", "Left", Boxed) + Str("B5", "Center", Center) + Str("C5", "Right", Right)));
         rows.Append(Row(6, Str("A6", "Indent 0") ));
         rows.Append(Row(7, Str("A7", "Indent 2", Indent)));

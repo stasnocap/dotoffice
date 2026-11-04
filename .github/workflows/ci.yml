@@ -56,6 +56,17 @@ jobs:
           # Phase 3 features: TOC page numbers, footnotes on their reference's page, right-to-left text.
           bash tools/check-showcase.sh showcase.pdf convert.log
           pdftoppm -r 60 -png showcase.pdf showcase-page
+
+          # XLSX → PDF: format codes, print titles, manual breaks, fit-to-width, headers/footers and hidden sheets.
+          dotnet run -c Release --no-build --project samples/DotOffice.Samples -- showcase-xlsx showcase-xlsx.xlsx
+          dotnet run -c Release --no-build --project samples/DotOffice.Samples -- convert showcase-xlsx.xlsx showcase-xlsx.pdf | tee convert-xlsx.log
+          qpdf --check showcase-xlsx.pdf
+          pdffonts showcase-xlsx.pdf
+          pdfinfo showcase-xlsx.pdf | tee info-xlsx.log
+          grep -q "Title: *DotOffice XLSX showcase" info-xlsx.log
+          pdffonts showcase-xlsx.pdf | grep -q Carlito
+          mkdir -p xlsx-check && (cd xlsx-check && bash ../tools/check-xlsx-showcase.sh ../showcase-xlsx.pdf ../convert-xlsx.log)
+          pdftoppm -r 60 -png showcase-xlsx.pdf showcase-xlsx-page
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'
         with:
@@ -65,3 +76,6 @@ jobs:
             showcase.docx
             showcase.pdf
             showcase-page-*.png
+            showcase-xlsx.xlsx
+            showcase-xlsx.pdf
+            showcase-xlsx-page-*.png
