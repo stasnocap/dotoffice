@@ -25,12 +25,13 @@ public class SheetLayoutTests
         public int Indent;
         public double Rotation;
         public bool Stacked;
+        public GradientFill? Gradient;
         public RunProperties Font = SheetLayoutTests.Font;
 
         public CellStyle Build() => new()
         {
             Font = Font, Fill = Fill, Borders = Borders, HorizontalAlignment = Horizontal, VerticalAlignment = Vertical, Wrap = Wrap, Indent = Indent,
-            Rotation = Rotation, Stacked = Stacked,
+            Rotation = Rotation, Stacked = Stacked, Gradient = Gradient,
         };
     }
 
@@ -815,5 +816,77 @@ public class SheetRotationTests
         var page = SheetLayoutTests.Layout(sheet).Pages[0];
         Assert.Single(page.Items.OfType<PushItem>());
         Assert.Equal(sheet.DefaultColumnWidth, page.Items.OfType<PushItem>().Single().Clip!.Value.Width, 3); // clipped to its own column
+    }
+}
+
+public class SheetGradientTests
+{
+    private static GradientFill Gradient(GradientKind kind, double degree = 0, double focusX = 0, double focusY = 0) => new()
+    {
+        Kind = kind, Degree = degree, Left = focusX, Right = focusX, Top = focusY, Bottom = focusY,
+        Stops = [new GradientStop(0, new Color(255, 0, 0)), new GradientStop(1, new Color(0, 0, 255))],
+    };
+
+    private static LayoutPage Page(GradientFill gradient, Action<Worksheet>? configure = null)
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("x", SheetLayoutTests.Style(s => s.Gradient = gradient))));
+        sheet.ColumnWidths[0] = 100;
+        sheet.RowHeights[0] = 40;
+        configure?.Invoke(sheet);
+        return SheetLayoutTests.Layout(sheet).Pages[0];
+    }
+
+    [Fact]
+    public void A_linear_gradient_is_one_gradient_item_over_the_cell_below_its_text()
+    {
+        var page = Page(Gradient(GradientKind.Linear, 90));
+        var item = page.Items.OfType<GradientItem>().Single();
+        Assert.Equal((100.0, 40.0, 90.0), (item.Width, item.Height, item.Degree));
+        Assert.Equal(2, item.Stops.Count);
+        Assert.True(page.Items.IndexOf(item) < page.Items.FindIndex(i => i is TextItem));
+        Assert.Empty(page.Items.OfType<RectItem>());
+    }
+
+    [Fact]
+    public void A_gradient_replaces_the_solid_fill()
+    {
+        var style = SheetLayoutTests.Style(s => { s.Fill = Color.White; s.Gradient = Gradient(GradientKind.Linear); });
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("x", style)));
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        Assert.Single(page.Items.OfType<GradientItem>());
+        Assert.Empty(page.Items.OfType<RectItem>());
+    }
+
+    [Fact]
+    public void A_path_gradient_is_drawn_as_nested_rectangles_growing_from_the_focus_inside_a_clip()
+    {
+        var page = Page(Gradient(GradientKind.Path, focusX: 0.5, focusY: 0.5));
+        var items = page.Items;
+        var rects = items.OfType<RectItem>().ToList();
+        Assert.True(rects.Count >= 16);
+        Assert.Contains(items, i => i is PushItem { Clip: not null });
+        Assert.Contains(items, i => i is PopItem);
+        // Painted outermost first, so each following rectangle is smaller and nearer the focus color (red).
+        Assert.True(rects[0].Width > rects[^1].Width);
+        Assert.True(rects[^1].Fill.R > rects[0].Fill.R && rects[^1].Fill.B < rects[0].Fill.B);
+        Assert.Equal(rects[^1].X + rects[^1].Width / 2, rects[0].X + rects[0].Width / 2, 3); // concentric around the cell center
+    }
+
+    [Fact]
+    public void A_path_gradient_from_the_corner_starts_at_that_corner()
+    {
+        var page = Page(Gradient(GradientKind.Path, 0, 0));
+        var innermost = page.Items.OfType<RectItem>().Last();
+        double left = new SheetPageSetup().Margins.Left, top = new SheetPageSetup().Margins.Top;
+        Assert.Equal((left, top), (innermost.X + innermost.Width / 2, innermost.Y + innermost.Height / 2));
+    }
+
+    [Fact]
+    public void Gradients_follow_the_page_scale()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("x", SheetLayoutTests.Style(s => s.Gradient = Gradient(GradientKind.Linear)))));
+        sheet.ColumnWidths[0] = 100;
+        sheet.PageSetup.Scale = 0.5;
+        Assert.Equal(50.0, SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<GradientItem>().Single().Width, 3);
     }
 }

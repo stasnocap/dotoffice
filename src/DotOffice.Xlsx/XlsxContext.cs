@@ -587,7 +587,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     /// <summary>An empty cell only matters when it paints something (fill or border).</summary>
     private static Cell? BuildEmpty(CellFormat format) =>
-        format.Style.Fill is not null || format.Style.Borders.HasAny ? new Cell { Style = format.Style } : null;
+        format.Style.Fill is not null || format.Style.Gradient is not null || format.Style.Borders.HasAny ? new Cell { Style = format.Style } : null;
 
     private static string CodeOf(CellFormat format) => format.NumberFormatCode ?? NumberFormat.BuiltIn(format.NumberFormatId) ?? "General";
 

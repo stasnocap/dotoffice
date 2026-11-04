@@ -97,4 +97,20 @@ public class XlsxConverterTests
             Directory.Delete(dir, true);
         }
     }
+
+    [Fact]
+    public async Task Gradient_fills_become_pdf_shadings_without_warnings()
+    {
+        var warnings = new ConversionWarningList();
+        var builder = new XlsxBuilder
+        {
+            Styles = "<fonts><font/></fonts><fills><fill><patternFill patternType=\"none\"/></fill>" +
+                     "<fill><gradientFill degree=\"45\"><stop position=\"0\"><color rgb=\"FFFF0000\"/></stop><stop position=\"1\"><color rgb=\"FF0000FF\"/></stop></gradientFill></fill></fills>" +
+                     "<borders><border/></borders><cellXfs><xf fontId=\"0\" fillId=\"1\" borderId=\"0\"/></cellXfs>",
+        }.AddSheet("S", Row(1, C("A1", "1", style: 0)));
+        var text = Encoding.Latin1.GetString(await Convert(builder, warnings));
+        Assert.Contains("/ShadingType 2", text);
+        Assert.Contains("/Shading << /Sh1 ", text);
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code.StartsWith("xlsx."));
+    }
 }

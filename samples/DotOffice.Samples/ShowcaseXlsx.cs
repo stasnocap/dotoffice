@@ -19,7 +19,7 @@ internal static class ShowcaseXlsx
     // cellXfs indexes (see Styles)
     private const int Default = 0, Title = 1, Header = 2, Money = 3, Percent = 4, IsoDate = 5, Time = 6, Accounting = 7, Wrap = 8,
         Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16,
-        Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21;
+        Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21, GradLinear = 22, GradDiagonal = 23, GradVertical = 24, GradCenter = 25, GradCorner = 26;
 
     public const string HiddenMarker = "HIDDENSHEETMARKER";
 
@@ -33,6 +33,7 @@ internal static class ShowcaseXlsx
             ("Text", TextSheet(), "visible"),
             ("Rich text", RichTextSheet(), "visible"),
             ("Rotation", RotationSheet(), "visible"),
+            ("Gradients", GradientSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -80,13 +81,18 @@ internal static class ShowcaseXlsx
         "<numFmt numFmtId=\"166\" formatCode=\"dddd, mmmm d, yyyy\"/></numFmts>" +
         "<fonts count=\"4\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font>" +
         "<font><b/><sz val=\"16\"/><color rgb=\"FFFFFFFF\"/><name val=\"Calibri\"/></font><font><i/><sz val=\"11\"/><color rgb=\"FF7F7F7F\"/><name val=\"Calibri\"/></font></fonts>" +
-        "<fills count=\"4\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>" +
+        "<fills count=\"9\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>" +
         "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF1F3864\"/></patternFill></fill>" +
-        "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFD9E1F2\"/></patternFill></fill></fills>" +
+        "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFD9E1F2\"/></patternFill></fill>" +
+        "<fill><gradientFill degree=\"0\"><stop position=\"0\"><color rgb=\"FFFFFFFF\"/></stop><stop position=\"1\"><color rgb=\"FF4472C4\"/></stop></gradientFill></fill>" +           // 4 left to right
+        "<fill><gradientFill degree=\"45\"><stop position=\"0\"><color theme=\"5\"/></stop><stop position=\"0.5\"><color rgb=\"FFFFFF00\"/></stop><stop position=\"1\"><color indexed=\"4\"/></stop></gradientFill></fill>" + // 5 diagonal, 3 stops
+        "<fill><gradientFill degree=\"90\"><stop position=\"0\"><color rgb=\"FF70AD47\"/></stop><stop position=\"1\"><color rgb=\"FF1E4620\"/></stop></gradientFill></fill>" +             // 6 top to bottom
+        "<fill><gradientFill type=\"path\" left=\"0.5\" right=\"0.5\" top=\"0.5\" bottom=\"0.5\"><stop position=\"0\"><color rgb=\"FFFFFFFF\"/></stop><stop position=\"1\"><color rgb=\"FFC00000\"/></stop></gradientFill></fill>" + // 7 from center
+        "<fill><gradientFill type=\"path\"><stop position=\"0\"><color rgb=\"FFFFC000\"/></stop><stop position=\"1\"><color rgb=\"FF7030A0\"/></stop></gradientFill></fill></fills>" +
         "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
         "<border><left/><right/><top/><bottom style=\"medium\"><color rgb=\"FF1F3864\"/></bottom><diagonal/></border>" +
         "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border></borders>" +
-        "<cellXfs count=\"22\">" +
+        "<cellXfs count=\"27\">" +
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 0 default
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"2\" borderId=\"0\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 1 title
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"1\"><alignment horizontal=\"center\"/></xf>" +                                                   // 2 header
@@ -109,6 +115,11 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\" textRotation=\"180\"/></xf>" +                 // 19 reading down
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\" textRotation=\"255\"/></xf>" +                 // 20 stacked
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment vertical=\"center\" wrapText=\"1\" textRotation=\"30\"/></xf>" +                      // 21 rotated and wrapped
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"4\" borderId=\"2\"/>" +                                                                                         // 22 gradient left to right
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"5\" borderId=\"2\"/>" +                                                                                         // 23 diagonal
+        "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"6\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 24 vertical
+        "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"7\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 25 from center
+        "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"8\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 26 from corner
         "</cellXfs></styleSheet>";
 
     // ------------------------------------------------------------------ cell helpers
@@ -249,6 +260,17 @@ internal static class ShowcaseXlsx
             Str("E3", "A rotated cell that wraps its text onto several lines", RotWrap)));
         rows.Append(Row(4, Str("A4", "Rows grow to fit rotated headings; the text is clipped at the cell edges.")));
         var cols = "<cols><col min=\"1\" max=\"4\" width=\"12\" customWidth=\"1\"/><col min=\"5\" max=\"5\" width=\"22\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string GradientSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Gradient fills", Bold)));
+        rows.Append(Row(3, Str("A3", "Left to right", GradLinear) + Str("B3", "Diagonal, three stops (theme, rgb, indexed)", GradDiagonal), 54));
+        rows.Append(Row(5, Str("A5", "Top to bottom", GradVertical) + Str("B5", "Path from the center", GradCenter), 54));
+        rows.Append(Row(7, Str("A7", "Path from a corner", GradCorner), 54));
+        var cols = "<cols><col min=\"1\" max=\"1\" width=\"26\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"34\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 

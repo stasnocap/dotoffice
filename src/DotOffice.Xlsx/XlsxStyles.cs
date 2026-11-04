@@ -91,22 +91,17 @@ internal static class XlsxStyles
 
         var fonts = Children(Child(root, "fonts"), "font").Select(f => ApplyFont(f, CellStyle.Default.Font, Resolve)).ToList();
 
-        bool gradientWarned = false;
-        var fills = new List<Color?>();
+        var fills = new List<(Color? Solid, GradientFill? Gradient)>();
         foreach (var fill in Children(Child(root, "fills"), "fill"))
         {
-            if (Child(fill, "gradientFill") is not null)
+            if (Child(fill, "gradientFill") is { } gradient)
             {
-                if (!gradientWarned)
-                {
-                    gradientWarned = true;
-                    warnings.Warn("xlsx.gradient-fill", "Gradient cell fills are not supported and were left unfilled.");
-                }
-                fills.Add(null);
+                var (solid, parsed) = ReadGradient(gradient, Resolve);
+                fills.Add((solid, parsed));
                 continue;
             }
             var pattern = Child(fill, "patternFill");
-            fills.Add((string?)pattern?.Attribute("patternType") == "solid" ? Resolve(Child(pattern, "fgColor")) : null);
+            fills.Add(((string?)pattern?.Attribute("patternType") == "solid" ? Resolve(Child(pattern, "fgColor")) : null, null));
         }
 
         var borders = Children(Child(root, "borders"), "border").Select(b => ReadBorders(b, Resolve)).ToList();
@@ -117,7 +112,8 @@ internal static class XlsxStyles
             var style = new CellStyle
             {
                 Font = Pick(fonts, Int(xf, "fontId")) ?? CellStyle.Default.Font,
-                Fill = Int(xf, "fillId") is { } fillId && fillId >= 0 && fillId < fills.Count ? fills[fillId] : null,
+                Fill = Int(xf, "fillId") is { } fillId && fillId >= 0 && fillId < fills.Count ? fills[fillId].Solid : null,
+                Gradient = Int(xf, "fillId") is { } gradientId && gradientId >= 0 && gradientId < fills.Count ? fills[gradientId].Gradient : null,
                 Borders = Pick(borders, Int(xf, "borderId")) ?? BorderSet.Empty,
             };
             if (Child(xf, "alignment") is { } alignment)
@@ -149,6 +145,31 @@ internal static class XlsxStyles
             formats.Add(new CellFormat(style, numFmtId, code));
         }
         return new Result(formats, Resolve);
+    }
+
+    /// <summary>
+    /// Reads a <c>gradientFill</c>. Stops whose color cannot be resolved are dropped; with fewer than two left the fill degrades to the
+    /// remaining color (or nothing). Excel's path gradients are always rectangular, so there is no separate circle kind.
+    /// </summary>
+    private static (Color? Solid, GradientFill? Gradient) ReadGradient(XElement gradient, Func<XElement?, Color?> resolve)
+    {
+        var stops = new List<GradientStop>();
+        foreach (var stop in Children(gradient, "stop"))
+            if (Double(stop, "position") is { } position && resolve(Child(stop, "color")) is { } color)
+                stops.Add(new GradientStop(Math.Clamp(position, 0, 1), color));
+        stops = stops.OrderBy(x => x.Position).ToList();
+        if (stops.Count < 2) return (stops.Count == 1 ? stops[0].Color : null, null);
+        bool path = (string?)gradient.Attribute("type") == "path";
+        return (null, new GradientFill
+        {
+            Kind = path ? GradientKind.Path : GradientKind.Linear,
+            Degree = Double(gradient, "degree") ?? 0,
+            Left = Math.Clamp(Double(gradient, "left") ?? 0, 0, 1),
+            Right = Math.Clamp(Double(gradient, "right") ?? 0, 0, 1),
+            Top = Math.Clamp(Double(gradient, "top") ?? 0, 0, 1),
+            Bottom = Math.Clamp(Double(gradient, "bottom") ?? 0, 0, 1),
+            Stops = stops,
+        });
     }
 
     /// <summary>Converts the file's textRotation (0–90 counter-clockwise, 91–180 clockwise) to degrees counter-clockwise; 255 (stacked) is no rotation.</summary>

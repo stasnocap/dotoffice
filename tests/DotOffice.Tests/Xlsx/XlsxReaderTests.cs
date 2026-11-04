@@ -354,7 +354,7 @@ public class XlsxStyleTests
     }
 
     [Fact]
-    public void Resolves_fills_and_skips_gradients_with_a_warning()
+    public void Resolves_solid_fills_and_degrades_a_one_stop_gradient_to_that_color()
     {
         var warnings = new ConversionWarningList();
         var wb = ReadWith("<xf fillId=\"0\"/><xf fillId=\"1\"/><xf fillId=\"2\"/><xf fillId=\"3\"/>",
@@ -362,8 +362,56 @@ public class XlsxStyleTests
         Assert.Null(StyleOf(wb, "A1").Fill);
         Assert.Null(StyleOf(wb, "B1").Fill);
         Assert.Equal(new Color(0, 255, 0), StyleOf(wb, "C1").Fill);
-        Assert.Null(StyleOf(wb, "D1").Fill);
-        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.gradient-fill");
+        Assert.Equal(Color.Black, StyleOf(wb, "D1").Fill);
+        Assert.Null(StyleOf(wb, "D1").Gradient);
+        Assert.Empty(warnings.Warnings);
+    }
+
+    private static GradientFill GradientOf(string fill, string? themeColors = null)
+    {
+        var builder = new XlsxBuilder
+        {
+            Styles = $"<fonts><font/></fonts><fills><fill><patternFill patternType=\"none\"/></fill>{fill}</fills><borders><border/></borders>" +
+                     "<cellXfs><xf fontId=\"0\" fillId=\"1\" borderId=\"0\"/></cellXfs>",
+            ThemeColors = themeColors,
+        }.AddSheet("S", Row(1, C("A1", "1", style: 0)));
+        var warnings = new ConversionWarningList();
+        var wb = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings });
+        Assert.Empty(warnings.Warnings);
+        var style = wb.Sheets[0].Cells[(0, 0)].Style;
+        Assert.Null(style.Fill);
+        return style.Gradient!;
+    }
+
+    [Fact]
+    public void Reads_a_linear_gradient_with_rgb_indexed_and_theme_stops()
+    {
+        var g = GradientOf("<fill><gradientFill degree=\"90\"><stop position=\"1\"><color theme=\"4\"/></stop><stop position=\"0\"><color rgb=\"FFFF0000\"/></stop>" +
+                           "<stop position=\"0.5\"><color indexed=\"4\"/></stop></gradientFill></fill>",
+            "<a:dk1><a:srgbClr val=\"000000\"/></a:dk1><a:lt1><a:srgbClr val=\"FFFFFF\"/></a:lt1><a:accent1><a:srgbClr val=\"112233\"/></a:accent1>");
+        Assert.Equal((GradientKind.Linear, 90.0), (g.Kind, g.Degree));
+        Assert.Equal([0.0, 0.5, 1.0], g.Stops.Select(x => x.Position)); // sorted
+        Assert.Equal([new Color(255, 0, 0), new Color(0, 0, 255), new Color(0x11, 0x22, 0x33)], g.Stops.Select(x => x.Color));
+    }
+
+    [Fact]
+    public void Reads_a_path_gradient_with_its_focus()
+    {
+        var g = GradientOf("<fill><gradientFill type=\"path\" left=\"0.5\" right=\"0.5\" top=\"0.25\" bottom=\"0.25\">" +
+                           "<stop position=\"0\"><color rgb=\"FFFFFFFF\"/></stop><stop position=\"1\"><color rgb=\"FF000000\"/></stop></gradientFill></fill>");
+        Assert.Equal(GradientKind.Path, g.Kind);
+        Assert.Equal((0.5, 0.5, 0.25, 0.25), (g.Left, g.Right, g.Top, g.Bottom));
+    }
+
+    [Fact]
+    public void Interpolates_between_stops()
+    {
+        var g = GradientOf("<fill><gradientFill><stop position=\"0\"><color rgb=\"FF000000\"/></stop><stop position=\"0.5\"><color rgb=\"FFFF0000\"/></stop>" +
+                           "<stop position=\"1\"><color rgb=\"FFFFFFFF\"/></stop></gradientFill></fill>");
+        Assert.Equal(new Color(0, 0, 0), g.ColorAt(0));
+        Assert.Equal(new Color(128, 0, 0), g.ColorAt(0.25), new ColorTolerance(1));
+        Assert.Equal(new Color(255, 128, 128), g.ColorAt(0.75), new ColorTolerance(1));
+        Assert.Equal(new Color(255, 255, 255), g.ColorAt(2));
     }
 
     [Fact]

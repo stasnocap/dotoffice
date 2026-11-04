@@ -111,6 +111,17 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     canvas.RestoreState();
                     (fill, stroke) = saved.Pop();
                     break;
+                case GradientItem gradient:
+                {
+                    // The gradient line runs through the center, as long as the projection of the box on it (so the corners get the end colors).
+                    double radians = gradient.Degree * Math.PI / 180, dx = Math.Cos(radians), dy = Math.Sin(radians);
+                    double half = (Math.Abs(gradient.Width * dx) + Math.Abs(gradient.Height * dy)) / 2;
+                    double cx = gradient.X + gradient.Width / 2, cy = gradient.Y + gradient.Height / 2;
+                    var shading = _pdf.AddShading(PdfShading.Axial(cx - dx * half, h - (cy - dy * half), cx + dx * half, h - (cy + dy * half),
+                        gradient.Stops.Select(s => new ShadingStop(s.Position, s.Color.R / 255.0, s.Color.G / 255.0, s.Color.B / 255.0)).ToList()));
+                    canvas.SaveState().Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip().PaintShading(shading).RestoreState();
+                    break;
+                }
                 case RectItem rect:
                     Fill(rect.Fill);
                     canvas.Rectangle(rect.X, h - rect.Y - rect.Height, rect.Width, rect.Height).Fill();

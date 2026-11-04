@@ -397,6 +397,7 @@ public sealed class SheetLayoutEngine
             Clip = p.Clip is { } c ? (dx + c.X * scale, dy + c.Y * scale, c.Width * scale, c.Height * scale) : null,
             CenterX = dx + p.CenterX * scale, CenterY = dy + p.CenterY * scale,
         },
+        GradientItem g => g with { X = dx + g.X * scale, Y = dy + g.Y * scale, Width = g.Width * scale, Height = g.Height * scale },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
         _ => item,
     };
@@ -713,7 +714,10 @@ public sealed class SheetLayoutEngine
             }
 
             foreach (var d in drawn)
-                if (d.Cell.Style.Fill is { } fill) items.Add(new RectItem(d.X, d.Y, d.Width, d.Height, fill));
+            {
+                if (d.Cell.Style.Gradient is { } gradient) EmitGradient(gradient, d.X, d.Y, d.Width, d.Height, items);
+                else if (d.Cell.Style.Fill is { } fill) items.Add(new RectItem(d.X, d.Y, d.Width, d.Height, fill));
+            }
             foreach (var d in drawn)
                 EmitText(d.Cell, d.Row, d.Column, d.X, d.Y, d.Width, d.Height, d.Merge is not null, columns, items);
             foreach (var d in drawn)
@@ -727,6 +731,30 @@ public sealed class SheetLayoutEngine
             foreach (var item in items) page.Items.Add(Transform(item, offsetX, offsetY, scale));
             _document.Pages.Add(page);
             _records.Add(new PageRecord(page, _sheet, _sheetPages++));
+        }
+
+        /// <summary>
+        /// Linear gradients become a shaded rectangle. Excel's path gradients are rectangular: the color depends on how far a point
+        /// is from the focus relative to the farthest edge, measured per axis, so they are drawn as nested rectangles.
+        /// </summary>
+        private static void EmitGradient(GradientFill gradient, double x, double y, double width, double height, List<LayoutItem> items)
+        {
+            if (width <= 0 || height <= 0) return;
+            if (gradient.Kind == GradientKind.Linear)
+            {
+                items.Add(new GradientItem(x, y, width, height, gradient.Degree, gradient.Stops));
+                return;
+            }
+            double fx = x + width * (gradient.Left + gradient.Right) / 2, fy = y + height * (gradient.Top + gradient.Bottom) / 2;
+            double reachX = Math.Max(Math.Max(fx - x, x + width - fx), 1e-6), reachY = Math.Max(Math.Max(fy - y, y + height - fy), 1e-6);
+            int steps = Math.Clamp((int)(Math.Max(width, height) / 2), 16, 64);
+            items.Add(new PushItem((x, y, width, height)));
+            for (int k = steps - 1; k >= 0; k--)
+            {
+                double outer = (k + 1.0) / steps;
+                items.Add(new RectItem(fx - outer * reachX, fy - outer * reachY, 2 * outer * reachX, 2 * outer * reachY, gradient.ColorAt((k + 0.5) / steps)));
+            }
+            items.Add(new PopItem());
         }
 
         private void EmitGridLines(List<int> columns, List<int> rows, Dictionary<int, double> columnX, Dictionary<int, double> rowY,

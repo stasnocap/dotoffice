@@ -87,6 +87,44 @@ public sealed class Cell
     public CellValueKind Kind { get; init; }
 }
 
+/// <summary>A color stop of a gradient: <see cref="Position"/> runs from 0 to 1.</summary>
+public readonly record struct GradientStop(double Position, Color Color);
+
+public enum GradientKind { Linear, Path }
+
+/// <summary>A cell background that blends between colors.</summary>
+public sealed record GradientFill
+{
+    public GradientKind Kind { get; init; }
+
+    /// <summary>Linear gradients: the direction of the blend in degrees, clockwise from left-to-right (90 runs top to bottom).</summary>
+    public double Degree { get; init; }
+
+    /// <summary>Path gradients: the focus, as fractions of the cell from its left and top edge; stop 0 is at the focus, stop 1 at the far edge.</summary>
+    public double Left { get; init; }
+    public double Right { get; init; }
+    public double Top { get; init; }
+    public double Bottom { get; init; }
+
+    /// <summary>At least two stops, sorted by position.</summary>
+    public IReadOnlyList<GradientStop> Stops { get; init; } = [];
+
+    /// <summary>The color at <paramref name="t"/> (0–1) along the gradient.</summary>
+    public Color ColorAt(double t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        if (Stops.Count == 0) return Color.White;
+        if (t <= Stops[0].Position) return Stops[0].Color;
+        for (int i = 1; i < Stops.Count; i++)
+        {
+            if (t > Stops[i].Position) continue;
+            double span = Stops[i].Position - Stops[i - 1].Position;
+            return span <= 1e-9 ? Stops[i].Color : Stops[i - 1].Color.Blend(Stops[i].Color, (t - Stops[i - 1].Position) / span);
+        }
+        return Stops[^1].Color;
+    }
+}
+
 public enum HorizontalAlignment { General, Left, Center, Right, Fill, Justify }
 
 /// <summary>Fully resolved cell formatting.</summary>
@@ -98,6 +136,9 @@ public sealed record CellStyle
 
     /// <summary>Solid background fill; null means none.</summary>
     public Color? Fill { get; init; }
+
+    /// <summary>Gradient background; takes the place of <see cref="Fill"/> when set.</summary>
+    public GradientFill? Gradient { get; init; }
 
     /// <summary>Only <see cref="BorderSet.Top"/>, <see cref="BorderSet.Bottom"/>, <see cref="BorderSet.Left"/> and <see cref="BorderSet.Right"/> are used.</summary>
     public BorderSet Borders { get; init; } = BorderSet.Empty;

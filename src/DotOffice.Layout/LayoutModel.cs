@@ -61,6 +61,12 @@ public sealed record RectItem(double X, double Y, double Width, double Height, C
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
 }
 
+/// <summary>A rectangle filled with a linear gradient; <see cref="Degree"/> runs clockwise from left-to-right (90 = top to bottom).</summary>
+public sealed record GradientItem(double X, double Y, double Width, double Height, double Degree, IReadOnlyList<GradientStop> Stops) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+}
+
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem
 {
     public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };

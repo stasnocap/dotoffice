@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -72,3 +72,8 @@ if grep -E "warning xlsx\.rich-text" "$log"; then fail "rich text should not war
 grep -qF "Rotated and stacked text" all.txt || fail "the rotation sheet is missing"
 grep -qF "Rows grow to fit rotated headings" all.txt || fail "the row under the rotated headings is missing"
 if grep -E "warning xlsx\.rotation" "$log"; then fail "rotated text should not warn any more"; fi
+
+# Gradients: the text on top of them is there, they are real shadings (not skipped) and nothing warns.
+for text in "Left to right" "Top to bottom" "Path from the center"; do grep -qF -- "$text" all.txt || fail "missing gradient cell: $text"; done
+if grep -E "warning xlsx\.gradient-fill" "$log"; then fail "gradient fills should not warn any more"; fi
+grep -aqE '/ShadingType 2' "$pdf" || fail "no linear shading in the PDF"
