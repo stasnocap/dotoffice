@@ -62,22 +62,28 @@ public sealed class TrueTypeFont
     /// <summary>True when the OS/2 fsType forbids embedding (restricted license).</summary>
     public bool IsEmbeddingRestricted { get; }
 
-    private TrueTypeFont(byte[] data)
+    private TrueTypeFont(byte[] data, int faceIndex)
     {
         _data = data;
         var sfntVersion = U32(0);
         if (sfntVersion == 0x4F54544F) // 'OTTO'
             throw new NotSupportedException("CFF-based OpenType fonts are not supported yet.");
-        if (sfntVersion == 0x74746366) // 'ttcf'
-            throw new NotSupportedException("TrueType collections are not supported yet.");
+        int dir = 0;
+        if (sfntVersion == 0x74746366) // 'ttcf': table offsets stay absolute, only the directory moves
+        {
+            if (faceIndex < 0 || faceIndex >= (int)U32(8)) throw new InvalidDataException("Face index out of range.");
+            dir = (int)U32(12 + faceIndex * 4);
+            sfntVersion = U32(dir);
+            if (sfntVersion == 0x4F54544F) throw new NotSupportedException("CFF-based OpenType fonts are not supported yet.");
+        }
         if (sfntVersion != 0x00010000 && sfntVersion != 0x74727565) // 'true'
             throw new InvalidDataException("Not a TrueType font.");
 
-        int numTables = U16(4);
+        int numTables = U16(dir + 4);
         _tables = new Dictionary<string, (int, int)>(numTables);
         for (int i = 0; i < numTables; i++)
         {
-            int rec = 12 + i * 16;
+            int rec = dir + 12 + i * 16;
             var tag = Encoding.ASCII.GetString(data, rec, 4);
             int offset = (int)U32(rec + 8);
             int length = (int)U32(rec + 12);
@@ -174,9 +180,9 @@ public sealed class TrueTypeFont
         PostScriptName = SanitizePostScriptName(names.GetValueOrDefault(6) ?? FamilyName);
     }
 
-    public static TrueTypeFont Load(byte[] data) => new(data);
+    public static TrueTypeFont Load(byte[] data, int faceIndex = 0) => new(data, faceIndex);
 
-    public static TrueTypeFont Load(string path) => new(File.ReadAllBytes(path));
+    public static TrueTypeFont Load(string path, int faceIndex = 0) => new(File.ReadAllBytes(path), faceIndex);
 
     /// <summary>Returns the glyph id for a Unicode code point, or 0 (.notdef) when unmapped.</summary>
     public ushort GetGlyphId(int codePoint) => _cmap.GetValueOrDefault(codePoint);

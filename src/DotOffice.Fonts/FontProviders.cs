@@ -107,7 +107,7 @@ public sealed class SystemFontProvider : IFontProvider
     private static readonly Lazy<SystemFontProvider> SharedInstance = new(() => new SystemFontProvider(FontDirectories.Default()));
 
     private readonly Lazy<Dictionary<string, List<FontFaceInfo>>> _index;
-    private readonly Dictionary<string, TrueTypeFont?> _loaded = [];
+    private readonly Dictionary<(string, int), TrueTypeFont?> _loaded = [];
 
     public SystemFontProvider(IEnumerable<string> directories)
     {
@@ -124,18 +124,18 @@ public sealed class SystemFontProvider : IFontProvider
     {
         if (!_index.Value.TryGetValue(family, out var faces)) return null;
         var info = FaceMatcher.Best(faces, bold, italic, f => (f.Weight, f.WidthClass, f.IsItalic));
-        return info is null ? null : Load(info.Path);
+        return info is null ? null : Load(info.Path, info.FaceIndex);
     }
 
-    private TrueTypeFont? Load(string path)
+    private TrueTypeFont? Load(string path, int faceIndex)
     {
         lock (_loaded)
         {
-            if (_loaded.TryGetValue(path, out var font)) return font;
-            try { font = TrueTypeFont.Load(path); }
+            if (_loaded.TryGetValue((path, faceIndex), out var font)) return font;
+            try { font = TrueTypeFont.Load(path, faceIndex); }
             catch (Exception e) when (e is InvalidDataException or NotSupportedException or IOException
                                           or ArgumentOutOfRangeException or IndexOutOfRangeException) { font = null; }
-            _loaded[path] = font;
+            _loaded[(path, faceIndex)] = font;
             return font;
         }
     }
@@ -145,10 +145,12 @@ public sealed class SystemFontProvider : IFontProvider
         var index = new Dictionary<string, List<FontFaceInfo>>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in FontDirectories.EnumerateFontFiles(directories))
         {
-            if (FontFaceInfo.TryRead(file) is not { } info) continue;
-            Add(info.FamilyName, info);
-            if (!string.Equals(info.TypographicFamilyName, info.FamilyName, StringComparison.OrdinalIgnoreCase))
-                Add(info.TypographicFamilyName, info);
+            foreach (var info in FontFaceInfo.TryReadAll(file))
+            {
+                Add(info.FamilyName, info);
+                if (!string.Equals(info.TypographicFamilyName, info.FamilyName, StringComparison.OrdinalIgnoreCase))
+                    Add(info.TypographicFamilyName, info);
+            }
         }
         return index;
 
@@ -196,6 +198,7 @@ public static class FontDirectories
         {
             if (!Directory.Exists(dir)) continue;
             foreach (var file in Directory.EnumerateFiles(dir, "*.ttf", options)) yield return file;
+            foreach (var file in Directory.EnumerateFiles(dir, "*.ttc", options)) yield return file;
         }
     }
 }

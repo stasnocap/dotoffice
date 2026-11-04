@@ -8,22 +8,48 @@ namespace DotOffice.Fonts;
 /// whole font directories can be indexed without parsing glyph data.
 /// </summary>
 public sealed record FontFaceInfo(string Path, string FamilyName, string TypographicFamilyName, string SubfamilyName,
-    int Weight, int WidthClass, bool IsItalic)
+    int Weight, int WidthClass, bool IsItalic, int FaceIndex = 0)
 {
     public bool IsBold => Weight >= 600;
 
     /// <summary>Reads face info from a TrueType (glyf) font file; returns null for anything unsupported.</summary>
-    public static FontFaceInfo? TryRead(string path)
+    public static FontFaceInfo? TryRead(string path) => TryReadAll(path).FirstOrDefault();
+
+    /// <summary>Reads every TrueType-outline face of a font file (a .ttc holds several).</summary>
+    public static List<FontFaceInfo> TryReadAll(string path)
     {
+        var result = new List<FontFaceInfo>();
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096);
-            return TryRead(stream, path);
+            Span<byte> head = stackalloc byte[16];
+            stream.ReadExactly(head[..12]);
+            if (BinaryPrimitives.ReadUInt32BigEndian(head) == 0x74746366)
+            {
+                int count = (int)Math.Min(BinaryPrimitives.ReadUInt32BigEndian(head[8..]), 64u);
+                var offsets = new uint[count];
+                for (int i = 0; i < count; i++)
+                {
+                    stream.ReadExactly(head[..4]);
+                    offsets[i] = BinaryPrimitives.ReadUInt32BigEndian(head);
+                }
+                for (int i = 0; i < count; i++)
+                {
+                    stream.Position = offsets[i];
+                    if (TryRead(stream, path) is { } f) result.Add(f with { FaceIndex = i });
+                }
+            }
+            else
+            {
+                stream.Position = 0;
+                if (TryRead(stream, path) is { } f) result.Add(f);
+            }
+            return result;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException
                                       or ArgumentOutOfRangeException or EndOfStreamException)
         {
-            return null;
+            return result;
         }
     }
 
