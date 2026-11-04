@@ -206,12 +206,95 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private void ReadWorksheet(XmlReader r, Worksheet sheet)
     {
         bool formulaWarned = false;
+        sheet.DefaultColumnWidth = 48; // Excel's 8.43-character default (64 px)
         r.MoveToContent();
         while (!r.EOF)
         {
-            if (r.NodeType == XmlNodeType.Element && r.LocalName == "sheetData") ReadSheetData(r, sheet, ref formulaWarned);
-            else r.Read();
+            if (r.NodeType != XmlNodeType.Element) { r.Read(); continue; }
+            switch (r.LocalName)
+            {
+                case "sheetFormatPr":
+                    ReadSheetFormat(r, sheet);
+                    r.Read();
+                    break;
+                case "cols":
+                    ReadColumns(r, sheet);
+                    break;
+                case "mergeCells":
+                    ReadMergeCells(r, sheet);
+                    break;
+                case "sheetData":
+                    ReadSheetData(r, sheet, ref formulaWarned);
+                    break;
+                default:
+                    r.Read();
+                    break;
+            }
         }
+    }
+
+    private const double MaxDigitWidth = 7;
+
+    /// <summary>Converts a width in characters of the default font's digit to points (ECMA-376 18.3.1.13).</summary>
+    internal static double WidthToPoints(double characters)
+    {
+        double pixels = Math.Truncate((256 * characters + Math.Truncate(128 / MaxDigitWidth)) / 256 * MaxDigitWidth);
+        return pixels * 0.75;
+    }
+
+    private static double? DoubleAttr(XmlReader r, string name) =>
+        double.TryParse(r.GetAttribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) && v >= 0 ? v : null;
+
+    private static void ReadSheetFormat(XmlReader r, Worksheet sheet)
+    {
+        if (DoubleAttr(r, "defaultColWidth") is { } width) sheet.DefaultColumnWidth = WidthToPoints(width);
+        else if (DoubleAttr(r, "baseColWidth") is { } baseWidth)
+            sheet.DefaultColumnWidth = Math.Ceiling((Math.Truncate(baseWidth * MaxDigitWidth) + 5) / 8) * 8 * 0.75;
+        if (DoubleAttr(r, "defaultRowHeight") is { } height && height > 0) sheet.DefaultRowHeight = Math.Min(height, 409.5);
+    }
+
+    private void ReadColumns(XmlReader r, Worksheet sheet)
+    {
+        if (r.IsEmptyElement) { r.Read(); return; }
+        int depth = r.Depth;
+        r.Read();
+        while (!r.EOF && !(r.NodeType == XmlNodeType.EndElement && r.Depth == depth))
+        {
+            if (r.NodeType == XmlNodeType.Element && r.LocalName == "col")
+            {
+                int min = (r.IntAttr("min") ?? 1) - 1;
+                int max = Math.Min((r.IntAttr("max") ?? min + 1) - 1, CellReference.MaxColumns - 1);
+                double? width = DoubleAttr(r, "width");
+                bool hidden = r.BoolAttr("hidden");
+                for (int c = Math.Max(min, 0); c <= max; c++)
+                {
+                    if (width is { } w) sheet.ColumnWidths[c] = Math.Min(WidthToPoints(w), 1790);
+                    if (hidden) sheet.HiddenColumns.Add(c);
+                }
+            }
+            r.Read();
+        }
+        r.Read();
+    }
+
+    private void ReadMergeCells(XmlReader r, Worksheet sheet)
+    {
+        if (r.IsEmptyElement) { r.Read(); return; }
+        int depth = r.Depth;
+        r.Read();
+        while (!r.EOF && !(r.NodeType == XmlNodeType.EndElement && r.Depth == depth))
+        {
+            if (r.NodeType == XmlNodeType.Element && r.LocalName == "mergeCell")
+            {
+                if (r.GetAttribute("ref") is { } reference && CellReference.TryParseRange(reference, out var range))
+                {
+                    if (range.FirstRow != range.LastRow || range.FirstColumn != range.LastColumn) sheet.Merges.Add(range);
+                }
+                else Options.Warnings.Warn("xlsx.bad-reference", $"Sheet '{sheet.Name}' has an invalid merged range.");
+            }
+            r.Read();
+        }
+        r.Read();
     }
 
     private void ReadSheetData(XmlReader r, Worksheet sheet, ref bool formulaWarned)
@@ -235,6 +318,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     r.Skip();
                     continue;
                 }
+                if (DoubleAttr(r, "ht") is { } rowHeight) sheet.RowHeights[rowIndex] = Math.Min(rowHeight, 409.5);
+                if (r.BoolAttr("hidden")) sheet.HiddenRows.Add(rowIndex);
                 ReadRow(r, sheet, rowIndex, ref formulaWarned);
             }
             else
