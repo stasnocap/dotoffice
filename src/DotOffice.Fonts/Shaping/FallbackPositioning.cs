@@ -18,18 +18,53 @@ internal static class FallbackPositioning
     }
 
     /// <summary>
-    /// Zeroes the advance of marks (by GDEF class, or Mn when the font has no glyph classes), moving them back by it
-    /// in left-to-right text (HarfBuzz's zero_mark_widths_by_gdef with adjust_offsets_when_zeroing).
+    /// Zeroes the advance of marks (by GDEF class, or Mn when the font has no glyph classes). In left-to-right text
+    /// the mark also moves back by it when <paramref name="adjustOffsets"/> is set, so it hangs over the previous
+    /// glyph (HarfBuzz's zero_mark_widths_by_gdef).
     /// </summary>
-    public static void ZeroMarkWidths(OpenTypeLayout layout, List<GlyphInfo> glyphs, bool rightToLeft)
+    public static void ZeroMarkWidths(OpenTypeLayout layout, List<GlyphInfo> glyphs, bool rightToLeft, bool adjustOffsets = true)
     {
         for (int i = 0; i < glyphs.Count; i++)
         {
             var g = glyphs[i];
-            bool mark = layout.HasGlyphClasses ? layout.GlyphClass(g.Glyph) == 3
-                : g.CodePoint > 0 && CharUnicodeInfo.GetUnicodeCategory(g.CodePoint) == UnicodeCategory.NonSpacingMark;
-            if (!mark) continue;
-            glyphs[i] = g with { XOffset = rightToLeft ? g.XOffset : g.XOffset - g.XAdvance, XAdvance = 0 };
+            if (!IsMarkGlyph(layout, g)) continue;
+            glyphs[i] = g with { XOffset = rightToLeft || !adjustOffsets ? g.XOffset : g.XOffset - g.XAdvance, XAdvance = 0 };
+        }
+    }
+
+    private static bool IsMarkGlyph(OpenTypeLayout layout, in GlyphInfo g) =>
+        layout.HasGlyphClasses ? layout.GlyphClass(g.Glyph) == 3
+            : g.CodePoint > 0 && CharUnicodeInfo.GetUnicodeCategory(g.CodePoint) == UnicodeCategory.NonSpacingMark;
+
+    /// <summary>
+    /// Applies the legacy kern table (HarfBuzz's hb_kern_machine_t): each glyph is kerned with the next one that is
+    /// not a mark or an ignorable. A cross-stream value moves the second glyph vertically; otherwise it is split
+    /// between the two advances and shifts the second glyph.
+    /// </summary>
+    public static void ApplyKernTable(TrueTypeFont font, List<GlyphInfo> glyphs)
+    {
+        var kern = font.Kern;
+        var layout = font.OpenTypeLayout;
+        for (int i = 0; i < glyphs.Count;)
+        {
+            int j = i + 1;
+            while (j < glyphs.Count && (IsMarkGlyph(layout, glyphs[j]) || glyphs[j].Ignorable && !glyphs[j].Hidden)) j++;
+            if (j >= glyphs.Count) break;
+
+            var (horizontal, cross) = kern.Kerning(glyphs[i].Glyph, glyphs[j].Glyph);
+            if (horizontal != 0 || cross != 0)
+            {
+                int value = horizontal;
+                var a = glyphs[i]; var b = glyphs[j];
+                if (horizontal != 0)
+                {
+                    int half = value >> 1, rest = value - half;
+                    a.XAdvance += half; b.XAdvance += rest; b.XOffset += rest;
+                }
+                if (cross != 0) b.YOffset = cross;
+                glyphs[i] = a; glyphs[j] = b;
+            }
+            i = j;
         }
     }
 

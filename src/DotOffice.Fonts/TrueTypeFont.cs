@@ -16,6 +16,7 @@ public sealed class TrueTypeFont
     private readonly short[] _leftSideBearings;
     private readonly int[] _loca;
     private Shaping.OpenTypeLayout? _layout;
+    private Shaping.KernTable? _kern;
 
     public string PostScriptName { get; }
     public string FamilyName { get; }
@@ -215,6 +216,9 @@ public sealed class TrueTypeFont
 
     /// <summary>GSUB/GPOS/GDEF interpreter for this font (created on first use).</summary>
     internal Shaping.OpenTypeLayout OpenTypeLayout => _layout ??= new Shaping.OpenTypeLayout(this);
+
+    /// <summary>The legacy kern table (empty when the font has none or only unsupported formats).</summary>
+    internal Shaping.KernTable Kern => _kern ??= new Shaping.KernTable(GetTableData("kern"));
 
     internal ReadOnlySpan<byte> GetGlyphData(ushort glyphId)
     {

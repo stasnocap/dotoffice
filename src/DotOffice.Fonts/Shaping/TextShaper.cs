@@ -128,7 +128,9 @@ public static class TextShaper
             else
             {
                 // No GPOS: marks are placed around their base's ink box, as HarfBuzz does.
-                FallbackPositioning.ZeroMarkWidths(layout, glyphs, rightToLeft);
+                bool kernTable = kerning && !font.Kern.IsEmpty;
+                if (kernTable) FallbackPositioning.ApplyKernTable(font, glyphs);
+                FallbackPositioning.ZeroMarkWidths(layout, glyphs, rightToLeft, adjustOffsets: !(kernTable && font.Kern.HasCrossStream));
                 ZeroIgnorables(glyphs);
                 FallbackPositioning.PositionMarks(font, glyphs, rightToLeft);
             }
