@@ -333,11 +333,23 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private static Cell? BuildEmpty(CellFormat format) =>
         format.Style.Fill is not null || format.Style.Borders.HasAny ? new Cell { Style = format.Style } : null;
 
+    private static string CodeOf(CellFormat format) => format.NumberFormatCode ?? NumberFormat.BuiltIn(format.NumberFormatId) ?? "General";
+
+    private static CellStyle WithColor(CellStyle style, Color? color) => color is { } c ? style with { Font = style.Font with { Color = c } } : style;
+
+    private static Cell TextCell(string text, CellFormat format)
+    {
+        var code = CodeOf(format);
+        if (code == "General") return new Cell { Text = text, Kind = CellValueKind.Text, Style = format.Style };
+        var shown = NumberFormat.Parse(code).FormatText(text);
+        return new Cell { Text = shown.Text, Kind = CellValueKind.Text, Style = WithColor(format.Style, shown.Color) };
+    }
+
     private Cell? Build(string type, string? value, string? inline, bool hasFormula, CellFormat format, Worksheet sheet, ref bool formulaWarned)
     {
         var style = format.Style;
         if (type == "inlineStr")
-            return inline is null ? BuildEmpty(format) : new Cell { Text = inline, Kind = CellValueKind.Text, Style = style };
+            return inline is null ? BuildEmpty(format) : TextCell(inline, format);
         if (value is null)
         {
             if (hasFormula && !formulaWarned)
@@ -352,19 +364,22 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         {
             case "s":
                 if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < _sharedStrings.Count)
-                    return new Cell { Text = _sharedStrings[index], Kind = CellValueKind.Text, Style = style };
+                    return TextCell(_sharedStrings[index], format);
                 Options.Warnings.Warn("xlsx.bad-shared-string", $"Sheet '{sheet.Name}' refers to a shared string that does not exist.");
                 return BuildEmpty(format);
             case "str":
             case "d":
-                return new Cell { Text = XlsxXml.DecodeEscapes(value), Kind = CellValueKind.Text, Style = style };
+                return TextCell(XlsxXml.DecodeEscapes(value), format);
             case "b":
                 return new Cell { Text = value.Trim() is "1" or "true" ? "TRUE" : "FALSE", Kind = CellValueKind.Bool, Style = style };
             case "e":
                 return new Cell { Text = value, Kind = CellValueKind.Error, Style = style };
             default:
                 if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number))
-                    return new Cell { Text = NumberFormatter.General(number), Kind = CellValueKind.Number, Style = style };
+                {
+                    var shown = NumberFormat.Parse(CodeOf(format)).FormatNumber(number, Date1904);
+                    return new Cell { Text = shown.Text, Kind = CellValueKind.Number, Style = WithColor(style, shown.Color) };
+                }
                 return value.Length == 0 ? BuildEmpty(format) : new Cell { Text = value, Kind = CellValueKind.Text, Style = style };
         }
     }
