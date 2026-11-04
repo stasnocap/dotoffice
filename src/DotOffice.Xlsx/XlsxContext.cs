@@ -69,8 +69,10 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
 
             var sheet = new Worksheet(entry.Name) { Visibility = entry.Visibility };
+            _sheetWarnings.Clear();
             using (var r = Package.OpenXml(rel.Target))
                 ReadWorksheet(r, sheet);
+            WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
             workbook.Sheets.Add(sheet);
         }
@@ -204,6 +206,36 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     // ------------------------------------------------------------------ worksheet
 
+    private readonly HashSet<string> _sheetWarnings = [];
+
+    private void WarnOnce(Worksheet sheet, string code, string message)
+    {
+        if (_sheetWarnings.Add(code)) Options.Warnings.Warn(code, $"Sheet '{sheet.Name}' {message}");
+    }
+
+    /// <summary>Features that are not rendered yet are reported once per sheet and then ignored.</summary>
+    private void WarnAboutDeferredFeatures(Worksheet sheet, string sheetPart)
+    {
+        foreach (var rel in Package.GetRelationships(sheetPart).Values)
+        {
+            if (rel.IsExternal) continue;
+            switch (rel.Kind)
+            {
+                case "drawing":
+                    WarnOnce(sheet, "xlsx.drawing", "contains charts, images or shapes, which are not rendered.");
+                    break;
+                case "pivotTable":
+                    WarnOnce(sheet, "xlsx.pivot", "contains a pivot table; its cached cell values are printed but it is not refreshed or styled.");
+                    break;
+                case "comments":
+                    WarnOnce(sheet, "xlsx.comments", "contains comments, which are not printed.");
+                    break;
+            }
+        }
+        if (sheet.Cells.Values.Any(c => c.Style.Rotation != 0))
+            WarnOnce(sheet, "xlsx.rotation", "contains rotated text, which is drawn horizontally.");
+    }
+
     private void ReadWorksheet(XmlReader r, Worksheet sheet)
     {
         bool formulaWarned = false;
@@ -228,6 +260,14 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     break;
                 case "sheetData":
                     ReadSheetData(r, sheet, ref formulaWarned);
+                    break;
+                case "drawing":
+                    WarnOnce(sheet, "xlsx.drawing", "contains charts, images or shapes, which are not rendered.");
+                    r.Read();
+                    break;
+                case "conditionalFormatting":
+                    WarnOnce(sheet, "xlsx.conditional-formatting", "uses conditional formatting, which is not applied.");
+                    r.Skip();
                     break;
                 case "pageSetUpPr":
                     fitToPage = r.BoolAttr("fitToPage");
