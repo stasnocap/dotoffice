@@ -19,6 +19,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private List<CellFormat> _formats = [];
     private Func<System.Xml.Linq.XElement?, Color?> _resolveColor = _ => null;
     private List<Dxf> _dxfs = [];
+    private IReadOnlyList<Color?>? _palette;
     private CfSheet _conditional = new();
     private long _cellCount;
 
@@ -78,7 +79,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             ReadDrawing(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
-            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904),
+            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette),
                 message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
             workbook.Sheets.Add(sheet);
         }
@@ -180,6 +181,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         _formats = table.Formats;
         _resolveColor = table.Resolve;
         _dxfs = table.Dxfs;
+        _palette = table.Palette;
     }
 
     private CellFormat FormatOf(string? styleAttribute) =>
@@ -653,7 +655,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         // Runs are kept only when the text is shown as it is; a text format (e.g. "@" with literals) rewrites it.
         if (code == "General") return new Cell { Text = rich.Text, Runs = ResolveRuns(rich, format.Style.Font), Kind = CellValueKind.Text, Style = format.Style };
         var text = rich.Text;
-        var shown = NumberFormat.Parse(code).FormatText(text);
+        var shown = NumberFormat.Parse(code, _palette).FormatText(text);
         return new Cell { Text = shown.Text, Kind = CellValueKind.Text, Style = WithColor(format.Style, shown.Color) };
     }
 
@@ -708,7 +710,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             default:
                 if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number))
                 {
-                    var shown = NumberFormat.Parse(CodeOf(format)).FormatNumber(number, Date1904);
+                    var shown = NumberFormat.Parse(CodeOf(format), _palette).FormatNumber(number, Date1904);
                     return new Cell { Text = shown.Text, Kind = CellValueKind.Number, Style = WithColor(style, shown.Color), Value = number };
                 }
                 return value.Length == 0 ? BuildEmpty(format) : new Cell { Text = value, Kind = CellValueKind.Text, Style = style };

@@ -28,9 +28,14 @@ internal sealed class NumberFormat
 
     private static readonly Dictionary<string, NumberFormat> Cache = new();
 
-    /// <summary>Parses (and caches) a format code. Never throws; unparseable codes degrade to General.</summary>
-    public static NumberFormat Parse(string code)
+    /// <summary>
+    /// Parses (and caches) a format code. Never throws; unparseable codes degrade to General. <paramref name="palette"/> is the workbook's indexed
+    /// palette that <c>[ColorN]</c> refers to; the default one is used without it (or for entries it lacks).
+    /// </summary>
+    public static NumberFormat Parse(string code, IReadOnlyList<Color?>? palette = null)
     {
+        // [ColorN] depends on the workbook's palette, so such codes are parsed against it and not cached.
+        if (palette is not null && code.Contains("color", StringComparison.OrdinalIgnoreCase)) return new NumberFormat(code, palette);
         lock (Cache)
         {
             if (!Cache.TryGetValue(code, out var format))
@@ -93,9 +98,9 @@ internal sealed class NumberFormat
 
     // ------------------------------------------------------------------ parsing
 
-    private NumberFormat(string code)
+    private NumberFormat(string code, IReadOnlyList<Color?>? palette = null)
     {
-        foreach (var part in SplitSections(code)) _sections.Add(ParseSection(part));
+        foreach (var part in SplitSections(code)) _sections.Add(ParseSection(part, palette));
         if (_sections.Count == 0) _sections.Add(new Section { Tokens = [new Token(Kind.General)] });
     }
 
@@ -116,7 +121,7 @@ internal sealed class NumberFormat
         return parts;
     }
 
-    private static Section ParseSection(string text)
+    private static Section ParseSection(string text, IReadOnlyList<Color?>? palette)
     {
         var s = new Section();
         var tokens = s.Tokens;
@@ -149,7 +154,7 @@ internal sealed class NumberFormat
                 {
                     int end = text.IndexOf(']', i);
                     if (end < 0) { i = text.Length; continue; }
-                    ParseBracket(s, text.Substring(i + 1, end - i - 1));
+                    ParseBracket(s, text.Substring(i + 1, end - i - 1), palette);
                     i = end + 1;
                     continue;
                 }
@@ -278,15 +283,15 @@ internal sealed class NumberFormat
         else tokens.Add(new Token(Kind.Literal, text));
     }
 
-    private static void ParseBracket(Section s, string content)
+    private static void ParseBracket(Section s, string content, IReadOnlyList<Color?>? palette)
     {
         if (content.Length == 0) return;
         if (ColorNames.TryGetValue(content, out var color)) { s.Color = color; return; }
         if (content.StartsWith("color", StringComparison.OrdinalIgnoreCase))
         {
-            // [ColorN] is entry N + 7 of the default palette (Color1 = black … Color56); a workbook's own palette is not consulted.
+            // [ColorN] is entry N + 7 of the indexed palette (Color1 = black … Color56): the workbook's own, else the default one.
             if (int.TryParse(content.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n is >= 1 and <= 56)
-                s.Color = XlsxStyles.DefaultIndexedColor(n + 7);
+                s.Color = n + 7 < palette?.Count && palette[n + 7] is { } own ? own : XlsxStyles.DefaultIndexedColor(n + 7);
             return;
         }
         if (content[0] is '<' or '>' or '=')

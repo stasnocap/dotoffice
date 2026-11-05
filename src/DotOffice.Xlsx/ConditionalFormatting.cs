@@ -253,7 +253,7 @@ internal static class ConditionalFormatting
     // ------------------------------------------------------------------ applying
 
     /// <summary>Everything an evaluation needs besides the sheet.</summary>
-    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904);
+    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904, IReadOnlyList<Color?>? Palette = null);
 
     /// <summary>What the rules decided for one cell; the first rule (highest priority) to set a property keeps it.</summary>
     private sealed class Outcome
@@ -633,7 +633,7 @@ internal static class ConditionalFormatting
         var text = cell.Text;
         if (o.NumberFormat is { } code && cell.Kind == CellValueKind.Number && cell.Value is { } number)
         {
-            var shown = NumberFormat.Parse(code).FormatNumber(number, env.Date1904);
+            var shown = NumberFormat.Parse(code, env.Palette).FormatNumber(number, env.Date1904);
             text = shown.Text;
             if (shown.Color is { } c && o.FontColor is null) style = style with { Font = style.Font with { Color = c } };
         }

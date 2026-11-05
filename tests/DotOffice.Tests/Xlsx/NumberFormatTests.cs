@@ -6,13 +6,13 @@ namespace DotOffice.Tests.Xlsx;
 
 public class NumberFormatTests
 {
-    private static Cell ReadCell(string value, string code, string? type = null, bool date1904 = false, int? builtIn = null)
+    private static Cell ReadCell(string value, string code, string? type = null, bool date1904 = false, int? builtIn = null, string colors = "")
     {
         var escaped = System.Security.SecurityElement.Escape(code);
         var numFmts = builtIn is null ? $"<numFmts count=\"1\"><numFmt numFmtId=\"164\" formatCode=\"{escaped}\"/></numFmts>" : "";
         var builder = new XlsxBuilder { Date1904 = date1904 };
         builder.Styles = numFmts + "<fonts><font/></fonts><fills><fill/></fills><borders><border/></borders>" +
-            $"<cellXfs><xf numFmtId=\"{builtIn ?? 164}\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellXfs>";
+            $"<cellXfs><xf numFmtId=\"{builtIn ?? 164}\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellXfs>" + colors;
         builder.AddSheet("S", Row(1, C("A1", value, type, 0)));
         return XlsxReader.Read(builder.BuildStream()).Sheets[0].Cells[(0, 0)];
     }
@@ -184,6 +184,15 @@ public class NumberFormatTests
     {
         var cell = ReadCell(value.ToString(System.Globalization.CultureInfo.InvariantCulture), code);
         Assert.Equal(new Color((byte)r, (byte)g, (byte)b), cell.Style.Font.Color);
+    }
+
+    [Fact]
+    public void Indexed_colors_use_the_workbook_palette_when_it_has_one()
+    {
+        // Entries 0-9 keep their meaning; entry 10 (Color3) is replaced, entry 11 (Color4) is not listed and stays the default.
+        var colors = "<colors><indexedColors>" + string.Concat(Enumerable.Repeat("<rgbColor rgb=\"FF000000\"/>", 10)) + "<rgbColor rgb=\"FF102030\"/></indexedColors></colors>";
+        Assert.Equal(new Color(0x10, 0x20, 0x30), ReadCell("1.5", "[Color3]0.0", colors: colors).Style.Font.Color);
+        Assert.Equal(new Color(0, 255, 0), ReadCell("1", "[Color4]0", colors: colors).Style.Font.Color);
     }
 
     [Theory]

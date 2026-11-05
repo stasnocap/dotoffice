@@ -92,7 +92,7 @@ internal static class XlsxStyles
     internal static Color DefaultIndexedColor(int index) => Color.TryParseHex(LegacyPalette[Math.Clamp(index, 0, LegacyPalette.Length - 1)])!.Value;
 
     /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
-    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs);
+    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs, IReadOnlyList<Color?> Palette);
 
     public static Result Read(XmlReader reader, XlsxTheme theme, IConversionWarningSink? warnings)
     {
@@ -103,7 +103,7 @@ internal static class XlsxStyles
         for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(LegacyPalette[i]);
         Color? Resolve(XElement? color) => ResolveColor(color, theme, palette);
         var dxfs = new List<Dxf>();
-        if (root is null) return new Result(formats, Resolve, dxfs);
+        if (root is null) return new Result(formats, Resolve, dxfs, palette);
 
         ReadPalette(root, palette);
 
@@ -167,7 +167,7 @@ internal static class XlsxStyles
             formats.Add(new CellFormat(style, numFmtId, code));
         }
         foreach (var dxf in Children(Child(root, "dxfs"), "dxf")) dxfs.Add(ReadDxf(dxf, numberFormats, Resolve));
-        return new Result(formats, Resolve, dxfs);
+        return new Result(formats, Resolve, dxfs, palette);
     }
 
     private static Dxf ReadDxf(XElement dxf, Dictionary<int, string> numberFormats, Func<XElement?, Color?> resolve)

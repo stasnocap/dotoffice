@@ -140,7 +140,10 @@ internal static class ShowcaseXlsx
         "<dxf><font><b/><color rgb=\"FF9C5700\"/></font><fill><patternFill><bgColor rgb=\"FFFFEB9C\"/></patternFill></fill>" +
         "<border><bottom style=\"thin\"><color rgb=\"FF9C5700\"/></bottom></border></dxf>" +                                                          // 3 top
         "<dxf><font><b/><i/><u/><color rgb=\"FFC00000\"/></font><numFmt numFmtId=\"167\" formatCode=\"0.0&quot; (!)&quot;\"/></dxf>" +                  // 4 duplicate
-        "</dxfs></styleSheet>";
+        "</dxfs>" +
+        // The workbook's own palette: entries 0–9 as in Excel, entry 10 (what [Color3] means) purple instead of red.
+        "<colors><indexedColors><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FFFF0000\"/><rgbColor rgb=\"FF00FF00\"/><rgbColor rgb=\"FF0000FF\"/>" +
+        "<rgbColor rgb=\"FFFFFF00\"/><rgbColor rgb=\"FFFF00FF\"/><rgbColor rgb=\"FF00FFFF\"/><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FF7030A0\"/></indexedColors></colors></styleSheet>";
 
     // ------------------------------------------------------------------ cell helpers
 
@@ -193,7 +196,7 @@ internal static class ShowcaseXlsx
             ("Fraction", 2.5, Fraction1, "# ?/?", "2 1/2"),
             ("Fraction, two digits", 3.14159, Fraction2, "# ??/??", "3 14/99"),
             ("Eighths", 2.375, Eighths, "# ?/8", "2 3/8"),
-            ("Indexed color", 1.5, IndexedRed, "[Color3]0.0", "red from the palette"),
+            ("Indexed color", 1.5, IndexedRed, "[Color3]0.0", "purple, not red"),
         };
         int r = 4;
         foreach (var (name, value, style, code, note) in samples)
