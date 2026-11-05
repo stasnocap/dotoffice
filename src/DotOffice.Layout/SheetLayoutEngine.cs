@@ -6,7 +6,7 @@ namespace DotOffice.Layout;
 /// Lays out the worksheets of a <see cref="Workbook"/> into pages: each sheet's print range is split into bands of
 /// columns and rows that fit a page, and every cell is drawn into its band with its fill, borders and text.
 /// </summary>
-public sealed class SheetLayoutEngine
+public sealed partial class SheetLayoutEngine
 {
     private const double Epsilon = 0.01;
 
@@ -546,10 +546,10 @@ public sealed class SheetLayoutEngine
                 c1 = Math.Max(c1, column);
             }
             // Excel prints pictures even outside the cells, so they belong to the used range.
-            foreach (var image in _sheet.Images)
+            foreach (var image in _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes))
             {
                 var (ix, iy, iw, ih) = ImageRectFromA1(image);
-                if (iw <= 0 || ih <= 0) continue;
+                if (IsEmpty(image, iw, ih)) continue;
                 int firstColumn = ColumnAt(ix), lastColumn = ColumnAt(ix + iw - Epsilon), firstRow = RowAt(iy), lastRow = RowAt(iy + ih - Epsilon);
                 if (r1 < 0) (r0, c0) = (firstRow, firstColumn);
                 (r0, c0, r1, c1) = (Math.Min(r0, firstRow), Math.Min(c0, firstColumn), Math.Max(r1, lastRow), Math.Max(c1, lastColumn));
@@ -662,22 +662,28 @@ public sealed class SheetLayoutEngine
             return 1_048_575;
         }
 
-        /// <summary>The rectangle of a picture measured from the corner of A1. Rotated pictures are placed by their unrotated frame.</summary>
-        private (double X, double Y, double Width, double Height) ImageRectFromA1(SheetImage image)
+        /// <summary>Pictures have no area when either side is empty; a line may be as thin as nothing in one direction.</summary>
+        private static bool IsEmpty(SheetObject obj, double width, double height) =>
+            obj is SheetShape { Geometry: ShapeGeometry.Line } ? width <= 0.01 && height <= 0.01 : width <= 0.01 || height <= 0.01;
+
+        /// <summary>The rectangle of an object measured from the corner of A1. Rotated objects are placed by their unrotated frame.</summary>
+        private (double X, double Y, double Width, double Height) ImageRectFromA1(SheetObject image)
         {
-            switch (image.Anchor)
+            var (x, y, width, height) = image.Anchor switch
             {
-                case ImageAnchorKind.TwoCell:
-                {
-                    double x0 = ColumnStart(image.From.Column) + image.From.ColumnOffset, y0 = RowStart(image.From.Row) + image.From.RowOffset;
-                    double x1 = ColumnStart(image.To.Column) + image.To.ColumnOffset, y1 = RowStart(image.To.Row) + image.To.RowOffset;
-                    return (x0, y0, Math.Max(x1 - x0, 0), Math.Max(y1 - y0, 0));
-                }
-                case ImageAnchorKind.OneCell:
-                    return (ColumnStart(image.From.Column) + image.From.ColumnOffset, RowStart(image.From.Row) + image.From.RowOffset, image.Width, image.Height);
-                default:
-                    return (image.X, image.Y, image.Width, image.Height);
-            }
+                ImageAnchorKind.TwoCell => TwoCellRect(image),
+                ImageAnchorKind.OneCell => (ColumnStart(image.From.Column) + image.From.ColumnOffset, RowStart(image.From.Row) + image.From.RowOffset, image.Width, image.Height),
+                _ => (image.X, image.Y, image.Width, image.Height),
+            };
+            var f = image.Frame;
+            return (x + f.X * width, y + f.Y * height, f.Width * width, f.Height * height);
+        }
+
+        private (double X, double Y, double Width, double Height) TwoCellRect(SheetObject image)
+        {
+            double x0 = ColumnStart(image.From.Column) + image.From.ColumnOffset, y0 = RowStart(image.From.Row) + image.From.RowOffset;
+            double x1 = ColumnStart(image.To.Column) + image.To.ColumnOffset, y1 = RowStart(image.To.Row) + image.To.RowOffset;
+            return (x0, y0, Math.Max(x1 - x0, 0), Math.Max(y1 - y0, 0));
         }
 
         /// <summary>A run of page positions that shows a contiguous stretch of the sheet: sheet distances S0–S1 are drawn from page distance P0.</summary>
@@ -704,18 +710,20 @@ public sealed class SheetLayoutEngine
         /// </summary>
         private void EmitImages(List<int> columns, List<int> rows, Dictionary<int, double> columnX, Dictionary<int, double> rowY, List<LayoutItem> items)
         {
-            if (_sheet.Images.Count == 0) return;
+            if (_sheet.Images.Count == 0 && _sheet.Shapes.Count == 0) return;
             double originX = ColumnStart(_range.FirstColumn), originY = RowStart(_range.FirstRow);
             var columnSegments = Segments(columns, c => ColumnStart(c) - originX, ColumnWidthOf, columnX);
             var rowSegments = Segments(rows, r => RowStart(r) - originY, RowHeightOf, rowY);
 
-            foreach (var image in _sheet.Images)
+            foreach (var image in _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes).OrderBy(o => o.ZOrder))
             {
                 var (ax, ay, w, h) = ImageRectFromA1(image);
                 double x = ax - originX, y = ay - originY;
-                if (w <= 0.01 || h <= 0.01) continue;
-                // The turned bounding box of a rotated picture reaches beyond its frame by at most this much on each side.
+                if (IsEmpty(image, w, h)) continue;
+                // The turned bounding box of a rotated object reaches beyond its frame by at most this much on each side, and outlines and
+                // text that overflow the frame reach beyond it as well.
                 double reach = image.Rotation == 0 ? 0 : (Math.Abs(w) + Math.Abs(h));
+                if (image is SheetShape shape) reach = Math.Max(reach, shape.LineWidth + 1);
                 foreach (var columnSegment in columnSegments)
                 {
                     double x0 = Math.Max(x - reach, columnSegment.S0), x1 = Math.Min(x + w + reach, columnSegment.S1);
@@ -729,10 +737,17 @@ public sealed class SheetLayoutEngine
                         var visible = image.Rotation != 0
                             ? (columnSegment.P0, rowSegment.P0, columnSegment.S1 - columnSegment.S0, rowSegment.S1 - rowSegment.S0)
                             : (columnSegment.P0 + (x0 - columnSegment.S0), rowSegment.P0 + (y0 - rowSegment.S0), x1 - x0, y1 - y0);
-                        EmitImage(image, px, py, w, h, visible, items);
+                        EmitObject(image, px, py, w, h, visible, items);
                     }
                 }
             }
+        }
+
+        private void EmitObject(SheetObject obj, double x, double y, double width, double height,
+            (double X, double Y, double Width, double Height) visible, List<LayoutItem> items)
+        {
+            if (obj is SheetShape shape) _engine.EmitShape(shape, x, y, width, height, visible, items);
+            else if (obj is SheetImage image) EmitImage(image, x, y, width, height, visible, items);
         }
 
         private static void EmitImage(SheetImage image, double x, double y, double width, double height,

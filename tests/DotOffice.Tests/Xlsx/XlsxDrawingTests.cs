@@ -70,12 +70,20 @@ public class XlsxDrawingTests
     [Fact]
     public void Charts_and_shapes_still_warn_once_and_pictures_next_to_them_are_kept()
     {
-        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Pic()) + OneCellAnchor(2, 2, 10, 10, Shape) + OneCellAnchor(4, 4, 10, 10, ChartFrame) + OneCellAnchor(6, 6, 10, 10, Shape));
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Pic()) + OneCellAnchor(2, 2, 10, 10, CustomShape) + OneCellAnchor(4, 4, 10, 10, ChartFrame) + OneCellAnchor(6, 6, 10, 10, CustomShape));
         Assert.Single(sheet.Images);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.drawing", warning.Code);
         Assert.Contains("chart", warning.Message);
         Assert.Contains("2 shapes", warning.Message);
+    }
+
+    [Fact]
+    public void A_shape_that_paints_nothing_is_dropped_silently()
+    {
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Shape));
+        Assert.Empty(sheet.Shapes);
+        Assert.Empty(warnings.Warnings);
     }
 
     [Fact]

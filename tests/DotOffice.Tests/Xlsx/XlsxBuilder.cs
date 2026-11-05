@@ -111,6 +111,13 @@ internal sealed class XlsxBuilder
     /// <summary>A shape with a text body, a connector-free chart frame etc. are all "not a picture" to the reader.</summary>
     public const string Shape = "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"Rectangle\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp>";
 
+    /// <summary>A shape the reader cannot draw (custom geometry).</summary>
+    public const string CustomShape = "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"Freeform\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:custGeom/></xdr:spPr></xdr:sp>";
+
+    /// <summary>A shape with the given <c>spPr</c> content, optional <c>style</c> and <c>txBody</c> elements.</summary>
+    public static string Sp(string spPr = "", string style = "", string txBody = "", string nvAttributes = "") =>
+        $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"Shape\"{nvAttributes}/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{spPr}</xdr:spPr>{style}{txBody}</xdr:sp>";
+
     public const string ChartFrame = "<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id=\"4\" name=\"Chart\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>" +
                                      "<xdr:xfrm/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"/></a:graphic></xdr:graphicFrame>";
 

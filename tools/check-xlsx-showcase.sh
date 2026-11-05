@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -114,6 +114,21 @@ grep -aq '^0.1843 0.3333 0.5922 rg$' conditional-qdf.pdf || fail "the data bars 
 grep -aq '^0.498 0 0 rg$' conditional-qdf.pdf || fail "the negative data bars should have a dark red border"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
+
+# Shapes: drawn as vector content on a single page (themed blue fill, group parts, a dashed outline), with their text, and not reported.
+shape_pages=0; shape_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shapes" ] && { shape_pages=$((shape_pages + 1)); shape_page=$p; }; done
+[ "$shape_pages" = 1 ] || fail "the shapes sheet should fit one page, found $shape_pages"
+shape_text=$(page_text "$shape_page")
+for text in "Theme style" "Rounded rectangle" "Dashed oval" "A text box has no fill" "Hexagon"; do
+  [[ $shape_text == *"$text"* ]] || fail "missing shape text: $text"
+done
+qpdf --qdf --object-streams=disable "$pdf" shapes-qdf.pdf
+for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.4392 0.1882 0.6275" "0.7529 0 0"; do
+  grep -aq "^$color rg$" shapes-qdf.pdf || fail "shape fill $color is missing"
+done
+grep -aq '^\[[0-9.]* [0-9.]*\] 0 d$' shapes-qdf.pdf || fail "the dashed outline is missing"
+if grep -E "warning xlsx\.drawing-approximated" "$log"; then fail "the supported shapes should not be reported as approximated"; fi
 
 # Print areas: the three areas of the "Areas" sheet are three separate pages, and nothing outside them is printed.
 area_pages=0

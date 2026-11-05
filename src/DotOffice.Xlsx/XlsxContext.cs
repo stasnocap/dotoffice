@@ -159,6 +159,9 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     // ------------------------------------------------------------------ styles.xml and theme
 
+    /// <summary>The workbook theme (the Office default when the file has none).</summary>
+    internal XlsxTheme Theme { get; private set; } = XlsxTheme.Default;
+
     private void ReadStyles()
     {
         var theme = XlsxTheme.Default;
@@ -176,6 +179,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
         }
 
+        Theme = theme;
         var stylesRel = Package.FindRelationship(WorkbookPart, "styles");
         if (stylesRel is null || !Package.Exists(stylesRel.Target)) return;
         using var styles = Package.OpenXml(stylesRel.Target);
@@ -269,10 +273,12 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             {
                 var parts = new List<string>();
                 if (skipped.Charts > 0) parts.Add(skipped.Charts == 1 ? "a chart" : $"{skipped.Charts} charts");
-                if (skipped.Shapes > 0) parts.Add(skipped.Shapes == 1 ? "a shape" : $"{skipped.Shapes} shapes");
+                if (skipped.Shapes > 0) parts.Add(skipped.Shapes == 1 ? "a shape with custom geometry" : $"{skipped.Shapes} shapes with custom geometry");
                 if (skipped.Other > 0) parts.Add("other drawing objects");
-                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures are).");
+                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures and shapes are).");
             }
+            if (skipped.Notes.Count > 0)
+                WarnOnce(sheet, "xlsx.drawing-approximated", $"has drawing objects that are only approximated: {string.Join("; ", skipped.Notes)}.");
         }
         catch (XmlException)
         {

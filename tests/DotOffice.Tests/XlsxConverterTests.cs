@@ -120,7 +120,7 @@ public class XlsxConverterTests
         var warnings = new ConversionWarningList();
         var png = PngTestEncoder.Encode(2, 2, 2, 8, [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
         var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: DrawingElement)
-            .AddDrawing(1, OneCellAnchor(1, 1, 60, 40, Pic()) + OneCellAnchor(3, 3, 60, 40, Shape), png);
+            .AddDrawing(1, OneCellAnchor(1, 1, 60, 40, Pic()) + OneCellAnchor(3, 3, 60, 40, CustomShape), png);
         var text = Encoding.Latin1.GetString(await Convert(builder, warnings));
         Assert.Contains("/Subtype /Image", text);
         var warning = Assert.Single(warnings.Warnings, w => w.Code.StartsWith("xlsx."));

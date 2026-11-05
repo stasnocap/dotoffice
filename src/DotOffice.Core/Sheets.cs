@@ -32,45 +32,12 @@ public readonly record struct AnchorPoint(int Column, int Row, double ColumnOffs
 
 public enum ImageAnchorKind
 {
-    /// <summary>Corners at <see cref="SheetImage.From"/> and <see cref="SheetImage.To"/>; the size follows the cells.</summary>
+    /// <summary>Corners at <see cref="SheetObject.From"/> and <see cref="SheetObject.To"/>; the size follows the cells.</summary>
     TwoCell,
-    /// <summary>Top-left corner at <see cref="SheetImage.From"/>, size <see cref="SheetImage.Width"/> × <see cref="SheetImage.Height"/>.</summary>
+    /// <summary>Top-left corner at <see cref="SheetObject.From"/>, size <see cref="SheetObject.Width"/> × <see cref="SheetObject.Height"/>.</summary>
     OneCell,
-    /// <summary>Top-left corner at (<see cref="SheetImage.X"/>, <see cref="SheetImage.Y"/>) measured from the corner of A1, with the given size.</summary>
+    /// <summary>Top-left corner at (<see cref="SheetObject.X"/>, <see cref="SheetObject.Y"/>) measured from the corner of A1, with the given size.</summary>
     Absolute,
-}
-
-/// <summary>A picture placed on a worksheet by a drawing anchor. Lengths in points.</summary>
-public sealed record SheetImage
-{
-    public required ImageData Image { get; init; }
-
-    public ImageAnchorKind Anchor { get; init; }
-
-    public AnchorPoint From { get; init; }
-
-    public AnchorPoint To { get; init; }
-
-    public double X { get; init; }
-
-    public double Y { get; init; }
-
-    public double Width { get; init; }
-
-    public double Height { get; init; }
-
-    /// <summary>Cropping as fractions of the image removed from each side.</summary>
-    public double CropLeft { get; init; }
-    public double CropTop { get; init; }
-    public double CropRight { get; init; }
-    public double CropBottom { get; init; }
-
-    /// <summary>Rotation in degrees counter-clockwise.</summary>
-    public double Rotation { get; init; }
-
-    /// <summary>Mirrored left to right / top to bottom (about the picture's center, before the rotation is applied).</summary>
-    public bool FlipH { get; init; }
-    public bool FlipV { get; init; }
 }
 
 /// <summary>A comment attached to a cell: <paramref name="Reference"/> is its A1 address, <paramref name="Text"/> the plain text.</summary>
@@ -106,6 +73,9 @@ public sealed class Worksheet(string name)
 
     /// <summary>Pictures in drawing order (later ones are on top).</summary>
     public List<SheetImage> Images { get; } = [];
+
+    /// <summary>Shapes, text boxes and lines of the drawing.</summary>
+    public List<SheetShape> Shapes { get; } = [];
 
     /// <summary>Cell comments (notes); printed after the sheet when <see cref="SheetPageSetup.Comments"/> asks for it.</summary>
     public List<SheetComment> Comments { get; } = [];

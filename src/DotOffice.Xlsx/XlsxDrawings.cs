@@ -1,31 +1,31 @@
 using System.Globalization;
 using System.Xml.Linq;
 using DotOffice.Core;
+using static DotOffice.Xlsx.DrawingMl;
 
 namespace DotOffice.Xlsx;
 
-/// <summary>Reads the pictures of a worksheet's drawing part (SpreadsheetML Drawing, <c>xdr:wsDr</c>).</summary>
+/// <summary>Reads the pictures and shapes of a worksheet's drawing part (SpreadsheetML Drawing, <c>xdr:wsDr</c>).</summary>
 internal static class XlsxDrawings
 {
     private const double EmuPerPoint = 12700;
 
-    /// <summary>What a drawing contained that is not rendered.</summary>
-    internal sealed record Skipped(int Charts, int Shapes, int Other)
+    /// <summary>What a drawing contained that is not rendered, and what is rendered only approximately.</summary>
+    internal sealed record Skipped(int Charts, int Shapes, int Other, IReadOnlyList<string> Notes)
     {
         public bool Any => Charts + Shapes + Other > 0;
     }
 
     /// <summary>
-    /// Adds the pictures of the drawing part to <paramref name="sheet"/> and reports what was left out. Pictures that are hidden or
+    /// Adds the pictures and shapes of the drawing part to <paramref name="sheet"/> and reports what was left out. Objects that are hidden or
     /// excluded from printing (<c>fPrintsWithSheet="0"</c>, as Excel's "Print object" option writes it) are not printed.
     /// </summary>
     public static Skipped Read(XlsxContext context, Worksheet sheet, string drawingPart)
     {
-        int charts = 0, shapes = 0, other = 0;
         XDocument doc;
         using (var reader = context.Package.OpenXml(drawingPart)) doc = XDocument.Load(reader);
-        if (doc.Root is not { } root || root.Name.LocalName != "wsDr") return new Skipped(0, 0, 1);
-        var rels = context.Package.GetRelationships(drawingPart);
+        if (doc.Root is not { } root || root.Name.LocalName != "wsDr") return new Skipped(0, 0, 1, []);
+        var state = new State(context, sheet, context.Package.GetRelationships(drawingPart));
 
         foreach (var anchor in root.Elements())
         {
@@ -37,34 +37,101 @@ internal static class XlsxDrawings
                 _ => (ImageAnchorKind?)null,
             };
             if (kind is null) continue;
+            if ((string?)Child(anchor, "clientData")?.Attribute("fPrintsWithSheet") is "0" or "false") continue;
 
+            var frame = new AnchorFrame(kind.Value, Point(Child(anchor, "from")), Point(Child(anchor, "to")), Number(Child(anchor, "pos"), "x") / EmuPerPoint,
+                Number(Child(anchor, "pos"), "y") / EmuPerPoint, Number(Child(anchor, "ext"), "cx") / EmuPerPoint, Number(Child(anchor, "ext"), "cy") / EmuPerPoint,
+                Child(anchor, "ext") is not null);
             foreach (var content in anchor.Elements())
             {
                 switch (content.Name.LocalName)
                 {
-                    case "pic":
-                        ReadPicture(context, sheet, anchor, content, kind.Value, rels);
+                    case "pic" or "sp" or "cxnSp" or "grpSp":
+                        ReadObject(state, frame, FrameFraction.Whole, content);
                         break;
-                    case "graphicFrame": charts++; break;
-                    case "sp" or "cxnSp" or "grpSp": shapes++; break;
+                    case "graphicFrame": state.Charts++; break;
                     case "from" or "to" or "pos" or "ext" or "clientData": break;
-                    default: other++; break; // AlternateContent (slicers, …), contentPart
+                    default: state.Other++; break; // AlternateContent (slicers, …), contentPart
                 }
             }
         }
-        return new Skipped(charts, shapes, other);
+        return new Skipped(state.Charts, state.Shapes, state.Other, state.Notes);
     }
 
-    private static void ReadPicture(XlsxContext context, Worksheet sheet, XElement anchor, XElement pic, ImageAnchorKind kind,
-        IReadOnlyDictionary<string, Opc.Relationship> rels)
+    /// <summary>The anchor of a top-level object: where its frame is, and whether the anchor itself states the size (<c>ext</c>).</summary>
+    private sealed record AnchorFrame(ImageAnchorKind Kind, AnchorPoint From, AnchorPoint To, double X, double Y, double Width, double Height, bool HasExtent);
+
+    private sealed class State(XlsxContext context, Worksheet sheet, IReadOnlyDictionary<string, Opc.Relationship> rels)
     {
+        public XlsxContext Context { get; } = context;
+        public Worksheet Sheet { get; } = sheet;
+        public IReadOnlyDictionary<string, Opc.Relationship> Relationships { get; } = rels;
+        public int Charts, Shapes, Other, ZOrder;
+        public List<string> Notes { get; } = [];
+
+        public void Note(string note)
+        {
+            if (!Notes.Contains(note)) Notes.Add(note);
+        }
+    }
+
+    private static void ReadObject(State state, AnchorFrame anchor, FrameFraction frame, XElement element)
+    {
+        switch (element.Name.LocalName)
+        {
+            case "pic": ReadPicture(state, anchor, frame, element); break;
+            case "sp" or "cxnSp": ReadShape(state, anchor, frame, element); break;
+            case "grpSp": ReadGroup(state, anchor, frame, element); break;
+        }
+    }
+
+    /// <summary>
+    /// Reads a group by placing its children inside the group's frame: a child's own coordinates are mapped from the group's child space
+    /// (<c>chOff</c>, <c>chExt</c>) onto the group's frame. A rotated group's children are drawn unrotated.
+    /// </summary>
+    private static void ReadGroup(State state, AnchorFrame anchor, FrameFraction frame, XElement group)
+    {
+        if (Child(Child(group, "nvGrpSpPr"), "cNvPr") is { } p && (string?)p.Attribute("hidden") is "1" or "true") return;
+        var xfrm = Child(Child(group, "grpSpPr"), "xfrm");
+        if (Number(xfrm, "rot") != 0) state.Note("a rotated group is drawn unrotated");
+        var childOffset = Child(xfrm, "chOff");
+        var childExtent = Child(xfrm, "chExt");
+        double cx = Number(childExtent, "cx"), cy = Number(childExtent, "cy");
+        foreach (var child in group.Elements())
+        {
+            if (child.Name.LocalName is not ("pic" or "sp" or "cxnSp" or "grpSp")) continue;
+            var childXfrm = child.Name.LocalName switch
+            {
+                "pic" => Child(Child(child, "spPr"), "xfrm"),
+                "grpSp" => Child(Child(child, "grpSpPr"), "xfrm"),
+                _ => Child(Child(child, "spPr"), "xfrm"),
+            };
+            var fraction = cx > 0 && cy > 0 && Child(childXfrm, "off") is { } off && Child(childXfrm, "ext") is { } ext
+                ? new FrameFraction((Number(off, "x") - Number(childOffset, "x")) / cx, (Number(off, "y") - Number(childOffset, "y")) / cy, Number(ext, "cx") / cx, Number(ext, "cy") / cy)
+                : FrameFraction.Whole;
+            ReadObject(state, anchor, frame.Within(fraction), child);
+        }
+    }
+
+    /// <summary>The size and position fields every object takes from its anchor.</summary>
+    private static (ImageAnchorKind Kind, AnchorPoint From, AnchorPoint To, double X, double Y, double Width, double Height) Placement(AnchorFrame anchor, XElement? xfrm, FrameFraction frame)
+    {
+        // A top-level one-cell or absolute anchor without its own size takes it from the object's xfrm; inside groups the anchor decides.
+        double width = anchor.HasExtent ? anchor.Width : Number(Child(xfrm, "ext"), "cx") / EmuPerPoint;
+        double height = anchor.HasExtent ? anchor.Height : Number(Child(xfrm, "ext"), "cy") / EmuPerPoint;
+        return (anchor.Kind, anchor.From, anchor.To, anchor.X, anchor.Y, width, height);
+    }
+
+    private static void ReadPicture(State state, AnchorFrame anchor, FrameFraction frame, XElement pic)
+    {
+        var context = state.Context;
+        var sheet = state.Sheet;
         var properties = Child(Child(pic, "nvPicPr"), "cNvPr");
         if ((string?)properties?.Attribute("hidden") is "1" or "true") return;
-        if ((string?)Child(anchor, "clientData")?.Attribute("fPrintsWithSheet") is "0" or "false") return;
 
         var blip = Child(Child(pic, "blipFill"), "blip");
         var embed = blip?.Attributes().FirstOrDefault(a => a.Name.LocalName == "embed")?.Value;
-        if (embed is null || !rels.TryGetValue(embed, out var rel) || rel.IsExternal || !context.Package.Exists(rel.Target))
+        if (embed is null || !state.Relationships.TryGetValue(embed, out var rel) || rel.IsExternal || !context.Package.Exists(rel.Target))
         {
             context.Options.Warnings.Warn("xlsx.image-missing", $"Sheet '{sheet.Name}' has a picture whose image is missing or linked from outside the file; it was skipped.");
             return;
@@ -80,42 +147,169 @@ internal static class XlsxDrawings
         var src = Child(Child(pic, "blipFill"), "srcRect");
         double Crop(string name) => Math.Clamp(Number(src, name) / 100_000.0, 0, 1);
         var xfrm = Child(Child(pic, "spPr"), "xfrm");
-        bool flipH = (string?)xfrm?.Attribute("flipH") is "1" or "true", flipV = (string?)xfrm?.Attribute("flipV") is "1" or "true";
+        bool flipH = Flag(xfrm, "flipH"), flipV = Flag(xfrm, "flipV");
         double rotation = -Number(xfrm, "rot") / 60_000.0; // clockwise in the file, counter-clockwise in the model
 
-        var ext = Child(anchor, "ext") ?? Child(xfrm, "ext");
-        double width = Number(ext, "cx") / EmuPerPoint, height = Number(ext, "cy") / EmuPerPoint;
-        var pos = Child(anchor, "pos");
+        var (kind, from, to, x, y, width, height) = Placement(anchor, xfrm, frame);
         sheet.Images.Add(new SheetImage
         {
             Image = image,
-            Anchor = kind,
-            From = Point(Child(anchor, "from")),
-            To = Point(Child(anchor, "to")),
-            X = Number(pos, "x") / EmuPerPoint,
-            Y = Number(pos, "y") / EmuPerPoint,
-            Width = width,
-            Height = height,
+            Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame,
             CropLeft = Crop("l"), CropTop = Crop("t"), CropRight = Crop("r"), CropBottom = Crop("b"),
             Rotation = rotation,
             FlipH = flipH, FlipV = flipV,
+            ZOrder = state.ZOrder++,
         });
+    }
+
+    // ------------------------------------------------------------------ shapes
+
+    private static readonly double[] StyleLineWidths = [0, 0.5, 1, 1.5];
+
+    private static ShapeGeometry? GeometryOf(string? preset) => preset switch
+    {
+        null or "rect" or "flowChartProcess" or "snip1Rect" or "snip2SameRect" => ShapeGeometry.Rectangle,
+        "roundRect" => ShapeGeometry.RoundRectangle,
+        "ellipse" or "flowChartConnector" => ShapeGeometry.Ellipse,
+        "triangle" => ShapeGeometry.Triangle,
+        "rtTriangle" => ShapeGeometry.RightTriangle,
+        "diamond" or "flowChartDecision" => ShapeGeometry.Diamond,
+        "parallelogram" => ShapeGeometry.Parallelogram,
+        "trapezoid" => ShapeGeometry.Trapezoid,
+        "hexagon" => ShapeGeometry.Hexagon,
+        "rightArrow" => ShapeGeometry.RightArrow,
+        "leftArrow" => ShapeGeometry.LeftArrow,
+        "upArrow" => ShapeGeometry.UpArrow,
+        "downArrow" => ShapeGeometry.DownArrow,
+        "line" or "straightConnector1" => ShapeGeometry.Line,
+        _ => null,
+    };
+
+    private static void ReadShape(State state, AnchorFrame anchor, FrameFraction frame, XElement shape)
+    {
+        var context = state.Context;
+        bool connector = shape.Name.LocalName == "cxnSp";
+        var properties = Child(Child(shape, connector ? "nvCxnSpPr" : "nvSpPr"), "cNvPr");
+        if ((string?)properties?.Attribute("hidden") is "1" or "true") return;
+        var spPr = Child(shape, "spPr");
+        var xfrm = Child(spPr, "xfrm");
+
+        if (Child(spPr, "custGeom") is not null)
+        {
+            state.Shapes++;
+            return;
+        }
+        var preset = (string?)Child(spPr, "prstGeom")?.Attribute("prst");
+        var geometry = GeometryOf(preset);
+        if (geometry is null)
+        {
+            state.Note($"shapes of the geometry '{preset}' are drawn as rectangles");
+            geometry = connector ? ShapeGeometry.Line : ShapeGeometry.Rectangle;
+        }
+        else if (connector) geometry = ShapeGeometry.Line;
+        if (connector && preset is not (null or "line" or "straightConnector1")) state.Note("bent and curved connectors are drawn as straight lines");
+
+        // The theme's style references stand in for what the shape does not state itself.
+        var style = Child(shape, "style");
+        var theme = context.Theme;
+        Color? StyleColor(string name) => Resolve(Child(style, name), theme);
+        var fillRef = Child(style, "fillRef");
+        var lineRef = Child(style, "lnRef");
+        Color? fill = geometry == ShapeGeometry.Line ? null : SolidFill(spPr, theme, Number(fillRef, "idx") > 0 ? StyleColor("fillRef") : null);
+
+        var ln = Child(spPr, "ln");
+        Color? lineColor;
+        double lineWidth;
+        StrokeStyle lineStyle = StrokeStyle.Solid;
+        if (ln is not null && ln.Elements().Any(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill"))
+            lineColor = SolidFill(ln, theme);
+        else lineColor = Number(lineRef, "idx") > 0 ? StyleColor("lnRef") : null;
+        int lineIdx = (int)Number(lineRef, "idx");
+        lineWidth = ln?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) ? emu / EmuPerPoint
+            : lineIdx is >= 1 and <= 3 ? StyleLineWidths[lineIdx] : 0.75;
+        if ((string?)Child(ln, "prstDash")?.Attribute("val") is { } dash && dash != "solid")
+            lineStyle = dash is "sysDot" or "dot" or "sysDash" ? StrokeStyle.Dotted : StrokeStyle.Dashed;
+        if (geometry == ShapeGeometry.Line && lineColor is null && ln is null) lineColor = Color.Black;
+
+        // Text: the default color is the style's font color (white on the theme's default shapes).
+        var fontColor = Resolve(Child(style, "fontRef"), theme);
+        var paragraphs = ReadText(Child(shape, "txBody"), theme, fontColor, out var body);
+
+        if (fill is null && lineColor is null && paragraphs.Count == 0) return;
+        var (kind, from, to, x, y, width, height) = Placement(anchor, xfrm, frame);
+        double Inset(string name, double fallback) => (string?)body?.Attribute(name) is { } v && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var e) ? e / EmuPerPoint : fallback;
+        state.Sheet.Shapes.Add(new SheetShape
+        {
+            Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame,
+            Rotation = -Number(xfrm, "rot") / 60_000.0,
+            FlipH = Flag(xfrm, "flipH"), FlipV = Flag(xfrm, "flipV"),
+            ZOrder = state.ZOrder++,
+            Geometry = geometry.Value,
+            Fill = fill,
+            LineColor = lineColor,
+            LineWidth = lineWidth,
+            LineStyle = lineStyle,
+            Paragraphs = paragraphs,
+            TextAnchor = (string?)body?.Attribute("anchor") switch { "ctr" => ShapeTextAnchor.Middle, "b" => ShapeTextAnchor.Bottom, _ => ShapeTextAnchor.Top },
+            TextInsets = new Thickness(Inset("tIns", 3.6), Inset("rIns", 7.2), Inset("bIns", 3.6), Inset("lIns", 7.2)),
+            WrapText = (string?)body?.Attribute("wrap") != "none",
+        });
+    }
+
+    private static List<ShapeParagraph> ReadText(XElement? txBody, XlsxTheme theme, Color? defaultColor, out XElement? bodyProperties)
+    {
+        bodyProperties = Child(txBody, "bodyPr");
+        var result = new List<ShapeParagraph>();
+        if (txBody is null) return result;
+        var baseFont = new RunProperties { FontFamily = "Calibri", FontSize = 11, Color = defaultColor };
+        foreach (var p in txBody.Elements().Where(e => e.Name.LocalName == "p"))
+        {
+            RunProperties Font(XElement? rPr)
+            {
+                var font = baseFont;
+                if (rPr is null) return font;
+                if (rPr.Attribute("sz") is { } sz && double.TryParse(sz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var size) && size > 0) font = font with { FontSize = size / 100 };
+                if (rPr.Attribute("b") is { } b) font = font with { Bold = b.Value is "1" or "true" };
+                if (rPr.Attribute("i") is { } i) font = font with { Italic = i.Value is "1" or "true" };
+                if ((string?)rPr.Attribute("u") is { } u) font = font with { Underline = u == "none" ? UnderlineStyle.None : u.StartsWith("dbl", StringComparison.Ordinal) ? UnderlineStyle.Double : UnderlineStyle.Single };
+                if ((string?)rPr.Attribute("strike") is { } strike) font = font with { Strike = strike != "noStrike" };
+                if ((string?)Child(rPr, "latin")?.Attribute("typeface") is { Length: > 0 } face && !face.StartsWith('+')) font = font with { FontFamily = face };
+                if (Child(rPr, "solidFill") is { } fillElement && Resolve(fillElement, theme) is { } color) font = font with { Color = color };
+                return font;
+            }
+
+            var runs = new List<CellTextRun>();
+            foreach (var child in p.Elements())
+            {
+                switch (child.Name.LocalName)
+                {
+                    case "r": runs.Add(new CellTextRun(Child(child, "t")?.Value ?? "", Font(Child(child, "rPr")))); break;
+                    case "br": runs.Add(new CellTextRun("\n", Font(Child(child, "rPr")))); break;
+                    case "fld": runs.Add(new CellTextRun(Child(child, "t")?.Value ?? "", Font(Child(child, "rPr")))); break;
+                }
+            }
+            var alignment = (string?)Child(p, "pPr")?.Attribute("algn") switch
+            {
+                "ctr" => HorizontalAlignment.Center, "r" => HorizontalAlignment.Right, "just" or "dist" => HorizontalAlignment.Justify, _ => HorizontalAlignment.Left,
+            };
+            double emptySize = runs.Count > 0 ? runs.Max(r => r.Font.FontSize) : Font(Child(p, "endParaRPr")).FontSize;
+            result.Add(new ShapeParagraph(alignment, runs, emptySize));
+        }
+        // A text body of empty paragraphs only carries no text.
+        if (result.All(p => p.Runs.Count == 0 || p.Runs.All(r => r.Text.Length == 0))) result.Clear();
+        return result;
     }
 
     private static AnchorPoint Point(XElement? e) => e is null
         ? default
         : new AnchorPoint(
-            (int)Math.Clamp(Number(Child(e, "col")), 0, CellReference.MaxColumns - 1), (int)Math.Clamp(Number(Child(e, "row")), 0, CellReference.MaxRows - 1),
-            Number(Child(e, "colOff")) / EmuPerPoint, Number(Child(e, "rowOff")) / EmuPerPoint);
+            (int)Math.Clamp(Number(Child(e, "col"), null), 0, CellReference.MaxColumns - 1), (int)Math.Clamp(Number(Child(e, "row"), null), 0, CellReference.MaxRows - 1),
+            Number(Child(e, "colOff"), null) / EmuPerPoint, Number(Child(e, "rowOff"), null) / EmuPerPoint);
 
-    private static XElement? Child(XElement? parent, string name) => parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name);
-
-    /// <summary>An element's text or an attribute's value as a number; 0 when absent or malformed.</summary>
+    /// <summary>An element's text as a number; 0 when absent or malformed.</summary>
     private static double Number(XElement? e, string? attribute)
     {
         var text = attribute is null ? e?.Value : (string?)e?.Attribute(attribute);
         return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) ? v : 0;
     }
-
-    private static double Number(XElement? e) => Number(e, null);
 }

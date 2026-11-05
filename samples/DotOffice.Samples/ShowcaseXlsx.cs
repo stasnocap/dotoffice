@@ -36,6 +36,7 @@ internal static class ShowcaseXlsx
             ("Rotation", RotationSheet(), "visible"),
             ("Gradients", GradientSheet(), "visible"),
             ("Pictures", PicturesSheet(), "visible"),
+            ("Shapes", ShapesSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
@@ -63,6 +64,7 @@ internal static class ShowcaseXlsx
         }
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
+        WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
@@ -293,6 +295,59 @@ internal static class ShowcaseXlsx
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 
+    // ------------------------------------------------------------------ shapes
+
+    private static string Fill(string hex) => $"<a:solidFill><a:srgbClr val=\"{hex}\"/></a:solidFill>";
+
+    private static string Line(string hex, double width = 1, string dash = "") =>
+        $"<a:ln w=\"{(long)(width * Emu)}\">{Fill(hex)}{(dash.Length == 0 ? "" : $"<a:prstDash val=\"{dash}\"/>")}</a:ln>";
+
+    private static string Text(string text, string color = "000000", int size = 1100, bool bold = false, string align = "ctr", string anchor = "ctr") =>
+        $"<xdr:txBody><a:bodyPr anchor=\"{anchor}\"/><a:p><a:pPr algn=\"{align}\"/><a:r><a:rPr lang=\"en-US\" sz=\"{size}\" b=\"{(bold ? 1 : 0)}\">{Fill(color)}</a:rPr><a:t>{SecurityElement.Escape(text)}</a:t></a:r></a:p></xdr:txBody>";
+
+    private static string Shape(string preset, string name, string fill, string extra = "", string text = "", int rotation = 0, string flip = "") =>
+        $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm rot=\"{rotation}\"{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm>" +
+        $"<a:prstGeom prst=\"{preset}\"><a:avLst/></a:prstGeom>{(fill.Length == 0 ? "<a:noFill/>" : Fill(fill))}{extra}</xdr:spPr>{text}</xdr:sp>";
+
+    private static void WriteShapes(ZipArchive zip, int sheetNumber)
+    {
+        // The default look Excel gives an inserted shape: no fill or line in spPr, the theme's blue and a darker outline from the style.
+        const string ThemeStyle = "<xdr:style><a:lnRef idx=\"2\"><a:schemeClr val=\"accent1\"><a:shade val=\"50000\"/></a:schemeClr></a:lnRef><a:fillRef idx=\"1\"><a:schemeClr val=\"accent1\"/></a:fillRef>" +
+                                  "<a:effectRef idx=\"0\"><a:schemeClr val=\"accent1\"/></a:effectRef><a:fontRef idx=\"minor\"><a:schemeClr val=\"lt1\"/></a:fontRef></xdr:style>";
+        string themed = "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"Themed\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>" + ThemeStyle + Text("Theme style", "FFFFFF") + "</xdr:sp>";
+        string connector(string flip, string color) =>
+            $"<xdr:cxnSp><xdr:nvCxnSpPr><xdr:cNvPr id=\"4\" name=\"Line\"/><xdr:cNvCxnSpPr/></xdr:nvCxnSpPr><xdr:spPr><a:xfrm{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1\" cy=\"1\"/></a:xfrm><a:prstGeom prst=\"straightConnector1\"><a:avLst/></a:prstGeom>{Line(color, 2.25)}</xdr:spPr></xdr:cxnSp>";
+        string child(string preset, string fill, int x, int y, int w, int h) =>
+            $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"5\" name=\"Part\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"{preset}\"><a:avLst/></a:prstGeom>{Fill(fill)}</xdr:spPr></xdr:sp>";
+        var group = "<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id=\"6\" name=\"Group\"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2000\" cy=\"1000\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"2000\" cy=\"1000\"/></a:xfrm></xdr:grpSpPr>" +
+                    child("ellipse", "ED7D31", 0, 0, 1000, 1000) + child("rect", "70AD47", 1000, 250, 1000, 500) + "</xdr:grpSp>";
+        var anchors =
+            OneCell(1, 3, 0, 0, 130, 50, themed) +
+            OneCell(4, 3, 0, 0, 130, 50, Shape("roundRect", "Rounded", "FFF2CC", Line("BF9000", 1.5), Text("Rounded rectangle", "7F6000", bold: true))) +
+            OneCell(7, 3, 0, 0, 100, 50, Shape("ellipse", "Oval", "DDEBF7", Line("2F5597", 1, "dash"), Text("Dashed oval", "1F3864"))) +
+            OneCell(1, 8, 0, 0, 90, 60, Shape("triangle", "Triangle", "C00000", "", Text("Up", "FFFFFF"))) +
+            OneCell(3, 8, 0, 0, 90, 60, Shape("diamond", "Diamond", "7030A0", "", Text("Diamond", "FFFFFF"))) +
+            OneCell(5, 8, 0, 0, 110, 50, Shape("rightArrow", "Arrow", "00B050", Line("006100"), Text("Right", "FFFFFF"))) +
+            OneCell(7, 8, 0, 0, 90, 60, Shape("hexagon", "Hexagon", "FFC000", Line("7F6000", 2), Text("Hexagon"))) +
+            OneCell(1, 14, 0, 0, 120, 45, Shape("rect", "Rotated", "9DC3E6", Line("2E75B6", 1), Text("Rotated 20°", "1F3864"), rotation: 20 * 60000)) +
+            OneCell(4, 14, 0, 0, 110, 45, Shape("rect", "Text box", "", "", Text("A text box has no fill or outline, only text.", "404040", 1000, align: "l", anchor: "t"))) +
+            OneCell(7, 14, 0, 0, 100, 50, group) +
+            OneCell(1, 20, 0, 0, 120, 40, connector("", "C00000")) +
+            OneCell(4, 20, 0, 0, 120, 40, connector(" flipV=\"1\"", "2F5597")) +
+            OneCell(7, 20, 0, 0, 100, 0, connector("", "7F7F7F"));
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+    }
+
+    private static string ShapesSheet()
+    {
+        var rows = Row(1, Str("A1", "Shapes, text boxes and lines", Bold)) + Row(3, Str("A3", "Shapes:")) + Row(8, Str("A8", "Geometry:")) + Row(12, Str("A12", "Rotation, text box, group:")) +
+                   Row(20, Str("A20", "Lines:"));
+        return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>", rows,
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+    }
+
     // ------------------------------------------------------------------ comments
 
     private static void WriteComments(ZipArchive zip, int sheetNumber, StringBuilder content)
@@ -375,7 +430,7 @@ internal static class ShowcaseXlsx
             OneCell(5, 24, 4, 2, 56, 35, Pic("Flipped vertically", flip: " flipV=\"1\"")) +                                      // mirrored top to bottom
             Absolute(300, 260, 90, 56, Pic("Absolute")) +                                                                         // measured from A1
             TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
-            "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Shape\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
+            "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Freeform\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:custGeom/></xdr:spPr></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/></Relationships>");
