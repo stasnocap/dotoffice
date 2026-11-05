@@ -214,7 +214,7 @@ internal static class XlsxDrawings
 
     private static ShapeGeometry? GeometryOf(string? preset) => preset switch
     {
-        null or "rect" or "flowChartProcess" or "snip1Rect" or "snip2SameRect" => ShapeGeometry.Rectangle,
+        null or "rect" or "flowChartProcess" => ShapeGeometry.Rectangle,
         "roundRect" or "flowChartAlternateProcess" or "flowChartTerminator" => ShapeGeometry.RoundRectangle,
         "ellipse" or "flowChartConnector" => ShapeGeometry.Ellipse,
         "triangle" => ShapeGeometry.Triangle,
@@ -245,6 +245,13 @@ internal static class XlsxDrawings
             ? Math.Clamp(v / 100_000.0, min, max) : fallback;
     }
 
+    /// <summary>The raw value of a preset's named adjust value (<c>val N</c>), or null when it does not state one.</summary>
+    private static double? AdjustRaw(XElement? prstGeom, string name)
+    {
+        var gd = prstGeom?.Elements().FirstOrDefault(e => e.Name.LocalName == "avLst")?.Elements().FirstOrDefault(e => (string?)e.Attribute("name") == name);
+        return gd?.Attribute("fmla")?.Value is { } f && f.StartsWith("val ", StringComparison.Ordinal) && double.TryParse(f.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
+    }
+
     private static void ReadShape(State state, AnchorFrame anchor, FrameFraction frame, XElement shape)
     {
         var context = state.Context;
@@ -271,6 +278,12 @@ internal static class XlsxDrawings
         {
             paths = [new ShapePath(route, false, Fill: false)];
             geometry = ShapeGeometry.Line;
+        }
+        else if (preset is not null && GeometryOf(preset) is null
+                 && PresetPaths.Build(preset, Number(Child(xfrm, "ext"), "cx"), Number(Child(xfrm, "ext"), "cy"), name => AdjustRaw(Child(spPr, "prstGeom"), name)) is { Count: > 0 } presetPaths)
+        {
+            paths = presetPaths;
+            geometry = connector ? ShapeGeometry.Line : ShapeGeometry.Custom;
         }
         else
         {

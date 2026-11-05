@@ -111,11 +111,11 @@ public class XlsxShapeTests
     [Fact]
     public void Unknown_geometry_is_drawn_as_a_rectangle_with_one_approximation_warning_and_custom_geometry_is_not_drawn()
     {
-        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp("<a:prstGeom prst=\"cloud\"/>" + SolidRed)) + OneCellAnchor(2, 2, 10, 10, Sp("<a:prstGeom prst=\"wave\"/>" + SolidRed)) +
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp("<a:prstGeom prst=\"curvedRightArrow\"/>" + SolidRed)) + OneCellAnchor(2, 2, 10, 10, Sp("<a:prstGeom prst=\"wave\"/>" + SolidRed)) +
                                      OneCellAnchor(4, 4, 10, 10, CustomShape));
         Assert.Equal([ShapeGeometry.Rectangle, ShapeGeometry.Rectangle], sheet.Shapes.Select(s => s.Geometry));
         Assert.Equal(["xlsx.drawing", "xlsx.drawing-approximated"], warnings.Warnings.Select(w => w.Code).OrderBy(c => c));
-        Assert.Contains("cloud", warnings.Warnings.Single(w => w.Code == "xlsx.drawing-approximated").Message);
+        Assert.Contains("curvedRightArrow", warnings.Warnings.Single(w => w.Code == "xlsx.drawing-approximated").Message);
     }
 
     [Fact]
@@ -450,5 +450,126 @@ public class XlsxShapeTests
         var (flat, _) = Read(OneCellAnchor(1, 1, 200, 100, Group("0", Child(0))));
         Assert.Empty(flat.Shapes[0].GroupTurns);
         Assert.Equal(-30, flat.Shapes[0].Rotation);
+    }
+
+    private static string Preset(string preset, string adjust = "") => $"<a:prstGeom prst=\"{preset}\"><a:avLst>{adjust}</a:avLst></a:prstGeom>" + SolidRed;
+    private static string Gd(string name, int value) => $"<a:gd name=\"{name}\" fmla=\"val {value}\"/>";
+
+    [Theory]
+    [InlineData("star4", 8)]
+    [InlineData("star6", 12)]
+    [InlineData("star8", 16)]
+    [InlineData("star24", 48)]
+    [InlineData("heptagon", 7)]
+    [InlineData("decagon", 10)]
+    [InlineData("dodecagon", 12)]
+    [InlineData("flowChartMerge", 3)]
+    [InlineData("flowChartManualInput", 4)]
+    [InlineData("flowChartOffpageConnector", 5)]
+    [InlineData("snip1Rect", 5)]
+    [InlineData("snip2SameRect", 8)]
+    public void Polygon_presets_are_drawn_with_their_own_corners(string preset, int corners)
+    {
+        var shape = ReadOne(Sp(Preset(preset)));
+        Assert.Equal(ShapeGeometry.Custom, shape.Geometry);
+        var path = Assert.Single(shape.Paths!);
+        Assert.True(path.Closed);
+        Assert.Equal(corners, path.Points.Count);
+        Assert.All(path.Points, p => { Assert.InRange(p.X, -1e-9, 1 + 1e-9); Assert.InRange(p.Y, -1e-9, 1 + 1e-9); });
+    }
+
+    [Fact]
+    public void Stars_fill_the_frame_and_follow_the_inner_radius()
+    {
+        var star = ReadOne(Sp(Preset("star4"))).Paths![0].Points;
+        Assert.Contains(star, p => Math.Abs(p.X - 0.5) < 1e-9 && Math.Abs(p.Y) < 1e-9);        // the top point
+        Assert.Contains(star, p => Math.Abs(p.X - (0.5 + 0.125 * Math.Cos(Math.PI / 4))) < 1e-9 && Math.Abs(p.Y - (0.5 - 0.125 * Math.Sin(Math.PI / 4))) < 1e-9); // notch at 25 % of the radius, 45 deg
+        var fat = ReadOne(Sp(Preset("star4", Gd("adj", 50000)))).Paths![0].Points;               // adj 50000: notches on the points' circle
+        Assert.Contains(fat, p => Math.Abs(p.X - 0.5 - 0.25 * Math.Sqrt(2)) < 1e-9);
+    }
+
+    [Fact]
+    public void Wedge_callouts_leave_the_side_the_tip_is_nearest_and_reach_the_tip()
+    {
+        // Default tip: 20.8 % left of the center, 62.5 % below it: the wedge hangs from the bottom edge.
+        var wedge = ReadOne(Sp(Preset("wedgeRectCallout"))).Paths![0].Points;
+        Assert.Contains(wedge, p => Math.Abs(p.X - (0.5 - 0.20833)) < 1e-9 && Math.Abs(p.Y - 1.125) < 1e-9);
+        Assert.Contains(wedge, p => Math.Abs(p.X - 1.0 / 6) < 1e-9 && Math.Abs(p.Y - 1) < 1e-9);
+        Assert.Contains(wedge, p => Math.Abs(p.X - 5.0 / 12) < 1e-9 && Math.Abs(p.Y - 1) < 1e-9);
+        // The tip to the right of the box: the wedge sits in the right edge.
+        var right = ReadOne(Sp(Preset("wedgeRectCallout", Gd("adj1", 80000) + Gd("adj2", 10000)))).Paths![0].Points;
+        Assert.Contains(right, p => Math.Abs(p.X - 1.3) < 1e-9 && Math.Abs(p.Y - 0.6) < 1e-9);
+        Assert.Contains(right, p => Math.Abs(p.X - 1) < 1e-9 && Math.Abs(p.Y - 7.0 / 12) < 1e-9);
+        // Rounded and elliptic callouts and the cloud callout all keep their tip.
+        Assert.Contains(ReadOne(Sp(Preset("wedgeRoundRectCallout"))).Paths![0].Points, p => Math.Abs(p.Y - 1.125) < 1e-9);
+        Assert.Contains(ReadOne(Sp(Preset("wedgeEllipseCallout"))).Paths![0].Points, p => Math.Abs(p.X - (0.5 - 0.20833)) < 1e-9 && Math.Abs(p.Y - 1.125) < 1e-9);
+        Assert.True(ReadOne(Sp(Preset("cloudCallout"))).Paths!.Count == 4);
+    }
+
+    [Fact]
+    public void Line_callouts_are_a_box_and_a_line_to_their_anchor()
+    {
+        var shape = ReadOne(Sp(Preset("borderCallout1")));
+        Assert.Equal(2, shape.Paths!.Count);
+        Assert.False(shape.Paths[1].Fill);
+        Assert.Equal([(-0.08333, 0.1875), (-0.38333, 1.125)], shape.Paths[1].Points);
+    }
+
+    [Fact]
+    public void Flow_chart_shapes_brackets_and_solids_have_paths()
+    {
+        Assert.Equal(3, ReadOne(Sp(Preset("flowChartPredefinedProcess"))).Paths!.Count);   // box and two bars
+        Assert.Equal(2, ReadOne(Sp(Preset("flowChartMagneticDisk"))).Paths!.Count);        // body and the top's front edge
+        Assert.Equal(3, ReadOne(Sp(Preset("cube"))).Paths!.Count);                          // front, top and side faces
+        var bracket = ReadOne(Sp(Preset("leftBracket"))).Paths!;
+        Assert.False(bracket[0].Stroke);                                                    // the fill carries no stroke
+        Assert.False(bracket[1].Fill);                                                      // the line carries no fill
+        Assert.False(bracket[1].Closed);
+        var right = ReadOne(Sp(Preset("rightBracket"))).Paths![1].Points;
+        Assert.Equal(0.0, right[0].X, 9);                                                   // mirrored: the arms start at the left, the spine is on the right
+        Assert.Contains(right, p => Math.Abs(p.X - 1) < 1e-9 && p.Y > 0.9 && p.Y < 0.95);   // the spine runs down the right edge
+        var brace = ReadOne(Sp(Preset("leftBrace"))).Paths![1].Points;
+        Assert.Equal((1.0, 1.0), (Math.Round(brace[0].X, 9), Math.Round(brace[0].Y, 9)));
+        Assert.Contains(brace, p => Math.Abs(p.X) < 1e-9 && Math.Abs(p.Y - 0.5) < 1e-9);   // the point of the brace, halfway down
+    }
+
+    [Fact]
+    public void Can_cloud_heart_and_the_arrows_are_drawn()
+    {
+        var can = ReadOne(Sp(Preset("can"))).Paths!;
+        Assert.Equal(2, can.Count);
+        Assert.Contains(can[0].Points, p => Math.Abs(p.X - 0.5) < 1e-9 && Math.Abs(p.Y - 0) < 1e-9); // the top of the lid
+        var cloud = ReadOne(Sp(Preset("cloud"))).Paths!;
+        Assert.Equal(9 * 12, Assert.Single(cloud).Points.Count);
+        Assert.Equal(0.0, cloud[0].Points.Min(p => p.X), 9);
+        Assert.Equal(1.0, cloud[0].Points.Max(p => p.Y), 9);
+        Assert.Single(ReadOne(Sp(Preset("heart"))).Paths!);
+        Assert.Equal(10, ReadOne(Sp(Preset("leftRightArrow"))).Paths![0].Points.Count);
+        Assert.Equal(10, ReadOne(Sp(Preset("upDownArrow"))).Paths![0].Points.Count);
+        Assert.Equal(9, ReadOne(Sp(Preset("sun"))).Paths!.Count);                            // eight rays and the disc
+        Assert.Equal(12, ReadOne(Sp(Preset("mathPlus"))).Paths![0].Points.Count);
+    }
+
+    [Fact]
+    public void Pie_arc_and_block_arc_follow_their_angles()
+    {
+        var pie = ReadOne(Sp(Preset("pie", Gd("adj1", 0) + Gd("adj2", 5_400_000)))).Paths![0].Points; // a quarter from 3 o'clock to 6
+        Assert.Equal((0.5, 0.5), pie[0]);
+        Assert.Equal((1.0, 0.5), pie[1]);
+        Assert.Equal(0.5, pie[^1].X, 9);
+        Assert.Equal(1.0, pie[^1].Y, 9);
+        var arc = ReadOne(Sp(Preset("arc"))).Paths!;                                          // default: from 12 o'clock to 3
+        Assert.False(arc[1].Fill);
+        Assert.Equal(0.5, arc[1].Points[0].X, 9);
+        Assert.Equal(1.0, arc[1].Points[^1].X, 9);
+        Assert.Equal(0.5, arc[1].Points[^1].Y, 9);
+    }
+
+    [Fact]
+    public void Hexagons_and_five_pointed_stars_take_their_adjust_values()
+    {
+        Assert.Null(ReadOne(Sp(Preset("hexagon"))).Adjust1 is { } d ? null : (object?)null);
+        Assert.Equal(0.4, ReadOne(Sp(Preset("hexagon", Gd("adj", 40000)))).Adjust1);
+        Assert.Equal(0.3, ReadOne(Sp(Preset("star5", Gd("adj", 30000)))).Adjust1);
     }
 }

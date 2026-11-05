@@ -216,7 +216,7 @@ public sealed partial class SheetLayoutEngine
             }
             case ShapeGeometry.Hexagon:
             {
-                double o = Math.Min(m * 0.25, w / 2);
+                double o = Math.Clamp(m * (shape.Adjust1 ?? 0.25), 0, w / 2);
                 return [(o, 0), (w - o, 0), (w, h / 2), (w - o, h), (o, h), (0, h / 2)];
             }
             case ShapeGeometry.Pentagon:
@@ -248,7 +248,7 @@ public sealed partial class SheetLayoutEngine
                 double halfWidth = Math.Cos(18 * Math.PI / 180), depth = 1 + Math.Cos(36 * Math.PI / 180); // the points' spread across and down
                 for (int k = 0; k < 10; k++)
                 {
-                    double angle = (-90 + 36 * k) * Math.PI / 180, radius = k % 2 == 0 ? 1 : 0.382;
+                    double angle = (-90 + 36 * k) * Math.PI / 180, radius = k % 2 == 0 ? 1 : Math.Clamp(shape.Adjust1 ?? 0.19098, 0, 0.5) * 2;
                     points.Add(((radius * Math.Cos(angle) + halfWidth) / (2 * halfWidth) * w, (radius * Math.Sin(angle) + 1) / depth * h));
                 }
                 return points;

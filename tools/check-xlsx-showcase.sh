@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Pivot fields" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Pivot fields" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape presets" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -235,6 +235,17 @@ for color in "1 0.7529 0" "0.4392 0.1882 0.6275"; do
   grep -aq "^$color rg$" paths-qdf.pdf || fail "shape or arrowhead fill $color is missing"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape paths"; then fail "the shape paths sheet should not warn"; fi
+
+# Shape presets: every shape is drawn from its own geometry (none is reported or left a rectangle), and the labels are in place.
+preset_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape presets" ] && preset_page=$p; done
+[ "$preset_page" != 0 ] || fail "no page for the shape presets sheet"
+preset_text=$(page_text "$preset_page")
+for text in "wedgeRectCallout" "cloudCallout" "Document" "MagneticDisk" "leftBrace" "lightningBolt" "star24" "blockArc"; do
+  [[ $preset_text == *"$text"* ]] || fail "missing preset label: $text"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape presets"; then fail "the shape presets sheet should not warn"; fi
+if grep -F "drawn as rectangles" "$log" | grep -qE "star|Callout|cloud|flowChart|Bracket|Brace|can|cube"; then fail "a preset is still drawn as a rectangle"; fi
 
 # Charts: six drawn on one page (titles, legend entries, axis labels, pie percentages, series colors), the stock chart is the only one reported.
 chart_pages=0; chart_page=0

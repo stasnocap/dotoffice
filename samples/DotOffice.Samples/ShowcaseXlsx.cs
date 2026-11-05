@@ -38,6 +38,7 @@ internal static class ShowcaseXlsx
             ("Pictures", PicturesSheet(), "visible"),
             ("Shapes", ShapesSheet(), "visible"),
             ("Shape paths", ShapePathsSheet(), "visible"),
+            ("Shape presets", ShapePresetsSheet(), "visible"),
             ("Shape fills", ShapeFillsSheet(), "visible"),
             ("Charts", ChartsSheet(), "visible"),
             ("More charts", MoreChartsSheet(), "visible"),
@@ -93,6 +94,7 @@ internal static class ShowcaseXlsx
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot custom") + 1, "Showcase pivot", "", stripes: true);
         WritePivotFields(zip, sheets.FindIndex(x => x.Name == "Pivot fields") + 1);
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
+        WriteShapePresets(zip, sheets.FindIndex(x => x.Name == "Shape presets") + 1);
         WriteShapeFills(zip, sheets.FindIndex(x => x.Name == "Shape fills") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
@@ -442,6 +444,38 @@ internal static class ShowcaseXlsx
     private static string ShapePathsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
         Row(1, Str("A1", "Shape paths: gradients, arrowheads, bent connectors, custom geometry", Bold)) + Row(3, Str("A3", "Gradient fills:")) + Row(9, Str("A9", "Arrowheads:")) + Row(13, Str("A13", "Connectors:")) + Row(19, Str("A19", "Custom geometry:")) + Row(26, Str("A26", "More presets and adjust values:")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+
+    private static readonly string[] PresetNames =
+    [
+        "star4", "star6", "star8", "star10", "star24", "heptagon", "decagon", "dodecagon",
+        "wedgeRectCallout", "wedgeRoundRectCallout", "wedgeEllipseCallout", "cloudCallout", "borderCallout1", "cloud",
+        "flowChartDocument", "flowChartPredefinedProcess", "flowChartInternalStorage", "flowChartManualInput", "flowChartManualOperation", "flowChartDelay",
+        "flowChartMerge", "flowChartDisplay", "flowChartOffpageConnector", "flowChartOr", "flowChartSummingJunction", "flowChartMagneticDisk",
+        "leftBracket", "rightBracket", "leftBrace", "rightBrace", "can", "cube", "bevel", "foldedCorner",
+        "heart", "lightningBolt", "sun", "moon", "smileyFace", "teardrop", "leftRightArrow", "upDownArrow",
+        "mathPlus", "mathMinus", "mathEqual", "snip1Rect", "snip2SameRect", "round1Rect", "round2SameRect", "pie", "chord", "arc", "blockArc",
+    ];
+
+    private static string ShapePresetsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"9\" width=\"13\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "Shape presets: stars, callouts, flow charts, brackets, solids, symbols", Bold)),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+
+    private static void WriteShapePresets(ZipArchive zip, int sheetNumber)
+    {
+        var anchors = new StringBuilder();
+        for (int i = 0; i < PresetNames.Length; i++)
+        {
+            // Eight to a row, each in a box with the name below it; the callouts leave room for their tips.
+            int column = i % 8, row = 3 + i / 8 * 6;
+            var name = PresetNames[i];
+            var fill = new[] { "2F5597", "C55A11", "548235", "7030A0", "BF9000", "C00000" }[i / 8 % 6];
+            anchors.Append(OneCell(column, row, 4, 4, 70, 50, Shape(name, name, fill, Line("203864", 1))));
+            anchors.Append(OneCell(column, row + 4, 0, 6, 92, 14, Shape("rect", "Label " + name, "", "", Text(name.Replace("flowChart", ""), "000000", 600))));
+        }
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+    }
 
     private static string Pattern(string preset, string foreground, string background) =>
         $"<a:pattFill prst=\"{preset}\"><a:fgClr><a:srgbClr val=\"{foreground}\"/></a:fgClr><a:bgClr><a:srgbClr val=\"{background}\"/></a:bgClr></a:pattFill>";
