@@ -858,6 +858,7 @@ internal static class ShowcaseXlsx
         Entry(zip, "xl/drawings/vmlDrawing1.vml",
             "<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\">" +
             "<v:shape id=\"LH\" o:spid=\"_x0000_s1025\" type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;width:54pt;height:30pt;z-index:1\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/><o:lock v:ext=\"edit\" rotation=\"t\"/></v:shape>" +
+            "<v:shape id=\"LHFIRST\" o:spid=\"_x0000_s1027\" type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;width:80pt;height:24pt;z-index:3\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/></v:shape>" +
             "<v:shape id=\"RF\" o:spid=\"_x0000_s1026\" type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;width:36pt;height:36pt;z-index:2\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/></v:shape></xml>");
         Entry(zip, "xl/drawings/_rels/vmlDrawing1.vml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/></Relationships>");
@@ -1044,7 +1045,7 @@ internal static class ShowcaseXlsx
         var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" +
-            "<headerFooter><oddHeader>&amp;L&amp;G&amp;C&amp;A</oddHeader><oddFooter>&amp;CPage &amp;P of &amp;N&amp;R&amp;G</oddFooter></headerFooter>" +
+            "<headerFooter differentFirst=\"1\"><oddHeader>&amp;L&amp;G&amp;C&amp;A</oddHeader><firstHeader>&amp;L&amp;G&amp;C&amp;A</firstHeader><firstFooter>&amp;CPage &amp;P of &amp;N&amp;R&amp;G</firstFooter><oddFooter>&amp;CPage &amp;P of &amp;N&amp;R&amp;G</oddFooter></headerFooter>" +
             "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"20\" max=\"16383\" man=\"1\"/></rowBreaks><drawing r:id=\"rId1\"/><legacyDrawingHF r:id=\"rId2\"/>");
     }
 

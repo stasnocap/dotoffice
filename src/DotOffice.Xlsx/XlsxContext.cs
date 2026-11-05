@@ -314,7 +314,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             {
                 var key = ((string?)shape.Attribute("id") ?? "").ToUpperInvariant();
                 if (key.Length < 2 || key[0] is not ('L' or 'C' or 'R') || key[1] is not ('H' or 'F')) continue;
-                key = key[..2];
+                // Excel (and EPPlus, which copies its files) name the first-page and even-page variants LHFIRST, RFEVEN, ...
+                if (key.Length > 2 && key[2..] is not ("FIRST" or "EVEN")) continue;
                 var data = shape.Elements().FirstOrDefault(e => e.Name.LocalName == "imagedata");
                 var relId = data?.Attributes().FirstOrDefault(a => a.Name.LocalName == "relid")?.Value;
                 if (relId is null || !vmlRels.TryGetValue(relId, out var image) || image.IsExternal || !Package.Exists(image.Target)) continue;

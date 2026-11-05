@@ -745,6 +745,26 @@ public class SheetHeaderFooterTests
     }
 
     [Fact]
+    public void First_page_and_even_page_headers_use_their_own_picture_or_fall_back_to_the_default()
+    {
+        var logo = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [255, 0, 0]), "logo");
+        var sheet = WithText("S", 120);
+        sheet.PageSetup.Header = new HeaderFooterText
+        {
+            Odd = new HeaderFooterParts("&G", "", ""),
+            Even = new HeaderFooterParts("&G", "", ""),
+            First = new HeaderFooterParts("&G", "", ""),
+        };
+        sheet.PageSetup.HeaderFooterPictures["LH"] = new HeaderFooterPicture(logo, 60, 30);
+        sheet.PageSetup.HeaderFooterPictures["LHFIRST"] = new HeaderFooterPicture(logo, 90, 30);
+        var doc = SheetLayoutTests.Layout(sheet);
+        Assert.True(doc.Pages.Count >= 3);
+        Assert.Equal(90, doc.Pages[0].Items.OfType<ImageItem>().Single().Width); // first page: its own picture
+        Assert.Equal(60, doc.Pages[1].Items.OfType<ImageItem>().Single().Width); // even page without one: the default
+        Assert.Equal(60, doc.Pages[2].Items.OfType<ImageItem>().Single().Width);
+    }
+
+    [Fact]
     public void Font_codes_change_size_and_weight_and_double_ampersand_is_literal()
     {
         var sheet = WithText("S");

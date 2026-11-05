@@ -73,23 +73,25 @@ public sealed partial class SheetLayoutEngine
     {
         var setup = record.Sheet.PageSetup;
         bool first = record.IndexInSheet == 0;
-        static HeaderFooterParts Pick(HeaderFooterText text, bool first, int number) =>
-            first && text.First is { } f ? f : number % 2 == 0 && text.Even is { } e ? e : text.Odd;
-        var header = Pick(setup.Header, first, number);
-        var footer = Pick(setup.Footer, first, number);
+        static (HeaderFooterParts Parts, string Variant) Pick(HeaderFooterText text, bool first, int number) =>
+            first && text.First is { } f ? (f, "FIRST") : number % 2 == 0 && text.Even is { } e ? (e, "EVEN") : (text.Odd, "");
+        var (header, headerVariant) = Pick(setup.Header, first, number);
+        var (footer, footerVariant) = Pick(setup.Footer, first, number);
         if (header.IsEmpty && footer.IsEmpty) return;
         var context = new FieldContext(number, total, record.Sheet.Name, workbook.Title ?? "", setup.HeaderFooterScaleWithDocument ? record.Scale : 1);
         var page = record.Page;
         double left = setup.Margins.Left, right = page.Width - setup.Margins.Right;
 
-        void Part(string text, double anchorLeft, double anchorRight, int alignment, bool isHeader)
+        void Part(string text, double anchorLeft, double anchorRight, int alignment, bool isHeader, string variant)
         {
             if (string.IsNullOrEmpty(text)) return;
             // A picture (&G) sits above the section's text, as wide and high as its drawing says (scaled with the sheet).
             HeaderFooterPicture? picture = null;
             if (text.Contains("&G", StringComparison.Ordinal))
             {
-                setup.HeaderFooterPictures.TryGetValue(string.Concat("LCR"[alignment], isHeader ? 'H' : 'F'), out picture);
+                // The first-page and even-page variants have their own pictures; without one the default picture is used.
+                string key = string.Concat("LCR"[alignment], isHeader ? 'H' : 'F');
+                if (!setup.HeaderFooterPictures.TryGetValue(key + variant, out picture)) setup.HeaderFooterPictures.TryGetValue(key, out picture);
                 text = text.Replace("&G", "", StringComparison.Ordinal);
             }
             var lines = text.Replace("\r\n", "\n").Split('\n').Select(l => BuildHeaderLine(l, context)).Where(l => l is not null).Select(l => l!).ToList();
@@ -126,11 +128,11 @@ public sealed partial class SheetLayoutEngine
             }
         }
 
-        foreach (var (parts, isHeader) in new[] { (header, true), (footer, false) })
+        foreach (var (parts, isHeader, variant) in new[] { (header, true, headerVariant), (footer, false, footerVariant) })
         {
-            Part(parts.Left, left, right, 0, isHeader);
-            Part(parts.Center, left, right, 1, isHeader);
-            Part(parts.Right, left, right, 2, isHeader);
+            Part(parts.Left, left, right, 0, isHeader, variant);
+            Part(parts.Center, left, right, 1, isHeader, variant);
+            Part(parts.Right, left, right, 2, isHeader, variant);
         }
     }
 

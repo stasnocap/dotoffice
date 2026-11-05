@@ -24,6 +24,17 @@ public class XlsxPageSetupTests
     }
 
     [Fact]
+    public void Header_footer_pictures_of_the_first_page_and_even_page_variants_are_kept_apart()
+    {
+        var png = PngTestEncoder.Encode(1, 1, 2, 8, [0, 0, 255]);
+        var builder = new XlsxBuilder().AddSheet("S", "", "", "<headerFooter><oddHeader>&amp;L&amp;G</oddHeader></headerFooter>" + XlsxBuilder.HeaderFooterPicturesElement)
+            .AddHeaderFooterPictures(1, png, ("LH", "width:10pt;height:10pt"), ("LHFIRST", "width:20pt;height:10pt"), ("RFEVEN", "width:30pt;height:10pt"), ("LHODD", "width:1pt;height:1pt"));
+        var pictures = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions()).Sheets[0].PageSetup.HeaderFooterPictures;
+        Assert.Equal(["LH", "LHFIRST", "RFEVEN"], pictures.Keys.Order());
+        Assert.Equal(20, pictures["LHFIRST"].Width);
+    }
+
+    [Fact]
     public void Header_footer_pictures_with_a_missing_part_warn_once()
     {
         var warnings = new ConversionWarningList();
