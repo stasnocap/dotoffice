@@ -38,6 +38,7 @@ internal static class ShowcaseXlsx
             ("Pictures", PicturesSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
+            ("Areas", AreasSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -74,7 +75,8 @@ internal static class ShowcaseXlsx
         Entry(zip, "xl/_rels/workbook.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
         Entry(zip, "xl/workbook.xml",
             $"<workbook xmlns=\"{Main}\" xmlns:r=\"{Rel}\"><sheets>{sheetEntries}</sheets>" +
-            "<definedNames><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName></definedNames></workbook>");
+            "<definedNames><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName>" +
+            $"<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Areas")}\">Areas!$A$1:$C$3,Areas!$E$5:$F$7,Areas!$A$10:$B$11</definedName></definedNames></workbook>");
         Entry(zip, "xl/styles.xml", Styles);
     }
 
@@ -283,6 +285,16 @@ internal static class ShowcaseXlsx
         rows.Append(Row(4, Str("A4", "Rows grow to fit rotated headings; the text is clipped at the cell edges.")));
         var cols = "<cols><col min=\"1\" max=\"4\" width=\"12\" customWidth=\"1\"/><col min=\"5\" max=\"5\" width=\"22\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string AreasSheet()
+    {
+        var rows = Row(1, Str("A1", "Print area one", Bold) + Str("E1", "never printed")) +
+                   Row(3, Str("C3", "End one")) +
+                   Row(5, Str("E5", "Print area two", Bold)) + Row(7, Str("F7", "End two")) +
+                   Row(10, Str("A10", "Print area three", Bold)) + Row(11, Str("B11", "End three")) +
+                   Row(14, Str("A14", "never printed"));
+        return Sheet("", rows, "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 
     private static string PaperSheet()

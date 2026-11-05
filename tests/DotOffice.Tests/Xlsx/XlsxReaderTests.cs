@@ -200,13 +200,13 @@ public class XlsxReaderTests
     }
 
     [Fact]
-    public void Uses_the_first_of_several_print_areas()
+    public void Reads_several_print_areas()
     {
         var warnings = new ConversionWarningList();
         var wb = Read(new XlsxBuilder { DefinedNames = "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">S!$A$1:$B$2,S!$D$4:$E$5</definedName>" }
             .AddSheet("S"), warnings);
-        Assert.Equal(new CellRange(0, 0, 1, 1), wb.Sheets[0].PageSetup.PrintArea);
-        Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.print-area-multiple");
+        Assert.Equal([new CellRange(0, 0, 1, 1), new CellRange(3, 3, 4, 4)], wb.Sheets[0].PageSetup.PrintAreas);
+        Assert.Empty(warnings.Warnings);
     }
 
     [Fact]

@@ -433,9 +433,18 @@ public sealed class SheetLayoutEngine
 
         public void Run()
         {
-            if (FindRange() is not { } range) return;
-            _range = range;
             foreach (var merge in _sheet.Merges) _anchors[(merge.FirstRow, merge.FirstColumn)] = merge;
+            // Each print area is printed as its own page set (Excel starts a new page for every area).
+            if (_setup.PrintAreas.Count == 0) RunRange(null);
+            else foreach (var area in _setup.PrintAreas) RunRange(area);
+        }
+
+        private void RunRange(CellRange? area)
+        {
+            if (FindRange(area) is not { } range) return;
+            _range = range;
+            _rowHeights.Clear();
+            _blocks.Clear();
 
             var columns = Enumerable.Range(_range.FirstColumn, _range.ColumnCount).Where(c => _sheet.ColumnWidth(c) > 0).ToList();
             ComputeRowHeights();
@@ -482,7 +491,7 @@ public sealed class SheetLayoutEngine
 
         // ---- range
 
-        private CellRange? FindRange()
+        private CellRange? FindRange(CellRange? printArea)
         {
             int r0 = int.MaxValue, c0 = int.MaxValue, r1 = -1, c1 = -1;
             foreach (var (row, column) in _sheet.Cells.Keys)
@@ -507,7 +516,7 @@ public sealed class SheetLayoutEngine
                 r1 = Math.Max(r1, merge.LastRow);
                 c1 = Math.Max(c1, merge.LastColumn);
             }
-            if (_setup.PrintArea is { } area)
+            if (printArea is { } area)
             {
                 // A whole-column or whole-row area would print a million blank rows; stop at the last used cell.
                 int lastRow = area.RowCount > 100_000 && r1 >= 0 ? Math.Min(area.LastRow, r1) : area.LastRow;

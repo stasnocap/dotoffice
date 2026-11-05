@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -105,6 +105,21 @@ bad=$(grep -ac '^1 0.7804 0.8078 rg$' conditional-qdf.pdf || true)
 [ "$bad" -ge 4 ] || fail "expected four cellIs fills, found $bad"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
+
+# Print areas: the three areas of the "Areas" sheet are three separate pages, and nothing outside them is printed.
+area_pages=0
+for p in $(seq 1 "$pages"); do
+  [ "$(header_of "$p")" = "Areas" ] || continue
+  area_pages=$((area_pages + 1))
+  case "$area_pages" in
+    1) [[ $(page_text "$p") == *"End one"* ]] || fail "the first area should print on its own page";;
+    2) [[ $(page_text "$p") == *"End two"* ]] || fail "the second area should print on its own page";;
+    3) [[ $(page_text "$p") == *"End three"* ]] || fail "the third area should print on its own page";;
+  esac
+done
+[ "$area_pages" = 3 ] || fail "expected three pages for the three print areas, found $area_pages"
+if grep -q "never printed" all.txt; then fail "text outside the print areas was printed"; fi
+if grep -E "warning xlsx\.print-area" "$log"; then fail "multiple print areas should not warn any more"; fi
 
 # Paper sizes: the "Paper" sheet is A3 (842 x 1191 pt), every other sheet is A4 or Letter.
 for p in $(seq 1 "$pages"); do

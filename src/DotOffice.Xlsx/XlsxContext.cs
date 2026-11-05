@@ -726,9 +726,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             {
                 var areas = CellReference.ParseAreas(name.Formula).Where(a => a.Range is not null).ToList();
                 if (areas.Count == 0) continue;
-                if (areas.Count > 1)
-                    Options.Warnings.Warn("xlsx.print-area-multiple", $"Sheet '{sheet.Name}' has several print areas; only the first is used.");
-                sheet.PageSetup.PrintArea = areas[0].Range;
+                sheet.PageSetup.PrintAreas.Clear();
+                sheet.PageSetup.PrintAreas.AddRange(areas.Select(a => a.Range!.Value));
             }
             else if (name.Name == "_xlnm.Print_Titles")
             {

@@ -397,16 +397,17 @@ internal static class ConditionalFormatting
             c1 = Math.Max(c1, column);
         }
         var used = r1 < 0 ? (CellRange?)null : new CellRange(r0, c0, r1, c1);
-        var area = sheet.PageSetup.PrintArea;
-        if (area is { } a)
+        var result = used;
+        foreach (var printArea in sheet.PageSetup.PrintAreas)
         {
+            var a = printArea;
             int lastRow = a.RowCount > 100_000 && used is { } u1 ? Math.Min(a.LastRow, u1.LastRow) : a.LastRow;
             int lastColumn = a.ColumnCount > 1_000 && used is { } u2 ? Math.Min(a.LastColumn, u2.LastColumn) : a.LastColumn;
             a = new CellRange(a.FirstRow, a.FirstColumn, Math.Max(lastRow, a.FirstRow), Math.Max(lastColumn, a.FirstColumn));
-            var union = used is { } u ? new CellRange(Math.Min(u.FirstRow, a.FirstRow), Math.Min(u.FirstColumn, a.FirstColumn), Math.Max(u.LastRow, a.LastRow), Math.Max(u.LastColumn, a.LastColumn)) : a;
-            if ((long)union.RowCount * union.ColumnCount <= 4_000_000) return union;
+            var union = result is { } u ? new CellRange(Math.Min(u.FirstRow, a.FirstRow), Math.Min(u.FirstColumn, a.FirstColumn), Math.Max(u.LastRow, a.LastRow), Math.Max(u.LastColumn, a.LastColumn)) : a;
+            if ((long)union.RowCount * union.ColumnCount <= 4_000_000) result = union;
         }
-        return used;
+        return result;
     }
 
     private static CellRange? Intersect(CellRange a, CellRange b)

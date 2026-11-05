@@ -269,6 +269,21 @@ public class SheetLayoutTests
     }
 
     [Fact]
+    public void Each_print_area_is_its_own_page_set()
+    {
+        var sheet = Sheet((0, 0, Text("one")), (3, 3, Text("two")), (6, 0, Text("skipped")), (8, 8, Text("three")));
+        sheet.PageSetup.PrintAreas.Add(new CellRange(0, 0, 1, 1));
+        sheet.PageSetup.PrintAreas.Add(new CellRange(3, 3, 4, 4));
+        sheet.PageSetup.PrintAreas.Add(new CellRange(8, 8, 8, 8));
+        var pages = Layout(sheet).Pages;
+        Assert.Equal(3, pages.Count);
+        Assert.Contains("one", PageText(pages[0]));
+        Assert.Contains("two", PageText(pages[1]));
+        Assert.Contains("three", PageText(pages[2]));
+        Assert.DoesNotContain("skipped", string.Concat(pages.Select(PageText)));
+    }
+
+    [Fact]
     public void Gridlines_are_drawn_only_when_requested()
     {
         var sheet = Sheet((0, 0, Text("a")), (1, 1, Text("b")));

@@ -263,8 +263,19 @@ public sealed class SheetPageSetup
 
     public double FooterDistance { get; set; } = 21.6;
 
-    /// <summary>The range to print; null means the used range.</summary>
-    public CellRange? PrintArea { get; set; }
+    /// <summary>The ranges to print, each as its own page set, in order; empty means the used range.</summary>
+    public List<CellRange> PrintAreas { get; } = [];
+
+    /// <summary>The first range to print; null means the used range. Setting it replaces all print areas.</summary>
+    public CellRange? PrintArea
+    {
+        get => PrintAreas.Count > 0 ? PrintAreas[0] : null;
+        set
+        {
+            PrintAreas.Clear();
+            if (value is { } area) PrintAreas.Add(area);
+        }
+    }
 
     /// <summary>Scale factor, 1.0 = 100%.</summary>
     public double Scale { get; set; } = 1.0;
