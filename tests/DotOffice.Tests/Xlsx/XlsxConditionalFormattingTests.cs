@@ -886,6 +886,16 @@ public class XlsxConditionalFormattingTests
     [InlineData("ISERROR(INDIRECT(\"R0C1\",FALSE))", All)]
     [InlineData("ISERROR(INDIRECT(\"R1C1\",TRUE))", All)]                          // A1 style text that is not A1 style
     [InlineData("INDIRECT(\"A\"&ROW(),TRUE)>20", "A3,A4")]
+    [InlineData("SUM(INDIRECT(\"C2\",FALSE))=10", All)]                          // the whole column B
+    [InlineData("SUM(INDIRECT(\"C1:C2\",FALSE))=110", All)]                      // columns A and B
+    [InlineData("SUM(INDIRECT(\"R2\",FALSE))=22", All)]                          // the whole row 2
+    [InlineData("COUNT(INDIRECT(\"R1:R2\",FALSE))=4", All)]
+    [InlineData("SUM(INDIRECT(\"R\",FALSE))>40", "A4")]                          // the cell's own row: 40 + 4 only for row 4
+    [InlineData("SUM(INDIRECT(\"R[1]\",FALSE))>40", "A3")]                       // the row below
+    [InlineData("INDEX(INDIRECT(\"C[1]\",FALSE),ROW())>2", "A3,A4")]             // the column to the right, by row number
+    [InlineData("SUM(INDIRECT(\"S!C2\",FALSE))=10", All)]                        // on a named sheet
+    [InlineData("ISERROR(INDIRECT(\"R0\",FALSE))", All)]
+    [InlineData("ISERROR(INDIRECT(\"R1:C2\",FALSE))", All)]                      // a row to a column is no reference
     public void INDIRECT_reads_R1C1_text_relative_to_the_cell(string formula, string expected) =>
         Assert.Equal(expected, Filled(formula));
 

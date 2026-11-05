@@ -1074,7 +1074,7 @@ internal static class ShowcaseXlsx
             int r = 4 + i;
             rows.Append(Row(r,
                 Num($"A{r}", scores[i]) + Str($"B{r}", $"Stripe {i + 1}") + Num($"C{r}", mixed[i]) + Num($"D{r}", mixed[i]) + Str($"E{r}", colors[i]) +
-                Num($"F{r}", scores[i]) + Num($"G{r}", scores[i]) + Num($"H{r}", signed[i]) + Num($"I{r}", scores[i]) + Num($"J{r}", scores[i]) + Num($"K{r}", scores[i])));
+                Num($"F{r}", scores[i]) + Num($"G{r}", scores[i]) + Num($"H{r}", signed[i]) + Num($"I{r}", scores[i]) + Num($"J{r}", scores[i]) + Num($"K{r}", scores[i]) + Num($"L{r}", scores[i])));
         }
         rows.Append(Row(15, Str("A15", "Priority, stopIfTrue and relative formulas decide which format wins; fills, fonts, borders and number formats come from the rules.")));
 
@@ -1221,7 +1221,7 @@ internal static class ShowcaseXlsx
         rows.Append(Row(1, Str("A1", "Conditional formatting with lookups, whole columns and an x14-only data bar", Bold)));
         rows.Append(Row(3, Str("A3", "Name: repeats", Header) + Str("B3", "Score: x14 bar", Header) + Str("C3", "VLOOKUP > 60", Header) + Str("D3", "Name total > 100", Header) +
                            Str("E3", "INDEX/MATCH", Header) + Str("F3", "OFFSET > 60", Header) + Str("G3", "INDIRECT < 30", Header) +
-                           Str("H3", "SUMIF > 100", Header) + Str("I3", "COUNTIFS = 1", Header) + Str("J3", "TEXT = 35", Header) + Str("K3", "INDIRECT R1C1 < 30", Header)));
+                           Str("H3", "SUMIF > 100", Header) + Str("I3", "COUNTIFS = 1", Header) + Str("J3", "TEXT = 35", Header) + Str("K3", "INDIRECT R1C1 < 30", Header) + Str("L3", "R1C1 column < 30", Header)));
         for (int i = 0; i < names.Length; i++)
         {
             int r = 4 + i;
@@ -1243,12 +1243,14 @@ internal static class ShowcaseXlsx
         tail.Append(Rule("I4:I10", 6, 9, "COUNTIFS($A$4:$A$10,$A4,$B$4:$B$10,\">50\")=1"));
         tail.Append(Rule("J4:J10", 6, 10, "TEXT(J4,\"0\")=\"35\""));
         tail.Append(Rule("K4:K10", 6, 11, "INDIRECT(\"RC2\",FALSE)<30"));
+        // A whole column in R1C1 text (C[-1], the column to the left), indexed by row: only Eli (24) is under 30.
+        tail.Append(Rule("L4:L10", 6, 12, "INDEX(INDIRECT(\"C[-1]\",FALSE),ROW())<30"));
         tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
         tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
                     "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" priority=\"7\" id=\"{CCCCCCCC-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\" border=\"1\">" +
                     "<x14:cfvo type=\"num\"><xm:f>0</xm:f></x14:cfvo><x14:cfvo type=\"num\"><xm:f>100</xm:f></x14:cfvo><x14:borderColor rgb=\"FF2E75B6\"/></x14:dataBar></x14:cfRule><xm:sqref>B4:B10</xm:sqref></x14:conditionalFormatting>" +
                     "</x14:conditionalFormattings></ext></extLst>");
-        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"11\" width=\"18\" customWidth=\"1\"/></cols>";
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"12\" width=\"16\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
     }
 

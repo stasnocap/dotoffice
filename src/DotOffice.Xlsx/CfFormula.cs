@@ -1016,7 +1016,7 @@ internal static class CfEvaluator
     }
 
     /// <summary>
-    /// A reference in R1C1 notation (<c>R2C3</c>, <c>R[-1]C</c>, <c>RC[2]:R[3]C[2]</c>, optionally after a sheet name and <c>!</c>); the bracketed offsets
+    /// A reference in R1C1 notation (<c>R2C3</c>, <c>R[-1]C</c>, <c>RC[2]:R[3]C[2]</c>, whole rows and columns such as <c>R2</c>, <c>C[-1]</c> and <c>R1:R3</c>, optionally after a sheet name and <c>!</c>); the bracketed offsets
     /// count from the cell the formula is evaluated for. Null when the text is no such reference.
     /// </summary>
     private static CfExpr? ParseR1C1(string text, CfContext ctx)
@@ -1039,7 +1039,24 @@ internal static class CfEvaluator
             if (row < 0 || column < 0 || row >= CellReference.MaxRows || column >= CellReference.MaxColumns) return null;
             return new CfRef(row, true, column, true, sheet);
         }
+        // A whole row (R2, R[1], R) or column (C3, C[-1], C), alone or as a range of them (R2:R5, C1:C[2]).
+        (bool Row, int Index)? Whole(string part)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(part, @"^([RC])(?:(\d+)|\[(-?\d+)\])?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (!m.Success) return null;
+            bool row = char.ToUpperInvariant(m.Groups[1].Value[0]) == 'R';
+            int index = m.Groups[2].Success ? int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) - 1
+                : (row ? ctx.Row : ctx.Column) + (m.Groups[3].Success ? int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture) : 0);
+            return index >= 0 && index < (row ? CellReference.MaxRows : CellReference.MaxColumns) ? (row, index) : null;
+        }
         var parts = t.Split(':');
+        if (parts.Length <= 2 && Whole(parts[0]) is { } firstWhole && (parts.Length == 1 || Whole(parts[1]) is { } lastWhole && lastWhole.Row == firstWhole.Row))
+        {
+            int last = parts.Length == 1 ? firstWhole.Index : Whole(parts[1])!.Value.Index;
+            return firstWhole.Row
+                ? new CfRange(new CfRef(firstWhole.Index, true, 0, true, sheet), new CfRef(last, true, CellReference.MaxColumns - 1, true, sheet))
+                : new CfRange(new CfRef(0, true, firstWhole.Index, true, sheet), new CfRef(CellReference.MaxRows - 1, true, last, true, sheet));
+        }
         if (parts.Length == 1) return One(parts[0]);
         return parts.Length == 2 && One(parts[0]) is { } from && One(parts[1]) is { } to ? new CfRange(from, to) : null;
     }
