@@ -11,13 +11,16 @@ public class XlsxPivotTests
     private static readonly Color Accent1 = Color.TryParseHex("4472C4")!.Value;
 
     /// <summary>Row Labels / Sum header in row 3, four regions in rows 4-7 and a Grand Total in row 8 (columns A and B).</summary>
-    private static (Worksheet Sheet, ConversionWarningList Warnings) Read(string definition, params string[] dxfs)
+    private static (Worksheet Sheet, ConversionWarningList Warnings) Read(string definition, params string[] dxfs) => ReadWith(definition, "", dxfs);
+
+    /// <summary>Like <see cref="Read"/>, with <paramref name="tableStyles"/> (a <c>tableStyles</c> element) in the styles part.</summary>
+    private static (Worksheet Sheet, ConversionWarningList Warnings) ReadWith(string definition, string tableStyles, params string[] dxfs)
     {
         var rows = Row(3, Inline("A3", "Row Labels") + Inline("B3", "Sum of Sales"));
         string[] regions = ["North", "South", "East", "West"];
         for (int i = 0; i < regions.Length; i++) rows += Row(4 + i, Inline($"A{4 + i}", regions[i]) + C($"B{4 + i}", $"{(i + 1) * 100}"));
         rows += Row(8, Inline("A8", "Grand Total") + C("B8", "1000"));
-        var builder = new XlsxBuilder { Styles = StylesWithDxfs(dxfs.Length == 0 ? [Dxf("FFC7CE")] : dxfs) }.AddSheet("S", rows);
+        var builder = new XlsxBuilder { Styles = StylesWithDxfs(dxfs.Length == 0 ? [Dxf("FFC7CE")] : dxfs) + tableStyles }.AddSheet("S", rows);
         builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable1.xml\"/></Relationships>");
         builder.AddPart("xl/pivotTables/pivotTable1.xml", definition);
@@ -79,8 +82,8 @@ public class XlsxPivotTests
     {
         var (noHeaders, _) = Read(Definition("PivotStyleLight16", flags: "showRowHeaders=\"1\" showColHeaders=\"0\""));
         Assert.False(At(noHeaders, "B3").Style.Font.Bold);
-        var (dark, warnings) = Read(Definition("PivotStyleDark3"));
-        Assert.False(At(dark, "B3").Style.Font.Bold);
+        var (unknown, warnings) = Read(Definition("PivotStyleLight99"));
+        Assert.False(At(unknown, "B3").Style.Font.Bold);
         Assert.Contains("is not applied", Assert.Single(warnings.Warnings).Message);
         var (custom, _) = Read(Definition("MyOwnStyle"));
         Assert.Null(At(custom, "B3").Style.Fill);
@@ -165,6 +168,76 @@ public class XlsxPivotTests
     {
         var (sheet, warnings) = Read(Definition("PivotStyleLight16", location: "<location ref=\"nonsense\"/>"));
         Assert.Null(At(sheet, "B3").Style.Fill);
+        Assert.Contains("is not applied", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Theory]
+    [InlineData("PivotStyleLight8")]
+    [InlineData("PivotStyleLight22")]
+    [InlineData("PivotStyleMedium16")]
+    [InlineData("PivotStyleMedium23")]
+    [InlineData("PivotStyleDark1")]
+    [InlineData("PivotStyleDark9")]
+    [InlineData("PivotStyleDark17")]
+    [InlineData("PivotStyleDark28")]
+    public void The_remaining_families_are_drawn_with_a_header_and_a_set_off_grand_total(string style)
+    {
+        var (sheet, warnings) = Read(Definition(style));
+        Assert.True(At(sheet, "B3").Style.Font.Bold);
+        Assert.NotNull(At(sheet, "B3").Style.Fill);
+        Assert.True(At(sheet, "B8").Style.Font.Bold);
+        Assert.Contains("drawn approximately", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void Dark_styles_use_a_dark_shade_of_the_accent_for_the_header_and_a_tinted_body()
+    {
+        var (sheet, _) = Read(Definition("PivotStyleDark3", flags: "showRowHeaders=\"1\" showColHeaders=\"1\" showRowStripes=\"1\""));
+        var header = At(sheet, "A3");
+        Assert.Equal(Color.White, header.Style.Font.Color);
+        var accent2 = Color.TryParseHex("ED7D31")!.Value;
+        Assert.Equal(accent2.Blend(Color.Black, 0.5), header.Style.Fill);
+        Assert.Equal(accent2.Blend(Color.White, 0.8), At(sheet, "B5").Style.Fill);          // body
+        Assert.Equal(accent2.Blend(Color.White, 0.6), At(sheet, "B4").Style.Fill);          // band
+        Assert.Equal(accent2.Blend(Color.Black, 0.5), At(sheet, "B8").Style.Fill);          // grand total
+    }
+
+    private static string Custom(string name, string elements, string attributes = "") =>
+        $"<tableStyles count=\"1\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"><tableStyle name=\"{name}\" {attributes} count=\"3\">{elements}</tableStyle></tableStyles>";
+
+    [Fact]
+    public void A_workbook_table_style_gives_the_pivot_its_dxfs_by_element()
+    {
+        string[] dxfs = [Dxf("FFFFCC"), Dxf("1F3864", "<b/><color rgb=\"FFFFFFFF\"/>"), Dxf("DDEBF7"), Dxf("C6EFCE", "<b/>"), Dxf("FCE4D6")];
+        var elements = "<tableStyleElement type=\"wholeTable\" dxfId=\"0\"/><tableStyleElement type=\"headerRow\" dxfId=\"1\"/><tableStyleElement type=\"firstRowStripe\" dxfId=\"2\"/>" +
+                       "<tableStyleElement type=\"totalRow\" dxfId=\"3\"/><tableStyleElement type=\"secondRowStripe\" dxfId=\"4\"/>";
+        var (sheet, warnings) = ReadWith(Definition("Mine", flags: "showRowHeaders=\"1\" showColHeaders=\"1\" showRowStripes=\"1\""), Custom("Mine", elements, "pivot=\"1\""), dxfs);
+        Assert.Equal(Color.TryParseHex("1F3864"), At(sheet, "B3").Style.Fill);        // headerRow
+        Assert.True(At(sheet, "B3").Style.Font.Bold);
+        Assert.Equal(Color.TryParseHex("DDEBF7"), At(sheet, "B4").Style.Fill);        // first stripe on the first data row
+        Assert.Equal(Color.TryParseHex("FCE4D6"), At(sheet, "B5").Style.Fill);        // second stripe
+        Assert.Equal(Color.TryParseHex("DDEBF7"), At(sheet, "A6").Style.Fill);        // stripes cross the label column
+        Assert.Equal(Color.TryParseHex("C6EFCE"), At(sheet, "B8").Style.Fill);        // totalRow
+        Assert.True(At(sheet, "A8").Style.Font.Bold);
+        Assert.Contains("drawn approximately", Assert.Single(warnings.Warnings).Message);
+        // Without stripes the whole-table format shows everywhere the other elements leave alone.
+        var (plain, _) = ReadWith(Definition("Mine"), Custom("Mine", elements), dxfs);
+        Assert.Equal(Color.TryParseHex("FFFFCC"), At(plain, "B5").Style.Fill);
+    }
+
+    [Fact]
+    public void Custom_column_stripes_alternate_over_data_columns_and_table_only_styles_are_ignored()
+    {
+        string[] dxfs = [Dxf("AAAAAA"), Dxf("BBBBBB")];
+        var elements = "<tableStyleElement type=\"firstColumnStripe\" dxfId=\"0\"/><tableStyleElement type=\"secondColumnStripe\" dxfId=\"1\"/>";
+        var location = "<location ref=\"A3:C8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\"/>";
+        var flags = "showRowHeaders=\"1\" showColHeaders=\"1\" showColStripes=\"1\"";
+        var (sheet, _) = ReadWith(Definition("Mine", location: location, flags: flags), Custom("Mine", elements), dxfs);
+        Assert.Equal(Color.TryParseHex("AAAAAA"), At(sheet, "B5").Style.Fill);
+        Assert.Equal(Color.TryParseHex("BBBBBB"), At(sheet, "C5").Style.Fill);
+        Assert.Null(At(sheet, "A5").Style.Fill);
+        var (tableOnly, warnings) = ReadWith(Definition("Mine", location: location, flags: flags), Custom("Mine", elements, "pivot=\"0\" table=\"1\""), dxfs);
+        Assert.Null(At(tableOnly, "B5").Style.Fill);
         Assert.Contains("is not applied", Assert.Single(warnings.Warnings).Message);
     }
 }

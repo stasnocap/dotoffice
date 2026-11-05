@@ -121,7 +121,8 @@ internal static class XlsxStyles
     internal static Color DefaultIndexedColor(int index) => Color.TryParseHex(LegacyPalette[Math.Clamp(index, 0, LegacyPalette.Length - 1)])!.Value;
 
     /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
-    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs, IReadOnlyList<Color?> Palette, Func<XElement, Dxf> ReadInlineDxf);
+    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs, IReadOnlyList<Color?> Palette, Func<XElement, Dxf> ReadInlineDxf,
+        IReadOnlyDictionary<string, IReadOnlyList<(string Type, int DxfId)>>? PivotStyles = null);
 
     public static Result Read(XmlReader reader, XlsxTheme theme, IConversionWarningSink? warnings)
     {
@@ -196,7 +197,15 @@ internal static class XlsxStyles
             formats.Add(new CellFormat(style, numFmtId, code));
         }
         foreach (var dxf in Children(Child(root, "dxfs"), "dxf")) dxfs.Add(ReadDxf(dxf, numberFormats, Resolve));
-        return new Result(formats, Resolve, dxfs, palette, d => ReadDxf(d, numberFormats, Resolve));
+        // The workbook's own table styles that apply to pivot tables (pivot="0" excludes them): name -> (element type, dxf id) pairs.
+        var pivotStyles = new Dictionary<string, IReadOnlyList<(string Type, int DxfId)>>(StringComparer.Ordinal);
+        foreach (var style in Children(Child(root, "tableStyles"), "tableStyle"))
+        {
+            if ((string?)style.Attribute("name") is not { Length: > 0 } styleName || (string?)style.Attribute("pivot") is "0" or "false") continue;
+            pivotStyles[styleName] = Children(style, "tableStyleElement")
+                .Select(e => ((string?)e.Attribute("type") ?? "", Int(e, "dxfId") ?? -1)).Where(e => e.Item1.Length > 0 && e.Item2 >= 0).ToList();
+        }
+        return new Result(formats, Resolve, dxfs, palette, d => ReadDxf(d, numberFormats, Resolve), pivotStyles);
     }
 
     private static Dxf ReadDxf(XElement dxf, Dictionary<int, string> numberFormats, Func<XElement?, Color?> resolve)

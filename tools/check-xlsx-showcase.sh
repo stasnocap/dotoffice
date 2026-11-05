@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -188,7 +188,25 @@ for name in "Pivot styled" "Pivot banded"; do
     grep -aq "^0.8549 0.8902 0.9529 rg$" "$pivot_file" || fail "the Medium 2 row bands are missing"
   fi
 done
-[ "$(grep -cE "warning xlsx\.pivot" "$log")" = 2 ] || fail "only the two styled pivot tables should be reported"
+# Dark 3 puts a dark shade of accent 2 (50 % black) on the header and grand total over a tinted body; the workbook's own style ("Showcase pivot")
+# gives the header (FFEB9C), the two stripes (DDEBF7 and E4DFEC) and the total row (FFD966) the dxfs its table style names.
+grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot dark'.*PivotStyleDark3.*approximately" || fail "the dark pivot table should be reported as approximated"
+grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot custom'.*Showcase pivot.*approximately" || fail "the custom-style pivot table should be reported as approximated"
+pivot_colors() {
+  local name=$1 file=""
+  for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$name" ] && qpdf "$pdf" --pages . "$p" -- "pv-$p.pdf" && qpdf --qdf --object-streams=disable "pv-$p.pdf" "pv-$p-qdf.pdf" && file="pv-$p-qdf.pdf"; done
+  [ -n "$file" ] || fail "no page for $name"
+  echo "$file"
+}
+dark_file=$(pivot_colors "Pivot dark")
+for color in "0.4627 0.2431 0.0941" "0.9725 0.7961 0.6784" "0.9843 0.898 0.8392"; do
+  grep -aq "^$color rg$" "$dark_file" || fail "the Dark 3 pivot should use the color $color"
+done
+custom_file=$(pivot_colors "Pivot custom")
+for color in "1 0.9216 0.6118" "0.8667 0.9216 0.9686" "0.8941 0.8745 0.9255" "1 0.851 0.4"; do
+  grep -aq "^$color rg$" "$custom_file" || fail "the custom pivot style should use the color $color"
+done
+[ "$(grep -cE "warning xlsx\.pivot" "$log")" = 4 ] || fail "only the four styled pivot tables should be reported"
 
 # Shape paths: gradients are real shadings (axial and radial), arrowheads are filled, custom geometry is filled, nothing is reported.
 path_page=0

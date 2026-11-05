@@ -220,7 +220,10 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         _dxfs = table.Dxfs;
         _palette = table.Palette;
         _readInlineDxf = table.ReadInlineDxf;
+        _pivotStyles = table.PivotStyles;
     }
+
+    private IReadOnlyDictionary<string, IReadOnlyList<(string Type, int DxfId)>>? _pivotStyles;
 
     private CellFormat FormatOf(string? styleAttribute) =>
         int.TryParse(styleAttribute, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < _formats.Count
@@ -423,7 +426,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             return;
         }
         var reasons = new List<string>();
-        var look = PivotStyling.Apply(sheet, root, Theme, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette));
+        var look = PivotStyling.Apply(sheet, root, Theme, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette), _pivotStyles);
         if (look.Style == PivotStyling.StyleOutcome.NotApplied) reasons.Add($"its table style '{look.StyleName}' is not applied");
         else if (look.Style == PivotStyling.StyleOutcome.Approximated) reasons.Add($"its table style '{look.StyleName}' is drawn approximately (what the style highlights, not every shade)");
         if (look.FormatsSkipped > 0) reasons.Add(look.FormatsSkipped == 1 ? "a pivot-area format that selects particular items is not applied" : $"{look.FormatsSkipped} pivot-area formats that select particular items are not applied");

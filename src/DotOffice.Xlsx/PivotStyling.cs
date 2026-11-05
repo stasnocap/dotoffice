@@ -35,7 +35,8 @@ internal static partial class PivotStyling
         public bool IsSubtotalRow(int row) => RowTypes.GetValueOrDefault(row) == "default";
     }
 
-    public static Result Apply(Worksheet sheet, XElement definition, XlsxTheme theme, ConditionalFormatting.Environment env)
+    public static Result Apply(Worksheet sheet, XElement definition, XlsxTheme theme, ConditionalFormatting.Environment env,
+        IReadOnlyDictionary<string, IReadOnlyList<(string Type, int DxfId)>>? customStyles = null)
     {
         XElement? Child(XElement? parent, string name) => parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name);
         bool Flag(XElement? e, string name, bool fallback) => (string?)e?.Attribute(name) switch { "1" or "true" => true, "0" or "false" => false, _ => fallback };
@@ -68,7 +69,7 @@ internal static partial class PivotStyling
         var outcome = StyleOutcome.None;
         if (styleName is not null)
         {
-            var look = LookOf(styleName, theme);
+            var look = customStyles is not null && customStyles.TryGetValue(styleName, out var elements) ? CustomLook(elements, env) : LookOf(styleName, theme);
             if (look is null) outcome = StyleOutcome.NotApplied;
             else
             {
@@ -127,7 +128,38 @@ internal static partial class PivotStyling
     // ------------------------------------------------------------------ built-in styles
 
     /// <summary>The formats of the parts of a table that a style defines; null for a part it leaves alone.</summary>
-    private sealed record Look(Dxf? Header, Dxf? RowHeader, Dxf? Subtotal, Dxf? GrandRow, Dxf? GrandColumn, Dxf? Stripe, Dxf? Body = null, Dxf? StripeAlternate = null);
+    private sealed record Look(Dxf? Header, Dxf? RowHeader, Dxf? Subtotal, Dxf? GrandRow, Dxf? GrandColumn, Dxf? Stripe, Dxf? Body = null, Dxf? StripeAlternate = null)
+    {
+        /// <summary>Under everything else, on every cell (a custom style's <c>wholeTable</c>).</summary>
+        public Dxf? Whole { get; init; }
+
+        /// <summary>Column stripes of a custom style (the first, third… and the second, fourth… data column).</summary>
+        public Dxf? ColumnStripe { get; init; }
+
+        public Dxf? ColumnStripeAlternate { get; init; }
+
+        /// <summary>A custom style: the stripes start with <see cref="Stripe"/> on the first data row and alternate with <see cref="StripeAlternate"/>.</summary>
+        public bool Custom { get; init; }
+    }
+
+    /// <summary>
+    /// The look a workbook's own table style gives: its elements name the dxf for the whole table, the header row, the total row and column,
+    /// the first column, the subtotal rows and the row and column stripes.
+    /// </summary>
+    private static Look? CustomLook(IReadOnlyList<(string Type, int DxfId)> elements, ConditionalFormatting.Environment env)
+    {
+        Dxf? Of(string type)
+        {
+            int id = elements.Where(e => e.Type == type).Select(e => e.DxfId).DefaultIfEmpty(-1).First();
+            return id >= 0 && id < env.Dxfs.Count ? env.Dxfs[id] : null;
+        }
+        var look = new Look(Of("headerRow"), Of("firstColumn"), Of("firstSubtotalRow"), Of("totalRow"), Of("lastColumn"), Of("firstRowStripe"), null, Of("secondRowStripe"))
+        {
+            Whole = Of("wholeTable"), ColumnStripe = Of("firstColumnStripe"), ColumnStripeAlternate = Of("secondColumnStripe"), Custom = true,
+        };
+        return look.Header is null && look.RowHeader is null && look.Subtotal is null && look.GrandRow is null && look.GrandColumn is null && look.Stripe is null
+            && look.StripeAlternate is null && look.Whole is null && look.ColumnStripe is null && look.ColumnStripeAlternate is null ? null : look;
+    }
 
     private static Border Line(Color color, bool thick = false) => new(thick ? BorderStyle.Thick : BorderStyle.Single, thick ? 2.25 : 0.75, color);
 
@@ -148,6 +180,7 @@ internal static partial class PivotStyling
         var tint = accentIndex == 0 ? new Color(0xD9, 0xD9, 0xD9) : accent.Blend(Color.White, 0.8);
         var light = accentIndex == 0 ? new Color(0xF2, 0xF2, 0xF2) : accent.Blend(Color.White, 0.9);
         var medium = accent.Blend(Color.White, 0.6);
+        var dark = accent.Blend(Color.Black, 0.5);
 
         Dxf Bold(Color? fill = null, Color? font = null, Border? top = null, Border? bottom = null) =>
             new() { Bold = true, Fill = fill, FontColor = font, Top = top, Bottom = bottom };
@@ -162,6 +195,16 @@ internal static partial class PivotStyling
                 return new Look(Bold(fill: accent, font: Color.White), null, Bold(fill: tint), Bold(top: Line(accent, thick: true)), Bold(), new Dxf { Fill = tint });
             case ("Medium", 1): // Medium 8-14 (Medium 9 is blue): tinted body, a header and grand total in the style's color
                 return new Look(Bold(fill: accent, font: Color.White), Bold(), Bold(fill: medium), Bold(fill: accent, font: Color.White), Bold(), new Dxf { Fill = light }, Body: new Dxf { Fill = tint }, StripeAlternate: new Dxf { Fill = light });
+            case ("Light", 1): // Light 8-14: a solid header in the style's color over banded rows, bold totals set off by lines
+                return new Look(Bold(fill: accent, font: Color.White), null, Bold(top: Line(accent)), Bold(top: Line(accent), bottom: Line(accent)), Bold(), new Dxf { Fill = light });
+            case ("Light", 3): // Light 22-28: like 15-21 with a stronger band in the body
+                return new Look(Bold(fill: tint, bottom: Line(accent)), Bold(), Bold(top: Line(accent)), Bold(top: Line(accent, thick: true), bottom: Line(accent)), Bold(), new Dxf { Fill = tint });
+            case ("Medium", 2): // Medium 15-21: a header in the style's color, a tinted body with darker bands, a bold grand total
+                return new Look(Bold(fill: accent, font: Color.White), Bold(), Bold(fill: medium), Bold(top: Line(accent, thick: true)), Bold(), new Dxf { Fill = tint }) { Whole = new Dxf { Fill = light } };
+            case ("Medium", 3): // Medium 22-28: header and grand total in the style's color, tinted row headings
+                return new Look(Bold(fill: accent, font: Color.White), Bold(fill: tint), Bold(fill: medium), Bold(fill: accent, font: Color.White), Bold(), new Dxf { Fill = tint }) { Whole = new Dxf { Fill = light } };
+            case ("Dark", _): // Dark 1-28: a header and grand total in a dark shade of the style's color over a tinted body with darker bands
+                return new Look(Bold(fill: dark, font: Color.White), variant >= 2 ? Bold() : null, Bold(fill: medium), Bold(fill: dark, font: Color.White), Bold(), new Dxf { Fill = medium }) { Whole = new Dxf { Fill = tint } };
             default: return null;
         }
     }
@@ -176,13 +219,16 @@ internal static partial class PivotStyling
         {
             bool header = g.IsHeader(row), label = g.IsLabel(column);
             int dataRow = row - g.Range.FirstRow - g.HeaderRows, dataColumn = column - g.Range.FirstColumn - g.LabelColumns;
-            // From the bottom layer up: the body and its stripes, the row labels, subtotals and grand totals, then the header.
+            // From the bottom layer up: the whole table, the body and its stripes, the row labels, subtotals and grand totals, then the header.
+            Put(row, column, look.Whole);
             if (!header && !label) Put(row, column, look.Body);
             // Bands run across whole rows (labels included) but skip the totals.
             bool banded = !header && rowStripes && !g.IsGrandRow(row) && !g.IsSubtotalRow(row);
-            if (banded && dataRow % 2 == (look.StripeAlternate is null ? 0 : 1)) Put(row, column, look.Stripe);
+            if (banded && look.Custom) Put(row, column, dataRow % 2 == 0 ? look.Stripe : look.StripeAlternate);
+            else if (banded && dataRow % 2 == (look.StripeAlternate is null ? 0 : 1)) Put(row, column, look.Stripe);
             else if (banded && look.StripeAlternate is not null && !label) Put(row, column, look.StripeAlternate);
-            if (!header && !label && columnStripes && dataColumn % 2 == 0 && look.Body is null) Put(row, column, look.Stripe);
+            if (!header && !label && columnStripes && look.Custom) Put(row, column, dataColumn % 2 == 0 ? look.ColumnStripe : look.ColumnStripeAlternate);
+            else if (!header && !label && columnStripes && dataColumn % 2 == 0 && look.Body is null) Put(row, column, look.Stripe);
             if (!header && label && rowHeaders) Put(row, column, look.RowHeader);
             if (!header && g.IsSubtotalRow(row)) Put(row, column, look.Subtotal);
             if (!header && g.IsGrandColumn(column)) Put(row, column, look.GrandColumn);

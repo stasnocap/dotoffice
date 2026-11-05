@@ -50,6 +50,8 @@ internal static class ShowcaseXlsx
             ("Pivot", PivotSheet("Pivot table cached cells (no pivot style: nothing to warn about)"), "visible"),
             ("Pivot styled", PivotSheet("Pivot table with a pivot style and a pivot-area format on the corner (approximated, reported)"), "visible"),
             ("Pivot banded", PivotSheet("Pivot table with a banded Medium style (approximated, reported)"), "visible"),
+            ("Pivot dark", PivotSheet("Pivot table with a banded Dark style (approximated, reported)"), "visible"),
+            ("Pivot custom", PivotSheet("Pivot table with the workbook's own table style from styles.xml (header, two stripes, total row; reported)"), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
@@ -84,6 +86,8 @@ internal static class ShowcaseXlsx
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16",
             "<formats count=\"1\"><format dxfId=\"5\"><pivotArea type=\"origin\" outline=\"0\" fieldPosition=\"0\"/></format></formats>");
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot banded") + 1, "PivotStyleMedium2", "", stripes: true);
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot dark") + 1, "PivotStyleDark3", "", stripes: true);
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot custom") + 1, "Showcase pivot", "", stripes: true);
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
         WriteShapeFills(zip, sheets.FindIndex(x => x.Name == "Shape fills") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
@@ -176,6 +180,9 @@ internal static class ShowcaseXlsx
         "<dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFFD966\"/></patternFill></fill></dxf>" +                                                  // 5 time period
         "<dxf><font><color rgb=\"FF403151\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></dxf>" +                      // 6 lavender: the function showcase
         "</dxfs>" +
+        // A table style of the workbook's own for the "Pivot custom" sheet: a yellow header, blue and lavender stripes, a gold total row.
+        "<tableStyles count=\"1\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"><tableStyle name=\"Showcase pivot\" table=\"0\" count=\"4\">" +
+        "<tableStyleElement type=\"headerRow\" dxfId=\"3\"/><tableStyleElement type=\"firstRowStripe\" dxfId=\"2\"/><tableStyleElement type=\"secondRowStripe\" dxfId=\"6\"/><tableStyleElement type=\"totalRow\" dxfId=\"5\"/></tableStyle></tableStyles>" +
         // The workbook's own palette: entries 0–9 as in Excel, entry 10 (what [Color3] means) purple instead of red.
         "<colors><indexedColors><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FFFF0000\"/><rgbColor rgb=\"FF00FF00\"/><rgbColor rgb=\"FF0000FF\"/>" +
         "<rgbColor rgb=\"FFFFFF00\"/><rgbColor rgb=\"FFFF00FF\"/><rgbColor rgb=\"FF00FFFF\"/><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FF7030A0\"/></indexedColors></colors></styleSheet>";
