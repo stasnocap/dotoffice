@@ -19,7 +19,8 @@ internal static class ShowcaseXlsx
     // cellXfs indexes (see Styles)
     private const int Default = 0, Title = 1, Header = 2, Money = 3, Percent = 4, IsoDate = 5, Time = 6, Accounting = 7, Wrap = 8,
         Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16,
-        Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21, GradLinear = 22, GradDiagonal = 23, GradVertical = 24, GradCenter = 25, GradCorner = 26;
+        Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21, GradLinear = 22, GradDiagonal = 23, GradVertical = 24, GradCenter = 25, GradCorner = 26,
+        Fraction1 = 27, Fraction2 = 28, Eighths = 29, IndexedRed = 30;
 
     public const string HiddenMarker = "HIDDENSHEETMARKER";
 
@@ -80,8 +81,9 @@ internal static class ShowcaseXlsx
 
     private const string Styles =
         $"<styleSheet xmlns=\"{Main}\">" +
-        "<numFmts count=\"3\"><numFmt numFmtId=\"164\" formatCode=\"yyyy\\-mm\\-dd\"/><numFmt numFmtId=\"165\" formatCode=\"#,##0;[Red]\\(#,##0\\)\"/>" +
-        "<numFmt numFmtId=\"166\" formatCode=\"dddd, mmmm d, yyyy\"/></numFmts>" +
+        "<numFmts count=\"7\"><numFmt numFmtId=\"164\" formatCode=\"yyyy\\-mm\\-dd\"/><numFmt numFmtId=\"165\" formatCode=\"#,##0;[Red]\\(#,##0\\)\"/>" +
+        "<numFmt numFmtId=\"166\" formatCode=\"dddd, mmmm d, yyyy\"/>" +
+        "<numFmt numFmtId=\"168\" formatCode=\"# ?/?\"/><numFmt numFmtId=\"169\" formatCode=\"# ??/??\"/><numFmt numFmtId=\"170\" formatCode=\"# ?/8\"/><numFmt numFmtId=\"171\" formatCode=\"[Color3]0.0\"/></numFmts>" +
         "<fonts count=\"4\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font>" +
         "<font><b/><sz val=\"16\"/><color rgb=\"FFFFFFFF\"/><name val=\"Calibri\"/></font><font><i/><sz val=\"11\"/><color rgb=\"FF7F7F7F\"/><name val=\"Calibri\"/></font></fonts>" +
         "<fills count=\"9\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>" +
@@ -95,7 +97,7 @@ internal static class ShowcaseXlsx
         "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
         "<border><left/><right/><top/><bottom style=\"medium\"><color rgb=\"FF1F3864\"/></bottom><diagonal/></border>" +
         "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border></borders>" +
-        "<cellXfs count=\"27\">" +
+        "<cellXfs count=\"31\">" +
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 0 default
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"2\" borderId=\"0\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 1 title
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"1\"><alignment horizontal=\"center\"/></xf>" +                                                   // 2 header
@@ -123,6 +125,10 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"6\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 24 vertical
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"7\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 25 from center
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"8\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 26 from corner
+        "<xf numFmtId=\"168\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 27 # ?/?
+        "<xf numFmtId=\"169\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 28 # ??/??
+        "<xf numFmtId=\"170\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 29 # ?/8
+        "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
         "</cellXfs>" +
         "<dxfs count=\"5\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
@@ -181,6 +187,10 @@ internal static class ShowcaseXlsx
             ("Negative in red", -1234567, Accounting, "#,##0;[Red](#,##0)", "parentheses"),
             ("Scientific", 12345.678, Scientific, "0.00E+00", "1.23E+04"),
             ("General", 0.1 + 0.2, Default, "General", "no float noise"),
+            ("Fraction", 2.5, Fraction1, "# ?/?", "2 1/2"),
+            ("Fraction, two digits", 3.14159, Fraction2, "# ??/??", "3 14/99"),
+            ("Eighths", 2.375, Eighths, "# ?/8", "2 3/8"),
+            ("Indexed color", 1.5, IndexedRed, "[Color3]0.0", "red from the palette"),
         };
         int r = 4;
         foreach (var (name, value, style, code, note) in samples)

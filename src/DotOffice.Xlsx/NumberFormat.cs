@@ -10,7 +10,7 @@ internal readonly record struct FormattedValue(string Text, Color? Color);
 /// <summary>A parsed Excel number-format code (<c>pos;neg;zero;text</c>) that can format numbers, dates and text.</summary>
 internal sealed class NumberFormat
 {
-    private enum Kind { Literal, Digit, Point, Comma, Percent, Exponent, Text, General, Year, Month, Day, Hour, Minute, Second, Elapsed, AmPm, SubSecond }
+    private enum Kind { Literal, Digit, Point, Comma, Percent, Exponent, Text, General, Year, Month, Day, Hour, Minute, Second, Elapsed, AmPm, SubSecond, Fraction }
 
     private readonly record struct Token(Kind Kind, string Text = "", int Count = 0);
 
@@ -21,6 +21,7 @@ internal sealed class NumberFormat
         public (char Op, double Value)? Condition;
         public bool IsDate;
         public bool HasText;
+        public bool IsFraction;
     }
 
     private readonly List<Section> _sections = [];
@@ -155,6 +156,10 @@ internal sealed class NumberFormat
                 case '0' or '#' or '?':
                     tokens.Add(new Token(Kind.Digit, c.ToString()));
                     break;
+                case '/' when !s.IsDate && TryFraction(text, i, tokens, out int consumed):
+                    s.IsFraction = true;
+                    i += consumed;
+                    continue;
                 case '.':
                     // ".0" right after a seconds token is a fraction of a second.
                     if (LastDate(tokens) is Kind.Second && i + 1 < text.Length && text[i + 1] == '0')
@@ -230,6 +235,36 @@ internal sealed class NumberFormat
         return s;
     }
 
+    /// <summary>
+    /// Recognizes a fraction such as <c># ?/?</c>, <c># ??/??</c> or <c>?/8</c> at the '/' at <paramref name="slash"/>: the digit placeholders
+    /// right before it are the numerator, those (or a fixed number) after it the denominator. They are replaced by one
+    /// <see cref="Kind.Fraction"/> token whose text is "numerator/denominator" placeholders and whose count is the fixed denominator (0 when variable).
+    /// </summary>
+    private static bool TryFraction(string text, int slash, List<Token> tokens, out int consumed)
+    {
+        consumed = 0;
+        int numerator = 0;
+        while (numerator < tokens.Count && tokens[^(numerator + 1)].Kind == Kind.Digit) numerator++;
+        if (numerator == 0) return false;
+        int j = slash + 1;
+        int end = j;
+        while (end < text.Length && text[end] is '?' or '#' or '0') end++;
+        string denominator = text[j..end];
+        int fixedDenominator = 0;
+        if (denominator.Length == 0)
+        {
+            while (end < text.Length && char.IsAsciiDigit(text[end])) end++;
+            if (end == j || !int.TryParse(text.AsSpan(j, end - j), NumberStyles.None, CultureInfo.InvariantCulture, out fixedDenominator) || fixedDenominator < 1 || fixedDenominator > 99_999)
+                return false;
+            denominator = fixedDenominator.ToString(CultureInfo.InvariantCulture);
+        }
+        string numeratorSpec = string.Concat(tokens.Skip(tokens.Count - numerator).Select(t => t.Text));
+        tokens.RemoveRange(tokens.Count - numerator, numerator);
+        tokens.Add(new Token(Kind.Fraction, numeratorSpec + "/" + denominator, fixedDenominator));
+        consumed = end - slash;
+        return true;
+    }
+
     private static Kind? LastDate(List<Token> tokens)
     {
         for (int i = tokens.Count - 1; i >= 0; i--)
@@ -247,7 +282,13 @@ internal sealed class NumberFormat
     {
         if (content.Length == 0) return;
         if (ColorNames.TryGetValue(content, out var color)) { s.Color = color; return; }
-        if (content.StartsWith("color", StringComparison.OrdinalIgnoreCase)) return; // indexed palette colors are not supported
+        if (content.StartsWith("color", StringComparison.OrdinalIgnoreCase))
+        {
+            // [ColorN] is entry N + 7 of the default palette (Color1 = black … Color56); a workbook's own palette is not consulted.
+            if (int.TryParse(content.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n is >= 1 and <= 56)
+                s.Color = XlsxStyles.DefaultIndexedColor(n + 7);
+            return;
+        }
         if (content[0] is '<' or '>' or '=')
         {
             int pos = 1;
@@ -288,7 +329,7 @@ internal sealed class NumberFormat
         double v = showSign ? value : Math.Abs(value);
         if (section.HasText && !section.IsDate && !HasNumeric(section)) return new FormattedValue(string.Concat(section.Tokens.Select(t => t.Kind == Kind.Literal ? t.Text : "")), section.Color);
 
-        string text = section.IsDate ? FormatDate(section, value, date1904) : FormatDecimal(section, v);
+        string text = section.IsDate ? FormatDate(section, value, date1904) : section.IsFraction ? FormatFraction(section, v) : FormatDecimal(section, v);
         return new FormattedValue(text, section.Color);
     }
 
@@ -425,6 +466,116 @@ internal sealed class NumberFormat
         string signPrefix = negative && !isZero ? "-" : "";
         var digits = new DigitState(intDigits, fracDigits, thousands, intPlaceholders, exponent, expIndex >= 0 ? tokens[expIndex] : default);
         return signPrefix + Assemble(tokens, general: null, digits);
+    }
+
+    /// <summary>
+    /// Formats a number as a fraction (<c># ?/?</c>, <c>?/8</c> …). The denominator is the best approximation with as many digits as the
+    /// denominator has placeholders, or the fixed one. Without integer placeholders the fraction is improper (2.5 → 5/2).
+    /// </summary>
+    private static string FormatFraction(Section s, double value)
+    {
+        var tokens = s.Tokens;
+        int at = tokens.FindIndex(t => t.Kind == Kind.Fraction);
+        var fraction = tokens[at];
+        int slash = fraction.Text.IndexOf('/');
+        string numeratorSpec = fraction.Text[..slash], denominatorSpec = fraction.Text[(slash + 1)..];
+        var integerPlaceholders = tokens.Take(at).Where(t => t.Kind == Kind.Digit).Select(t => t.Text[0]).ToList();
+        bool negative = value < 0;
+        double abs = Math.Abs(value);
+
+        double whole = Math.Floor(abs), remainder = abs - whole;
+        long numerator, denominator;
+        if (fraction.Count > 0)
+        {
+            denominator = fraction.Count;
+            numerator = (long)Math.Round(remainder * denominator, MidpointRounding.AwayFromZero);
+        }
+        else
+        {
+            long limit = Math.Min((long)Math.Pow(10, denominatorSpec.Length) - 1, 99_999);
+            (numerator, denominator) = BestFraction(remainder, limit);
+        }
+        if (numerator >= denominator) { whole++; numerator = 0; if (fraction.Count == 0) denominator = 1; }
+        if (integerPlaceholders.Count == 0)
+        {
+            numerator += (long)whole * denominator;
+            whole = 0;
+        }
+
+        bool showFraction = numerator != 0 || fraction.Count > 0;
+        string FractionText()
+        {
+            if (!showFraction) return new string(' ', fraction.Text.Length);
+            string n = numerator.ToString(CultureInfo.InvariantCulture), d = denominator.ToString(CultureInfo.InvariantCulture);
+            // The numerator is padded on the left, a variable denominator on the right; fixed ones are written as they are.
+            n = Pad(n, numeratorSpec, left: true);
+            if (fraction.Count == 0) d = Pad(d, denominatorSpec, left: false);
+            return n + "/" + d;
+        }
+
+        var sb = new StringBuilder();
+        bool integerDone = false;
+        foreach (var t in tokens)
+        {
+            switch (t.Kind)
+            {
+                case Kind.Literal:
+                    sb.Append(t.Text);
+                    break;
+                case Kind.Percent:
+                    sb.Append('%');
+                    break;
+                case Kind.Digit when !integerDone:
+                    integerDone = true;
+                    string digits = whole == 0 ? "" : whole.ToString("F0", CultureInfo.InvariantCulture);
+                    if (digits.Length == 0 && !showFraction) digits = "0"; // a value of zero still shows something
+                    int places = integerPlaceholders.Count;
+                    var padded = new StringBuilder(digits);
+                    // Placeholders beyond the digits (counted from the right): 0 shows a zero, ? a space, # nothing.
+                    for (int p = digits.Length; p < places; p++)
+                    {
+                        char placeholder = integerPlaceholders[places - 1 - p];
+                        if (placeholder == '0') padded.Insert(0, '0');
+                        else if (placeholder == '?') padded.Insert(0, ' ');
+                    }
+                    sb.Append(padded);
+                    break;
+                case Kind.Fraction:
+                    sb.Append(FractionText());
+                    break;
+            }
+        }
+        string text = sb.ToString();
+        return negative && (whole != 0 || numerator != 0) ? "-" + text : text;
+    }
+
+    private static string Pad(string digits, string spec, bool left)
+    {
+        if (digits.Length >= spec.Length) return digits;
+        var sb = new StringBuilder();
+        int missing = spec.Length - digits.Length;
+        // Padding follows the placeholder that is missing a digit: 0 → zero, ? → space, # → nothing.
+        for (int i = 0; i < missing; i++)
+        {
+            char placeholder = left ? spec[missing - 1 - i] : spec[digits.Length + i];
+            if (placeholder == '0') sb.Append('0');
+            else if (placeholder == '?') sb.Append(' ');
+        }
+        return left ? sb + digits : digits + sb;
+    }
+
+    /// <summary>The fraction n/d with d ≤ <paramref name="limit"/> closest to <paramref name="x"/> (0 ≤ x &lt; 1); the smallest denominator wins ties.</summary>
+    private static (long Numerator, long Denominator) BestFraction(double x, long limit)
+    {
+        long bestN = 0, bestD = 1;
+        double bestError = x;
+        for (long d = 1; d <= limit && bestError > 1e-12; d++)
+        {
+            long n = (long)Math.Round(x * d, MidpointRounding.AwayFromZero);
+            double error = Math.Abs(x - (double)n / d);
+            if (error < bestError - 1e-12) (bestN, bestD, bestError) = (n, d, error);
+        }
+        return (bestN, bestD);
     }
 
     private sealed record DigitState(string IntDigits, string FracDigits, bool Thousands, int IntPlaceholders, int Exponent, Token Exp);

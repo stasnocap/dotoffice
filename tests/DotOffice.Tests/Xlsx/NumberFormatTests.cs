@@ -128,4 +128,72 @@ public class NumberFormatTests
         Assert.Equal("x: abc", ReadCell("abc", "\"x: \"@", "str").Text);
         Assert.Equal("TRUE", ReadCell("1", "0.00", "b").Text);
     }
+
+    [Theory]
+    [InlineData(2.5, "# ?/?", "2 1/2")]
+    [InlineData(0.5, "# ?/?", " 1/2")]
+    [InlineData(3, "# ?/?", "3    ")]
+    [InlineData(0, "# ?/?", "0    ")]
+    [InlineData(2.333333333, "# ?/?", "2 1/3")]
+    [InlineData(2.75, "# ?/?", "2 3/4")]
+    [InlineData(1.0 / 3, "# ?/?", " 1/3")]
+    [InlineData(0.3333333, "# ?/?", " 1/3")]
+    [InlineData(3.14159, "# ??/??", "3 14/99")]
+    [InlineData(3.14159, "# ???/???", "3  16/113")]
+    [InlineData(0.04, "# ??/??", "  1/25")]
+    [InlineData(2.99999, "# ?/?", "3    ")]
+    [InlineData(1.9, "# ?/?", "1 8/9")]
+    [InlineData(2.5, "?/?", "5/2")]
+    [InlineData(0.75, "?/?", "3/4")]
+    [InlineData(10.25, "??/??", "41/4 ")]
+    [InlineData(0.5, "0 ?/?", "0 1/2")]
+    [InlineData(5, "0 ?/?", "5    ")]
+    [InlineData(2.4375, "# ?/8", "2 4/8")]
+    [InlineData(2.5, "# ?/8", "2 4/8")]
+    [InlineData(3, "# ?/8", "3 0/8")]
+    [InlineData(0.9999, "# ?/8", "1 0/8")]
+    [InlineData(1.5, "?/8", "12/8")]
+    [InlineData(-2.5, "# ?/?", "-2 1/2")]
+    [InlineData(-0.25, "?/?", "-1/4")]
+    [InlineData(2.5, "# ?/? \"lb\"", "2 1/2 lb")]
+    [InlineData(2.5, "\"≈\" # ?/?", "≈ 2 1/2")]
+    public void Formats_fractions(double value, string code, string expected) => Assert.Equal(expected, Fmt(value, code));
+
+    [Fact]
+    public void Fractions_pick_a_section_like_other_number_formats()
+    {
+        Assert.Equal("2 1/2", Fmt(2.5, "# ?/?;(# ?/?)"));
+        Assert.Equal("(2 1/2)", Fmt(-2.5, "# ?/?;(# ?/?)"));
+    }
+
+    [Fact]
+    public void Slashes_in_dates_and_quotes_are_not_fractions()
+    {
+        Assert.Equal("25/3/2023", Fmt(45010, "d/m/yyyy"));
+        Assert.Equal("3/25", Fmt(45010, "m/d"));
+        Assert.Equal("5/", Fmt(5, "0\"/\""));
+    }
+
+    [Theory]
+    [InlineData("[Color3]0.0", 1.5, 255, 0, 0)]       // Color3 = palette entry 10 = red
+    [InlineData("[Color4]0", 1, 0, 255, 0)]           // green
+    [InlineData("[Color5]0", 1, 0, 0, 255)]           // blue
+    [InlineData("0;[Color10]-0", -1, 0, 128, 0)]      // Color10 = palette entry 17 = dark green
+    [InlineData("[color46]0", 1, 255, 102, 0)]        // case-insensitive; palette entry 53
+    public void Indexed_colors_use_the_default_palette(string code, double value, int r, int g, int b)
+    {
+        var cell = ReadCell(value.ToString(System.Globalization.CultureInfo.InvariantCulture), code);
+        Assert.Equal(new Color((byte)r, (byte)g, (byte)b), cell.Style.Font.Color);
+    }
+
+    [Theory]
+    [InlineData("[Color0]0")]
+    [InlineData("[Color57]0")]
+    [InlineData("[Colorx]0")]
+    public void Out_of_range_indexed_colors_are_ignored(string code)
+    {
+        var cell = ReadCell("1", code);
+        Assert.Equal("1", cell.Text);
+        Assert.Equal(CellStyle.Default.Font.Color, cell.Style.Font.Color);
+    }
 }

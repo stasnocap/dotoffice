@@ -88,6 +88,9 @@ internal static class XlsxStyles
         "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333",
     ];
 
+    /// <summary>An entry of Excel's default indexed palette (the one <c>[ColorN]</c> number formats use, as index N + 7).</summary>
+    internal static Color DefaultIndexedColor(int index) => Color.TryParseHex(LegacyPalette[Math.Clamp(index, 0, LegacyPalette.Length - 1)])!.Value;
+
     /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
     public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs);
 

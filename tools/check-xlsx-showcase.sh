@@ -30,7 +30,7 @@ if grep -q "HIDDENSHEETMARKER" all.txt; then fail "the hidden sheet was printed"
 if grep -E "warning xlsx\.formula-no-cache" "$log"; then fail "cached values were not used"; fi
 
 # Number and date formats.
-for text in "Number and date formats" "1,234.50" "25%" "25.67%" "2023-03-15" "Wednesday, March 15, 2023" "12:00 PM" "(1,234,567)" "1.23E+04" "#N/A"; do
+for text in "Number and date formats" "1,234.50" "25%" "25.67%" "2023-03-15" "Wednesday, March 15, 2023" "12:00 PM" "(1,234,567)" "1.23E+04" "#N/A" "2 1/2" "3 14/99" "2 3/8"; do
   grep -qF -- "$text" all.txt || fail "missing formatted value: $text"
 done
 grep -qE '^\s*Too wide for its column:\s+#+\s*$' all.txt || fail "an overly wide number should show hashes"
