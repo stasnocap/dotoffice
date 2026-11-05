@@ -402,9 +402,22 @@ internal static class ShowcaseXlsx
 
         // Time periods are relative to the day the file is converted, so the dates are generated from today.
         double today = (DateTime.Today - new DateTime(1899, 12, 30)).TotalDays;
-        rows.Append(Row(17, Str("A17", "Today", Header) + Str("B17", "Yesterday", Header) + Str("C17", "Tomorrow", Header) + Str("D17", "Three weeks ago", Header) + Str("E17", "Next month", Header)));
+        rows.Append(Row(17, Str("A17", "Today", Header) + Str("B17", "Yesterday", Header) + Str("C17", "Tomorrow", Header) + Str("D17", "3 weeks ago", Header) + Str("E17", "Next month", Header)));
         rows.Append(Row(18, Num("A18", today, IsoDate) + Num("B18", today - 1, IsoDate) + Num("C18", today + 1, IsoDate) + Num("D18", today - 21, IsoDate) + Num("E18", today + 40, IsoDate)));
-        rows.Append(Row(19, Str("A19", "Time-period rules: only today, yesterday and tomorrow are highlighted,.")));
+        rows.Append(Row(19, Str("A19", "Time-period rules: only today, yesterday and tomorrow are highlighted.")));
+
+        // The other icon sets, one column each, over a ladder of values.
+        string[] sets = ["3ArrowsGray", "3Flags", "3TrafficLights2", "3Signs", "3Symbols2", "4Arrows", "4RedToBlack", "4Rating", "4TrafficLights", "5Arrows", "5Rating", "5Quarters"];
+        var setHeader = new StringBuilder();
+        for (int c = 0; c < sets.Length; c++) setHeader.Append(Str($"{ColumnName(c)}21", sets[c], Header));
+        rows.Append(Row(20, Str("A20", "More icon sets", Bold)));
+        rows.Append(Row(21, setHeader.ToString()));
+        for (int i = 0; i < 6; i++)
+        {
+            var line = new StringBuilder();
+            for (int c = 0; c < sets.Length; c++) line.Append(Num($"{ColumnName(c)}{22 + i}", i * 20));
+            rows.Append(Row(22 + i, line.ToString()));
+        }
 
         const string Percents = "<cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/>";
         const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -426,12 +439,18 @@ internal static class ShowcaseXlsx
         tail.Append($"<conditionalFormatting sqref=\"K4:K13\"><cfRule type=\"iconSet\" priority=\"12\"><iconSet iconSet=\"3Symbols\">{Percents}</iconSet></cfRule></conditionalFormatting>");
         tail.Append("<conditionalFormatting sqref=\"A18:E18\"><cfRule type=\"timePeriod\" timePeriod=\"today\" dxfId=\"5\" priority=\"13\"/>" +
                     "<cfRule type=\"timePeriod\" timePeriod=\"yesterday\" dxfId=\"1\" priority=\"14\"/><cfRule type=\"timePeriod\" timePeriod=\"tomorrow\" dxfId=\"0\" priority=\"15\"/></conditionalFormatting>");
+        for (int c = 0; c < sets.Length; c++)
+        {
+            int count = sets[c][0] - '0';
+            var thresholds = string.Concat(Enumerable.Range(0, count).Select(k => $"<cfvo type=\"percent\" val=\"{k * 100 / count}\"/>"));
+            tail.Append($"<conditionalFormatting sqref=\"{ColumnName(c)}22:{ColumnName(c)}27\"><cfRule type=\"iconSet\" priority=\"{20 + c}\"><iconSet iconSet=\"{sets[c]}\">{thresholds}</iconSet></cfRule></conditionalFormatting>");
+        }
         tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
         tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
                     "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" id=\"{AAAAAAAA-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\">" +
                     "<x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/><x14:negativeFillColor rgb=\"FFC00000\"/></x14:dataBar></x14:cfRule><xm:sqref>H4:H13</xm:sqref></x14:conditionalFormatting>" +
                     "</x14:conditionalFormattings></ext></extLst>");
-        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"11\" width=\"13\" customWidth=\"1\"/></cols>";
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
     }
 

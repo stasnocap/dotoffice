@@ -71,16 +71,42 @@ internal static class ConditionalFormatting
         "containsText", "notContainsText", "beginsWith", "endsWith", "containsBlanks", "notContainsBlanks", "containsErrors", "notContainsErrors",
     };
 
+    /// <summary>
+    /// The icon sets Excel offers, each from the lowest values to the highest. 3Stars, 3Triangles and 5Boxes exist only as Excel 2010
+    /// extensions (<c>x14:iconSet</c>); the other names are also valid in the main namespace.
+    /// </summary>
     private static readonly Dictionary<string, CellIcon[]> IconSets = new(StringComparer.Ordinal)
     {
         ["3Arrows"] = [new(IconShape.ArrowDown, Red), new(IconShape.ArrowSideways, Yellow), new(IconShape.ArrowUp, Green)],
+        ["3ArrowsGray"] = [new(IconShape.ArrowDown, Gray), new(IconShape.ArrowSideways, Gray), new(IconShape.ArrowUp, Gray)],
+        ["3Flags"] = [new(IconShape.Flag, Red), new(IconShape.Flag, Yellow), new(IconShape.Flag, Green)],
         ["3TrafficLights1"] = [new(IconShape.Circle, Red), new(IconShape.Circle, Yellow), new(IconShape.Circle, Green)],
+        ["3TrafficLights2"] = [new(IconShape.RimmedCircle, Red), new(IconShape.RimmedCircle, Yellow), new(IconShape.RimmedCircle, Green)],
+        ["3Signs"] = [new(IconShape.Diamond, Red), new(IconShape.TriangleUp, Yellow), new(IconShape.Circle, Green)],
         ["3Symbols"] = [new(IconShape.Cross, Red), new(IconShape.Exclamation, Yellow), new(IconShape.Check, Green)],
+        ["3Symbols2"] = [new(IconShape.BareCross, Red), new(IconShape.BareExclamation, Yellow), new(IconShape.BareCheck, Green)],
+        ["3Stars"] = [new(IconShape.Star, Gold, 0), new(IconShape.Star, Gold, 1), new(IconShape.Star, Gold, 2)],
+        ["3Triangles"] = [new(IconShape.TriangleDown, Red), new(IconShape.Dash, Yellow), new(IconShape.TriangleUp, Green)],
+        ["4Arrows"] = [new(IconShape.ArrowDown, Red), new(IconShape.ArrowDownRight, Yellow), new(IconShape.ArrowUpRight, Yellow), new(IconShape.ArrowUp, Green)],
+        ["4ArrowsGray"] = [new(IconShape.ArrowDown, Gray), new(IconShape.ArrowDownRight, Gray), new(IconShape.ArrowUpRight, Gray), new(IconShape.ArrowUp, Gray)],
+        ["4RedToBlack"] = [new(IconShape.Circle, Black), new(IconShape.Circle, Gray), new(IconShape.Circle, Pink), new(IconShape.Circle, Red)],
+        ["4Rating"] = [new(IconShape.Bars, Dark, 1), new(IconShape.Bars, Dark, 2), new(IconShape.Bars, Dark, 3), new(IconShape.Bars, Dark, 4)],
+        ["4TrafficLights"] = [new(IconShape.Circle, Black), new(IconShape.Circle, Red), new(IconShape.Circle, Yellow), new(IconShape.Circle, Green)],
+        ["5Arrows"] = [new(IconShape.ArrowDown, Red), new(IconShape.ArrowDownRight, Yellow), new(IconShape.ArrowSideways, Yellow), new(IconShape.ArrowUpRight, Yellow), new(IconShape.ArrowUp, Green)],
+        ["5ArrowsGray"] = [new(IconShape.ArrowDown, Gray), new(IconShape.ArrowDownRight, Gray), new(IconShape.ArrowSideways, Gray), new(IconShape.ArrowUpRight, Gray), new(IconShape.ArrowUp, Gray)],
+        ["5Rating"] = [new(IconShape.Bars, Dark, 0), new(IconShape.Bars, Dark, 1), new(IconShape.Bars, Dark, 2), new(IconShape.Bars, Dark, 3), new(IconShape.Bars, Dark, 4)],
+        ["5Quarters"] = [new(IconShape.Quarters, Dark, 0), new(IconShape.Quarters, Dark, 1), new(IconShape.Quarters, Dark, 2), new(IconShape.Quarters, Dark, 3), new(IconShape.Quarters, Dark, 4)],
+        ["5Boxes"] = [new(IconShape.Boxes, Dark, 0), new(IconShape.Boxes, Dark, 1), new(IconShape.Boxes, Dark, 2), new(IconShape.Boxes, Dark, 3), new(IconShape.Boxes, Dark, 4)],
     };
 
     private static Color Red => new(0xE0, 0x30, 0x30);
     private static Color Yellow => new(0xFF, 0xC0, 0x00);
     private static Color Green => new(0x00, 0xB0, 0x50);
+    private static Color Gray => new(0x80, 0x80, 0x80);
+    private static Color Black => new(0, 0, 0);
+    private static Color Pink => new(0xF4, 0xA0, 0xA0);
+    private static Color Gold => new(0xFF, 0xC0, 0x00);
+    private static Color Dark => new(0x40, 0x40, 0x40);
 
     // ------------------------------------------------------------------ reading
 

@@ -327,6 +327,41 @@ public class XlsxConditionalFormattingTests
         Assert.Equal([IconShape.Cross, IconShape.Exclamation, IconShape.Check], new[] { 0, 1, 2 }.Select(i => symbols.Cells[(i, 0)].Icon!.Shape));
     }
 
+    [Theory]
+    [InlineData("3ArrowsGray", 3, IconShape.ArrowDown, IconShape.ArrowUp)]
+    [InlineData("3Flags", 3, IconShape.Flag, IconShape.Flag)]
+    [InlineData("3TrafficLights2", 3, IconShape.RimmedCircle, IconShape.RimmedCircle)]
+    [InlineData("3Signs", 3, IconShape.Diamond, IconShape.Circle)]
+    [InlineData("3Symbols2", 3, IconShape.BareCross, IconShape.BareCheck)]
+    [InlineData("3Stars", 3, IconShape.Star, IconShape.Star)]
+    [InlineData("3Triangles", 3, IconShape.TriangleDown, IconShape.TriangleUp)]
+    [InlineData("4Arrows", 4, IconShape.ArrowDown, IconShape.ArrowUp)]
+    [InlineData("4ArrowsGray", 4, IconShape.ArrowDown, IconShape.ArrowUp)]
+    [InlineData("4RedToBlack", 4, IconShape.Circle, IconShape.Circle)]
+    [InlineData("4Rating", 4, IconShape.Bars, IconShape.Bars)]
+    [InlineData("4TrafficLights", 4, IconShape.Circle, IconShape.Circle)]
+    [InlineData("5Arrows", 5, IconShape.ArrowDown, IconShape.ArrowUp)]
+    [InlineData("5ArrowsGray", 5, IconShape.ArrowDown, IconShape.ArrowUp)]
+    [InlineData("5Rating", 5, IconShape.Bars, IconShape.Bars)]
+    [InlineData("5Quarters", 5, IconShape.Quarters, IconShape.Quarters)]
+    [InlineData("5Boxes", 5, IconShape.Boxes, IconShape.Boxes)]
+    public void All_icon_sets_are_read(string name, int count, IconShape lowest, IconShape highest)
+    {
+        var thresholds = Thresholds(Enumerable.Range(0, count).Select(i => i * 100 / count).ToArray());
+        var warnings = new ConversionWarningList();
+        var sheet = Read(Column("A", 0, 100), ConditionalFormatting("A1:A2", IconSet(1, name, thresholds)), warnings: warnings);
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal(lowest, sheet.Cells[(0, 0)].Icon!.Shape);
+        Assert.Equal(highest, sheet.Cells[(1, 0)].Icon!.Shape);
+    }
+
+    [Fact]
+    public void Level_icons_step_through_their_levels()
+    {
+        var sheet = Read(Column("A", 0, 20, 40, 60, 80), ConditionalFormatting("A1:A5", IconSet(1, "5Quarters", Thresholds(0, 20, 40, 60, 80))));
+        Assert.Equal([0, 1, 2, 3, 4], Enumerable.Range(0, 5).Select(i => sheet.Cells[(i, 0)].Icon!.Level));
+    }
+
     [Fact]
     public void Icon_sets_support_reverse_hidden_values_numbers_and_gte()
     {
@@ -416,13 +451,13 @@ public class XlsxConditionalFormattingTests
         Assert.Empty(warnings.Warnings);
 
         var tail = ConditionalFormatting("A1", CfRule("unknownKind", 1, "", "", 0)) +
-                   ConditionalFormatting("A2", IconSet(2, "5Arrows", Thresholds(0, 20, 40, 60, 80))) +
+                   ConditionalFormatting("A2", IconSet(2, "7Faces", Thresholds(0, 20, 40, 60, 80))) +
                    ConditionalFormatting("A1:A2", Expression("SUMPRODUCT(A1:A2)>1", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
         var sheet = Read(Column("A", 1, 2), tail, warnings: warnings);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.conditional-formatting", warning.Code);
         Assert.Contains("unknownKind", warning.Message);
-        Assert.Contains("5Arrows", warning.Message);
+        Assert.Contains("7Faces", warning.Message);
         Assert.Contains("expression", warning.Message);
         // The supported rule still applies.
         Assert.Equal("A2", FilledRows(sheet));

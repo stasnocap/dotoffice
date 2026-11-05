@@ -124,10 +124,24 @@ public sealed record CellTextRun(string Text, RunProperties Font);
 /// </summary>
 public sealed record CellDataBar(double Start, double End, Color Color, bool Gradient, bool Negative = false);
 
-public enum IconShape { ArrowUp, ArrowSideways, ArrowDown, Circle, Check, Exclamation, Cross }
+public enum IconShape
+{
+    ArrowUp, ArrowSideways, ArrowDown, ArrowUpRight, ArrowDownRight,
+    Circle, RimmedCircle, Check, Exclamation, Cross,
+    BareCheck, BareExclamation, BareCross,
+    Flag, Diamond, TriangleUp, TriangleDown, Dash,
+    /// <summary>A five-pointed star: filled for <c>Level</c> 2, half for 1, empty for 0.</summary>
+    Star,
+    /// <summary>A disc with <c>Level</c> (0–4) of its quarters filled, clockwise from the top.</summary>
+    Quarters,
+    /// <summary>Four ascending bars of which the first <c>Level</c> (0–4) are filled.</summary>
+    Bars,
+    /// <summary>A square with <c>Level</c> (0–4) of its quarters filled.</summary>
+    Boxes,
+}
 
 /// <summary>A conditional-format icon drawn at the left of the cell.</summary>
-public sealed record CellIcon(IconShape Shape, Color Color);
+public sealed record CellIcon(IconShape Shape, Color Color, int Level = 0);
 
 public sealed record Cell
 {

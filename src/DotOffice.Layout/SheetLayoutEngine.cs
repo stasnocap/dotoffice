@@ -935,34 +935,125 @@ public sealed class SheetLayoutEngine
             LayoutItem Poly(Color color, params (double X, double Y)[] points) =>
                 new PolygonItem(points.Select(p => (x + p.X * size, y + p.Y * size)).ToList(), color);
             LayoutItem Disc(Color color, double l, double t, double w, double h) => new EllipseItem(x + l * size, y + t * size, w * size, h * size, color);
+            // Polygon turned clockwise by the given degrees about the center of the icon square.
+            LayoutItem Turned(Color color, double degrees, params (double X, double Y)[] points)
+            {
+                double radians = degrees * Math.PI / 180, cos = Math.Cos(radians), sin = Math.Sin(radians);
+                return Poly(color, points.Select(p => (0.5 + (p.X - 0.5) * cos - (p.Y - 0.5) * sin, 0.5 + (p.X - 0.5) * sin + (p.Y - 0.5) * cos)).ToArray());
+            }
+            (double X, double Y)[] Star() =>
+                Enumerable.Range(0, 10).Select(k =>
+                {
+                    double angle = (k * 36 - 90) * Math.PI / 180, radius = k % 2 == 0 ? 0.5 : 0.21;
+                    return (0.5 + radius * Math.Cos(angle), 0.55 + radius * Math.Sin(angle));
+                }).ToArray();
+            var arrowUp = new (double X, double Y)[] { (0.5, 0), (1, 0.5), (0.72, 0.5), (0.72, 1), (0.28, 1), (0.28, 0.5), (0, 0.5) };
+            var arrowDown = new (double X, double Y)[] { (0.5, 1), (1, 0.5), (0.72, 0.5), (0.72, 0), (0.28, 0), (0.28, 0.5), (0, 0.5) };
+            var check = new (double X, double Y)[] { (0.2, 0.52), (0.31, 0.41), (0.43, 0.54), (0.69, 0.27), (0.8, 0.38), (0.43, 0.76) };
+            var bang = new (double X, double Y)[] { (0.43, 0.2), (0.57, 0.2), (0.55, 0.58), (0.45, 0.58) };
+            var cross = new (double X, double Y)[] { (0.28, 0.36), (0.36, 0.28), (0.5, 0.42), (0.64, 0.28), (0.72, 0.36), (0.58, 0.5), (0.72, 0.64), (0.64, 0.72), (0.5, 0.58), (0.36, 0.72), (0.28, 0.64), (0.42, 0.5) };
+            var empty = new Color(0xD9, 0xD9, 0xD9);
             switch (icon.Shape)
             {
                 case IconShape.ArrowUp:
-                    items.Add(Poly(icon.Color, (0.5, 0), (1, 0.5), (0.72, 0.5), (0.72, 1), (0.28, 1), (0.28, 0.5), (0, 0.5)));
+                    items.Add(Poly(icon.Color, arrowUp));
                     break;
                 case IconShape.ArrowDown:
-                    items.Add(Poly(icon.Color, (0.5, 1), (1, 0.5), (0.72, 0.5), (0.72, 0), (0.28, 0), (0.28, 0.5), (0, 0.5)));
+                    items.Add(Poly(icon.Color, arrowDown));
                     break;
                 case IconShape.ArrowSideways:
                     items.Add(Poly(icon.Color, (1, 0.5), (0.5, 0), (0.5, 0.28), (0, 0.28), (0, 0.72), (0.5, 0.72), (0.5, 1)));
                     break;
+                case IconShape.ArrowUpRight:
+                    items.Add(Turned(icon.Color, 45, arrowUp));
+                    break;
+                case IconShape.ArrowDownRight:
+                    items.Add(Turned(icon.Color, -45, arrowDown));
+                    break;
                 case IconShape.Circle:
                     items.Add(Disc(icon.Color, 0, 0, 1, 1));
                     break;
+                case IconShape.RimmedCircle:
+                    items.Add(Disc(Color.Black, 0, 0, 1, 1));
+                    items.Add(Disc(icon.Color, 0.12, 0.12, 0.76, 0.76));
+                    break;
                 case IconShape.Check:
                     items.Add(Disc(icon.Color, 0, 0, 1, 1));
-                    items.Add(Poly(White, (0.2, 0.52), (0.31, 0.41), (0.43, 0.54), (0.69, 0.27), (0.8, 0.38), (0.43, 0.76)));
+                    items.Add(Poly(White, check));
                     break;
                 case IconShape.Exclamation:
                     items.Add(Disc(icon.Color, 0, 0, 1, 1));
-                    items.Add(Poly(White, (0.43, 0.2), (0.57, 0.2), (0.55, 0.58), (0.45, 0.58)));
+                    items.Add(Poly(White, bang));
                     items.Add(Disc(White, 0.42, 0.65, 0.16, 0.16));
                     break;
                 case IconShape.Cross:
                     items.Add(Disc(icon.Color, 0, 0, 1, 1));
-                    items.Add(Poly(White, (0.28, 0.36), (0.36, 0.28), (0.5, 0.42), (0.64, 0.28), (0.72, 0.36), (0.58, 0.5), (0.72, 0.64),
-                        (0.64, 0.72), (0.5, 0.58), (0.36, 0.72), (0.28, 0.64), (0.42, 0.5)));
+                    items.Add(Poly(White, cross));
                     break;
+                case IconShape.BareCheck:
+                    items.Add(Poly(icon.Color, (0, 0.52), (0.15, 0.37), (0.36, 0.58), (0.84, 0.08), (1, 0.23), (0.36, 0.9)));
+                    break;
+                case IconShape.BareExclamation:
+                    items.Add(Poly(icon.Color, (0.38, 0), (0.62, 0), (0.58, 0.64), (0.42, 0.64)));
+                    items.Add(Disc(icon.Color, 0.37, 0.74, 0.26, 0.26));
+                    break;
+                case IconShape.BareCross:
+                    items.Add(Poly(icon.Color, (0.05, 0.2), (0.2, 0.05), (0.5, 0.35), (0.8, 0.05), (0.95, 0.2), (0.65, 0.5), (0.95, 0.8), (0.8, 0.95), (0.5, 0.65), (0.2, 0.95), (0.05, 0.8), (0.35, 0.5)));
+                    break;
+                case IconShape.Flag:
+                    items.Add(Poly(icon.Color, (0.12, 0), (0.24, 0), (0.24, 1), (0.12, 1)));
+                    items.Add(Poly(icon.Color, (0.24, 0.05), (0.95, 0.28), (0.24, 0.55)));
+                    break;
+                case IconShape.Diamond:
+                    items.Add(Poly(icon.Color, (0.5, 0), (1, 0.5), (0.5, 1), (0, 0.5)));
+                    break;
+                case IconShape.TriangleUp:
+                    items.Add(Poly(icon.Color, (0.5, 0.08), (1, 0.92), (0, 0.92)));
+                    break;
+                case IconShape.TriangleDown:
+                    items.Add(Poly(icon.Color, (0, 0.08), (1, 0.08), (0.5, 0.92)));
+                    break;
+                case IconShape.Dash:
+                    items.Add(Poly(icon.Color, (0, 0.35), (1, 0.35), (1, 0.65), (0, 0.65)));
+                    break;
+                case IconShape.Star:
+                    items.Add(Poly(empty, Star()));
+                    if (icon.Level >= 2) items.Add(Poly(icon.Color, Star()));
+                    else if (icon.Level == 1)
+                    {
+                        items.Add(new PushItem((x, y, size / 2, size)));
+                        items.Add(Poly(icon.Color, Star()));
+                        items.Add(new PopItem());
+                    }
+                    break;
+                case IconShape.Quarters:
+                    items.Add(Disc(empty, 0, 0, 1, 1));
+                    for (int q = 0; q < Math.Clamp(icon.Level, 0, 4); q++)
+                    {
+                        var wedge = new List<(double X, double Y)> { (0.5, 0.5) };
+                        for (int step = 0; step <= 6; step++)
+                        {
+                            double angle = (q * 90 + step * 15 - 90) * Math.PI / 180;
+                            wedge.Add((0.5 + 0.5 * Math.Cos(angle), 0.5 + 0.5 * Math.Sin(angle)));
+                        }
+                        items.Add(Poly(icon.Color, wedge.ToArray()));
+                    }
+                    break;
+                case IconShape.Bars:
+                    for (int bar = 0; bar < 4; bar++)
+                    {
+                        double height = 0.25 * (bar + 1), left = 0.04 + bar * 0.25;
+                        items.Add(new RectItem(x + left * size, y + (1 - height) * size, 0.18 * size, height * size, bar < icon.Level ? icon.Color : empty));
+                    }
+                    break;
+                case IconShape.Boxes:
+                {
+                    items.Add(new RectItem(x + 0.05 * size, y + 0.05 * size, 0.9 * size, 0.9 * size, empty));
+                    (double L, double T)[] quadrants = [(0.05, 0.05), (0.5, 0.05), (0.5, 0.5), (0.05, 0.5)];
+                    for (int q = 0; q < Math.Clamp(icon.Level, 0, 4); q++)
+                        items.Add(new RectItem(x + quadrants[q].L * size, y + quadrants[q].T * size, 0.45 * size, 0.45 * size, icon.Color));
+                    break;
+                }
             }
         }
 

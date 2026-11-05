@@ -98,7 +98,7 @@ if grep -E "warning xlsx\.drawing" "$log" | grep -qi "picture\b.*not rendered\|i
 
 # Conditional formatting: the rules are applied (not reported), and what they draw is in the page content (fills, curves for the
 # round icons). pdftotext cannot see colors, so the content streams are decompressed with qpdf and counted.
-for text in "Conditional formatting" "Color scale" "Solid bar" "Symbols" "stopIfTrue"; do grep -qF -- "$text" all.txt || fail "missing conditional text: $text"; done
+for text in "Conditional formatting" "Color scale" "Solid bar" "Symbols" "stopIfTrue" "More icon sets" "5Quarters" "4RedToBlack"; do grep -qF -- "$text" all.txt || fail "missing conditional text: $text"; done
 if grep -E "warning xlsx\.conditional-formatting" "$log"; then fail "supported conditional formatting should not warn"; fi
 qpdf --qdf --object-streams=disable "$pdf" conditional-qdf.pdf
 zebra=$(grep -ac '^0.8667 0.9216 0.9686 rg$' conditional-qdf.pdf || true)
@@ -107,6 +107,8 @@ bad=$(grep -ac '^1 0.7804 0.8078 rg$' conditional-qdf.pdf || true)
 [ "$bad" -ge 5 ] || fail "expected four cellIs fills plus the tomorrow cell, found $bad"
 yellow=$(grep -ac '^1 0.851 0.4 rg$' conditional-qdf.pdf || true)
 [ "$yellow" -ge 1 ] || fail "the time-period rule for today should have filled a cell (found $yellow)"
+grep -aq '^0.251 0.251 0.251 rg$' conditional-qdf.pdf || fail "the level icons (quarters, rating bars) are missing"
+grep -aq '^0.9569 0.6275 0.6275 rg$' conditional-qdf.pdf || fail "the pink icon of 4RedToBlack is missing"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
 
