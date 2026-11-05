@@ -10,6 +10,9 @@ public sealed partial class SheetLayoutEngine
 
     private enum Anchor { Start, Middle, End }
 
+    /// <summary>The plot rectangle of the chart being drawn when its layout is manual and inner (set by <see cref="EmitChart"/>).</summary>
+    private (double X, double Y, double Width, double Height)? _manualPlot;
+
     /// <summary>
     /// Draws a chart into its frame: background, title, legend, axes with gridlines and the series (columns, bars, lines or pie slices).
     /// Everything is clipped to the frame.
@@ -35,8 +38,8 @@ public sealed partial class SheetLayoutEngine
         if (!string.IsNullOrEmpty(chart.Title))
         {
             var titleFont = font with { FontSize = chart.TitleSize };
-            double used = PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items);
-            top += used + 4;
+            if (chart.TitlePosition is { } at) PlaceText(chart.Title, titleFont, x + at.X * w, y + at.Y * h, Anchor.Start, false, 0, items);
+            else top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
         }
 
         // ---- legend
@@ -68,6 +71,14 @@ public sealed partial class SheetLayoutEngine
                 }
                 if (chart.Legend == LegendPosition.Top) top += entryHeight + 4; else bottom -= entryHeight + 4;
             }
+        }
+        // A manual plot-area layout replaces the automatic one; an inner layout fixes the plot itself (below the axis labels).
+        _manualPlot = null;
+        if (chart.PlotArea is { } box)
+        {
+            var rect = (X: x + box.X * w, Y: y + box.Y * h, Width: box.Width * w, Height: box.Height * h);
+            if (box.Inner && chart.Kind is not (ChartKind.Pie or ChartKind.Doughnut or ChartKind.Radar)) _manualPlot = rect;
+            else (left, top, right, bottom) = (rect.X, rect.Y, rect.X + rect.Width, rect.Y + rect.Height);
         }
         if (right - left < 20 || bottom - top < 20)
         {
@@ -168,6 +179,8 @@ public sealed partial class SheetLayoutEngine
         double categoryWidth = chart.ShowCategoryAxis ? chart.Categories.Select(c => MeasureChartText(c, font)).DefaultIfEmpty(0).Max() : 0;
         double labelHeight = fontSize * 1.25;
 
+        // With a reversed value axis the category axis crosses at the value axis' minimum, which now lies at the top (or, for bars, right).
+        bool labelsAtFar = chart.ReverseValues && chart.ShowCategoryAxis;
         double plotLeft, plotRight, plotTop, plotBottom;
         bool rotateLabels = false;
         double stride = 1;
@@ -179,16 +192,18 @@ public sealed partial class SheetLayoutEngine
             double bandWidth = (plotRight - plotLeft) / (chart.CategoriesBetween ? categories : Math.Max(categories - 1, 1));
             rotateLabels = chart.ShowCategoryAxis && categoryWidth > bandWidth * 0.95 - 2;
             double below = !chart.ShowCategoryAxis ? 0 : rotateLabels ? categoryWidth * 0.7071 + labelHeight * 0.7071 + 6 : labelHeight + 5;
-            plotBottom = bottom - below;
+            if (labelsAtFar) { plotTop = top + below; plotBottom = bottom - labelHeight / 2; }
+            else plotBottom = bottom - below;
             stride = !chart.ShowCategoryAxis ? 1 : Math.Max(1, Math.Ceiling((rotateLabels ? labelHeight * 1.1 : categoryWidth + 6) / Math.Max(bandWidth, 1)));
         }
         else
         {
-            plotLeft = left + (chart.ShowCategoryAxis ? categoryWidth + 6 : 0);
-            plotRight = right - 8;
+            plotLeft = left + (chart.ShowCategoryAxis && !labelsAtFar ? categoryWidth + 6 : 0);
+            plotRight = right - (labelsAtFar ? categoryWidth + 12 : 8);
             plotTop = top + 4;
             plotBottom = bottom - (chart.ShowValueAxis ? labelHeight + 5 : 0);
         }
+        if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         var primary = chart.ValueScale;
@@ -201,8 +216,12 @@ public sealed partial class SheetLayoutEngine
         double Baseline(AxisScale scale) => scale.LogBase > 1 ? scale.Min : Math.Clamp(0, scale.Min, scale.Max);
         int Slot(int i) => chart.ReverseCategories ? categories - 1 - i : i;
         bool between = chart.CategoriesBetween || chart.Kind is ChartKind.Column or ChartKind.Bar;
-        double CategoryX(int i) => between ? plotLeft + (Slot(i) + 0.5) * plotWidth / categories
-            : categories > 1 ? plotLeft + Slot(i) * plotWidth / (categories - 1) : plotLeft + plotWidth / 2;
+        // t is the zero-based category position, fractional for points between categories (trendlines).
+        double SlotAt(double t) => chart.ReverseCategories ? categories - 1 - t : t;
+        double CategoryAt(double t) => between ? plotLeft + (SlotAt(t) + 0.5) * plotWidth / categories
+            : categories > 1 ? plotLeft + SlotAt(t) * plotWidth / (categories - 1) : plotLeft + plotWidth / 2;
+        double CategoryX(int i) => CategoryAt(i);
+        var errorBars = new List<(ChartSeries Series, int Index, double Across, double Value, AxisScale Scale)>();
 
         // ---- gridlines and value labels
         foreach (var tick in chart.Ticks)
@@ -272,14 +291,16 @@ public sealed partial class SheetLayoutEngine
                             double ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
                             // In horizontal bar charts the first series sits lowest in each group.
                             double slot = stacked ? center + offset : center - offset - barWidth;
-                            items.Add(new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
+                            AddFaded(items, s.Alpha, new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
+                            errorBars.Add((s, i, slot + barWidth / 2, stacked ? to : value, scale));
                             if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], stacked ? (ya + yb) / 2 : yb + 3, slot + barWidth / 2, stacked, color));
                         }
                         else
                         {
                             double center = plotLeft + (Slot(i) + 0.5) * band;
                             double xLeft = center + offset, ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
-                            items.Add(new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
+                            AddFaded(items, s.Alpha, new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
+                            errorBars.Add((s, i, xLeft + barWidth / 2, stacked ? to : value, scale));
                             if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], xLeft + barWidth / 2, stacked ? (ya + yb) / 2 : (value >= 0 ? ya - 2 : yb + 2), stacked, color));
                         }
                     }
@@ -305,7 +326,8 @@ public sealed partial class SheetLayoutEngine
                     var polygon = order.Select(i => (CategoryX(i), ValueY(scale, tops[i]))).ToList();
                     foreach (int i in Enumerable.Reverse(order))
                         polygon.Add((CategoryX(i), ValueY(scale, group.Grouping == ChartGrouping.Clustered ? baseline : below[i])));
-                    if (polygon.Count >= 3) items.Add(new PolygonItem(polygon, s.Color));
+                    if (polygon.Count >= 3) AddFaded(items, s.Alpha, new PolygonItem(polygon, s.Color));
+                    for (int i = 0; i < categories; i++) if (i < s.Values.Count && s.Values[i] is not null) errorBars.Add((s, i, CategoryX(i), tops[i], scale));
                 }
             }
             else if (group.Kind == ChartKind.Line)
@@ -321,6 +343,7 @@ public sealed partial class SheetLayoutEngine
                         double value = Scaled(s, i);
                         if (group.Grouping != ChartGrouping.Clustered) { cumulative[i] += value; value = cumulative[i]; }
                         points[i] = (CategoryX(i), ValueY(scale, value));
+                        errorBars.Add((s, i, CategoryX(i), value, scale));
                         if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], points[i]!.Value.X, points[i]!.Value.Y - 6, false, s.Color));
                     }
                     if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
@@ -335,6 +358,33 @@ public sealed partial class SheetLayoutEngine
             }
         }
 
+        // ---- error bars and trendlines, clipped to the plot
+        var overlays = new List<LayoutItem>();
+        foreach (var (s, i, across, value, scale) in errorBars)
+            foreach (var bars in s.ErrorBars ?? [])
+            {
+                if (bars.Horizontal != horizontalBars || i >= bars.Plus.Count) continue;
+                double a = ValuePosition(scale, value - bars.Minus[i]), b = ValuePosition(scale, value + bars.Plus[i]);
+                DrawErrorBar(overlays, horizontalBars, across, a, b, bars);
+            }
+        if (!horizontalBars)
+            foreach (var group in groups)
+                foreach (var s in group.Series)
+                    if (s.Trendline is { } trend && group.Grouping == ChartGrouping.Clustered)
+                    {
+                        var scale = group.Secondary ? secondaryScale : primary;
+                        var known = new List<(double X, double Y)>();
+                        for (int i = 0; i < s.Values.Count && i < categories; i++) if (s.Values[i] is { } v) known.Add((i + 1, v));
+                        var curve = ChartTrendlines.Fit(trend, known, known.Count > 0 ? known.Min(k => k.X) : 1, known.Count > 0 ? known.Max(k => k.X) : categories);
+                        DrawTrendline(overlays, curve.Select(q => (CategoryAt(q.X - 1), ValueY(scale, q.Y))).ToList(), trend);
+                    }
+        if (overlays.Count > 0)
+        {
+            items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight)));
+            items.AddRange(overlays);
+            items.Add(new PopItem());
+        }
+
         // ---- category axis line and labels
         if (chart.ShowCategoryAxis)
         {
@@ -345,7 +395,8 @@ public sealed partial class SheetLayoutEngine
                 items.Add(new LineItem(ax, plotTop, ax, plotBottom, 0.75, ChartGrid));
                 double band = plotHeight / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i++)
-                    PlaceText(chart.Categories[i], font, plotLeft - 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.End, true, 0, items);
+                    if (labelsAtFar) PlaceText(chart.Categories[i], font, plotRight + 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.Start, true, 0, items);
+                    else PlaceText(chart.Categories[i], font, plotLeft - 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.End, true, 0, items);
             }
             else
             {
@@ -354,7 +405,9 @@ public sealed partial class SheetLayoutEngine
                 for (int i = 0; i < categories && i < chart.Categories.Count; i += (int)stride)
                 {
                     double cx = CategoryX(i);
-                    if (rotateLabels) PlaceText(chart.Categories[i], font, cx + 3, plotBottom + 5, Anchor.End, false, 45, items);
+                    if (labelsAtFar && rotateLabels) PlaceText(chart.Categories[i], font, cx - 3, plotTop - 6, Anchor.Start, true, 45, items);
+                    else if (labelsAtFar) PlaceText(chart.Categories[i], font, cx, plotTop - 4 - labelHeight, Anchor.Middle, false, 0, items);
+                    else if (rotateLabels) PlaceText(chart.Categories[i], font, cx + 3, plotBottom + 5, Anchor.End, false, 45, items);
                     else PlaceText(chart.Categories[i], font, cx, plotBottom + 4, Anchor.Middle, false, 0, items);
                 }
             }
@@ -367,6 +420,41 @@ public sealed partial class SheetLayoutEngine
             if (horizontalBars && !inside) PlaceText(text, font with { Color = color }, lx, ly, Anchor.Start, true, 0, items);
             else PlaceText(text, font with { Color = color }, lx, inside ? ly : ly - font.FontSize * 1.25, Anchor.Middle, inside, 0, items);
         }
+    }
+
+    /// <summary>Adds a filled item, painted with the series' opacity when it is translucent.</summary>
+    private static void AddFaded(List<LayoutItem> items, double alpha, LayoutItem item)
+    {
+        if (alpha >= 1) { items.Add(item); return; }
+        items.Add(new PushItem(null, Opacity: alpha));
+        items.Add(item);
+        items.Add(new PopItem());
+    }
+
+    /// <summary>
+    /// An error bar with end caps: along the value axis from <paramref name="from"/> to <paramref name="to"/> (positions on that axis) at
+    /// <paramref name="across"/> on the other one; <paramref name="alongX"/> when the bar runs horizontally.
+    /// </summary>
+    private static void DrawErrorBar(List<LayoutItem> items, bool alongX, double across, double from, double to, ChartErrorBars bars)
+    {
+        var color = bars.Color ?? ChartText;
+        const double cap = 3;
+        if (alongX)
+        {
+            items.Add(new LineItem(from, across, to, across, bars.Width, color));
+            if (bars.EndCap) { items.Add(new LineItem(from, across - cap, from, across + cap, bars.Width, color)); items.Add(new LineItem(to, across - cap, to, across + cap, bars.Width, color)); }
+        }
+        else
+        {
+            items.Add(new LineItem(across, from, across, to, bars.Width, color));
+            if (bars.EndCap) { items.Add(new LineItem(across - cap, from, across + cap, from, bars.Width, color)); items.Add(new LineItem(across - cap, to, across + cap, to, bars.Width, color)); }
+        }
+    }
+
+    private static void DrawTrendline(List<LayoutItem> items, List<(double X, double Y)> points, ChartTrendline trend)
+    {
+        for (int k = 0; k + 1 < points.Count; k++)
+            items.Add(new LineItem(points[k].X, points[k].Y, points[k + 1].X, points[k + 1].Y, trend.Width, trend.Color, trend.Dashed ? LineStyle.Dashed : LineStyle.Solid));
     }
 
     /// <summary>

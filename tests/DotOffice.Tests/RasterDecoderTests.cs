@@ -179,4 +179,17 @@ public class RasterDecoderTests
         doc.Save(ms);
         Assert.Contains("/SMask", Encoding.Latin1.GetString(ms.ToArray()));
     }
+
+    [Fact]
+    public void Set_alpha_writes_a_graphics_state_resource_and_the_operator()
+    {
+        var doc = new PdfDocument();
+        var canvas = doc.AddPage(PageSize.A4).Canvas;
+        canvas.SaveState().SetAlpha(0.4).Rectangle(0, 0, 10, 10).Fill();
+        canvas.RestoreState();
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var text = Encoding.Latin1.GetString(ms.ToArray());
+        Assert.Contains("/ExtGState << /GSa40 << /ca 0.4 /CA 0.4 >> >>", text);
+    }
 }

@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -215,6 +215,21 @@ for text in "Columns and a line on a second axis" "Smoothed and straight lines" 
   [[ $opt_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "the chart options sheet should not warn"; fi
+
+# Chart extras: translucent areas and bubbles use graphics states, and the trendlines and error bars are drawn without a warning.
+extra_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Chart extras" ] && extra_page=$p; done
+extra_text=$(page_text "$extra_page")
+for text in "Translucent areas" "Translucent bubbles" "Trendline and error bars" "Polynomial trendline" "Manual plot layout"; do
+  [[ $extra_text == *"$text"* ]] || fail "missing chart text: $text"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart extras"; then fail "the chart extras sheet should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" extras-qdf.pdf
+grep -aq "/ExtGState" extras-qdf.pdf || fail "translucent series should use a graphics state"
+grep -aq "^/GSa55 gs$" extras-qdf.pdf || fail "the areas should be 55 % opaque"
+grep -aq "^/GSa50 gs$" extras-qdf.pdf || fail "the bubbles should be 50 % opaque"
+# The trendline (dashed, C00000) is drawn in dark red.
+grep -aq "^0.7529 0 0 RG$" extras-qdf.pdf || fail "no dark red trendline stroke"
 
 # Print titles outside the print area: row 1 sits above the area (A5:B124) and is repeated on every page of it; rows 2-4 are not printed.
 title_pages=0

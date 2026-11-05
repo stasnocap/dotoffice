@@ -32,7 +32,27 @@ public enum LegendPosition { None, Right, Left, Top, Bottom }
 /// </remarks>
 public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Color Color, bool Marker = false,
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
-    IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false);
+    IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
+    double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null);
+
+public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial, MovingAverage }
+
+/// <summary>
+/// A trendline fitted to a series (over its x values, or 1, 2, 3… for category charts) and drawn <paramref name="Forward"/> units beyond
+/// its last x and <paramref name="Backward"/> before its first. <paramref name="Order"/> is the degree of a polynomial and
+/// <paramref name="Period"/> the window of a moving average.
+/// </summary>
+public sealed record ChartTrendline(TrendlineKind Kind, Color Color, double Width = 2.25, bool Dashed = true, int Order = 2, int Period = 2,
+    double Forward = 0, double Backward = 0);
+
+/// <summary>
+/// Error bars of a series: per point the distance drawn above (<paramref name="Plus"/>) and below (<paramref name="Minus"/>) the value,
+/// or to the right and left of an x value when <paramref name="Horizontal"/>.
+/// </summary>
+public sealed record ChartErrorBars(bool Horizontal, IReadOnlyList<double> Plus, IReadOnlyList<double> Minus, bool EndCap = true, Color? Color = null, double Width = 1);
+
+/// <summary>A manually placed box in fractions of the chart's width and height; <paramref name="Inner"/> excludes the axis labels.</summary>
+public readonly record struct ChartBox(double X, double Y, double Width, double Height, bool Inner);
 
 /// <summary>
 /// A further chart type drawn on the same category axis as the first (a combination chart), on the primary or the secondary value axis.
@@ -172,6 +192,12 @@ public sealed record SheetChart : SheetObject
 
     /// <summary>The chart area's outline; null means none.</summary>
     public Color? Border { get; init; } = new Color(0xD9, 0xD9, 0xD9);
+
+    /// <summary>A manual layout (<c>c:layout</c>) of the plot area; null means automatic.</summary>
+    public ChartBox? PlotArea { get; init; }
+
+    /// <summary>A manual position (top-left, in fractions of the chart) of the title; null means centered on top.</summary>
+    public (double X, double Y)? TitlePosition { get; init; }
 
     /// <summary>The size of the text of axes, legend and labels.</summary>
     public double FontSize { get; init; } = 9;

@@ -7,6 +7,9 @@ public class SheetChartLayoutTests
 {
     private static readonly Color Red = new(255, 0, 0), Blue = new(0, 0, 255);
 
+    /// <summary>The page position of a chart anchored at A1: the sheet's left and top margins.</summary>
+    private const double OriginX = 50.4, OriginY = 54;
+
     private static SheetChart Chart(ChartKind kind, params ChartSeries[] series) => new()
     {
         Anchor = ImageAnchorKind.Absolute, X = 0, Y = 0, Width = 300, Height = 200, Kind = kind,
@@ -207,5 +210,116 @@ public class SheetChartLayoutTests
         Assert.Equal(3, dots.Count);
         var bars = page.Items.OfType<RectItem>().Where(r => r.Fill == Red).ToList();
         Assert.True(dots[1].Y < bars[0].Y); // 2 of 2 is the top, 10 of 20 only the middle
+    }
+
+    [Fact]
+    public void A_translucent_series_is_wrapped_in_an_opacity_group()
+    {
+        var page = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20) with { Alpha = 0.4 }));
+        var items = page.Items.ToList();
+        int pushes = items.OfType<PushItem>().Count(p => p.Opacity == 0.4);
+        Assert.Equal(3, pushes);
+        int at = items.FindIndex(i => i is PushItem { Opacity: 0.4 });
+        Assert.IsType<RectItem>(items[at + 1]);
+        Assert.IsType<PopItem>(items[at + 2]);
+    }
+
+    [Fact]
+    public void Translucent_bubbles_lose_their_white_halo()
+    {
+        var series = new ChartSeries("B", new double?[] { 5 }, Red, XValues: new double?[] { 5 }, Sizes: new double?[] { 3 }, Alpha: 0.5);
+        var chart = Chart(ChartKind.Bubble, series) with { XMin = 0, XMax = 10, XTicks = [new(0, "0"), new(10, "10")] };
+        var page = Page(chart);
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Color.White);
+        Assert.Contains(page.Items, i => i is PushItem { Opacity: 0.5 });
+    }
+
+    [Fact]
+    public void A_linear_trendline_is_a_dashed_straight_line_through_the_fit()
+    {
+        var series = Series(Red, 10, 20, 30) with { Trendline = new ChartTrendline(TrendlineKind.Linear, Blue, 2, true) };
+        var lines = Page(Chart(ChartKind.Line, series)).Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        var line = Assert.Single(lines);
+        Assert.Equal(LineStyle.Dashed, line.Style);
+        Assert.True(line.Y2 < line.Y1); // rising values rise on the page
+    }
+
+    [Theory]
+    [InlineData(TrendlineKind.Linear, 1, 2, 3, 4)]
+    [InlineData(TrendlineKind.Exponential, 2, 4, 8, 16)]
+    [InlineData(TrendlineKind.Power, 1, 4, 9, 16)]
+    [InlineData(TrendlineKind.Logarithmic, 1, 2, 2.585, 3)]
+    [InlineData(TrendlineKind.Polynomial, 1, 4, 9, 16)]
+    public void Fits_reproduce_data_that_follows_their_form(TrendlineKind kind, double y1, double y2, double y3, double y4)
+    {
+        var data = new List<(double X, double Y)> { (1, y1), (2, y2), (3, y3), (4, y4) };
+        var curve = ChartTrendlines.Fit(new ChartTrendline(kind, Red, Order: 2), data, 1, 4);
+        Assert.NotEmpty(curve);
+        foreach (var (x, y) in data)
+        {
+            var nearest = curve.OrderBy(c => Math.Abs(c.X - x)).First();
+            if (Math.Abs(nearest.X - x) < 1e-9) Assert.Equal(y, nearest.Y, 1);
+        }
+        Assert.Equal(y1, curve[0].Y, 1);
+        Assert.Equal(y4, curve[^1].Y, 1);
+    }
+
+    [Fact]
+    public void Trendlines_extend_forward_and_moving_averages_follow_the_period()
+    {
+        var data = new List<(double X, double Y)> { (1, 1), (2, 2), (3, 3), (4, 4) };
+        var forward = ChartTrendlines.Fit(new ChartTrendline(TrendlineKind.Linear, Red, Forward: 2, Backward: 0.5), data, 1, 4);
+        Assert.Equal((0.5, 0.5), (forward[0].X, Math.Round(forward[0].Y, 6)));
+        Assert.Equal((6.0, 6.0), (forward[^1].X, Math.Round(forward[^1].Y, 6)));
+        var average = ChartTrendlines.Fit(new ChartTrendline(TrendlineKind.MovingAverage, Red, Period: 2), data, 1, 4);
+        Assert.Equal(new[] { 1.5, 2.5, 3.5 }, average.Select(p => p.Y));
+        Assert.Empty(ChartTrendlines.Fit(new ChartTrendline(TrendlineKind.Linear, Red), [(1, 1)], 1, 1));
+        Assert.Empty(ChartTrendlines.Fit(new ChartTrendline(TrendlineKind.Logarithmic, Red), [(-1, 1), (-2, 2)], -2, -1));
+    }
+
+    [Fact]
+    public void Error_bars_are_a_line_with_end_caps_around_each_value()
+    {
+        var bars = new ChartErrorBars(false, [2, 2, 2], [2, 2, 2], true, Blue, 1);
+        var lines = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20) with { ErrorBars = [bars] })).Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        Assert.Equal(9, lines.Count); // per point: the bar and two caps
+        var vertical = lines.Where(l => l.X1 == l.X2).ToList();
+        Assert.Equal(3, vertical.Count);
+        Assert.All(vertical, l => Assert.True(Math.Abs(l.Y2 - l.Y1) > 5));
+        var noCaps = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20) with { ErrorBars = [bars with { EndCap = false }] })).Items.OfType<LineItem>().Count(l => l.Color == Blue);
+        Assert.Equal(3, noCaps);
+    }
+
+    [Fact]
+    public void An_inner_manual_plot_layout_fixes_the_plot_rectangle()
+    {
+        var chart = Chart(ChartKind.Column, Series(Red, 20, 20, 20)) with { PlotArea = new ChartBox(0.2, 0.1, 0.6, 0.5, true), Border = null, Background = null };
+        var bars = Page(chart).Items.OfType<RectItem>().Where(r => r.Fill == Red).ToList();
+        Assert.Equal(OriginY + 20, bars.Min(b => b.Y), 3); // 10 % of 200
+        Assert.Equal(OriginY + 120, bars.Max(b => b.Y + b.Height), 3); // 10 % + 50 % of the height is the zero line
+        Assert.InRange(bars.Min(b => b.X), OriginX + 60, OriginX + 120);
+        Assert.InRange(bars.Max(b => b.X + b.Width), OriginX + 120, OriginX + 240);
+    }
+
+    [Fact]
+    public void An_outer_manual_layout_confines_the_axes_and_a_manual_title_sits_where_it_is_put()
+    {
+        var chart = Chart(ChartKind.Column, Series(Red, 20, 20, 20)) with
+        {
+            PlotArea = new ChartBox(0.5, 0.5, 0.4, 0.4, false), Title = "Hi", TitlePosition = (0.1, 0.05), Border = null, Background = null,
+        };
+        var page = Page(chart);
+        Assert.All(page.Items.OfType<RectItem>().Where(r => r.Fill == Red), b => Assert.True(b.X >= OriginX + 150 - 0.01 && b.Y >= OriginY + 100 - 0.01));
+        var title = page.Items.OfType<TextItem>().First(t => t.Text == "Hi");
+        Assert.Equal(OriginX + 30, title.X, 1);
+    }
+
+    [Fact]
+    public void A_reversed_value_axis_moves_the_category_labels_to_the_top()
+    {
+        double LabelY(bool reversed) => Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with { ReverseValues = reversed })
+            .Items.OfType<TextItem>().First(t => t.Text == "b").Baseline;
+        Assert.True(LabelY(false) > OriginY + 150);
+        Assert.True(LabelY(true) < OriginY + 40);
     }
 }

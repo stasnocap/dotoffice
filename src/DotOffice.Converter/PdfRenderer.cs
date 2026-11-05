@@ -100,6 +100,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     // q/Q also save and restore the colors, so the cached ones must follow.
                     saved.Push((fill, stroke));
                     canvas.SaveState();
+                    if (push.Opacity < 1) canvas.SetAlpha(push.Opacity);
                     if (push.Clip is { } clip) canvas.Rectangle(clip.X, h - clip.Y - clip.Height, clip.Width, clip.Height).Clip();
                     if (push.FlipH || push.FlipV)
                     {

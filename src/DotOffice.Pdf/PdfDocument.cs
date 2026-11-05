@@ -110,6 +110,10 @@ public sealed class PdfDocument
                 resources.Append(" /Shading <<")
                          .AppendJoin("", page.Canvas.Shadings.Select(sh => $" /{sh.ResourceName} {shadingIds[sh]} 0 R"))
                          .Append(" >>");
+            if (page.Canvas.Alphas.Count > 0)
+                resources.Append(" /ExtGState <<")
+                         .AppendJoin("", page.Canvas.Alphas.Select(a => $" /GSa{a} << /ca {a / 100.0:0.##} /CA {a / 100.0:0.##} >>"))
+                         .Append(" >>");
             resources.Append(" >>");
 
             var links = page.Links.Where(l => l.Target is null || pageIndex.ContainsKey(l.Target)).ToList();

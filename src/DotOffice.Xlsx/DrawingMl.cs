@@ -61,6 +61,13 @@ internal static class DrawingMl
         return c;
     }
 
+    /// <summary>The opacity (0–1) of the first solid fill under <paramref name="holder"/>: its color's <c>alpha</c> modifier, 1 when absent.</summary>
+    public static double Opacity(XElement? holder)
+    {
+        var color = Child(holder, "solidFill")?.Elements().FirstOrDefault();
+        return color is not null && Child(color, "alpha") is { } alpha ? Math.Clamp(Number(alpha, "val", 100_000) / 100_000.0, 0, 1) : 1;
+    }
+
     private static Color? Preset(string? name) => name switch
     {
         "black" => Color.Black, "white" => Color.White, "red" => new Color(255, 0, 0), "green" => new Color(0, 128, 0), "blue" => new Color(0, 0, 255),

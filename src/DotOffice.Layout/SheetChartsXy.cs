@@ -25,7 +25,7 @@ public sealed partial class SheetLayoutEngine
         double labelHeight = fontSize * 1.25;
         double plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0) + 2, plotRight = right - Math.Max(4, lastWidth / 2);
         double plotTop = top + labelHeight / 2, plotBottom = bottom - (chart.ShowCategoryAxis ? labelHeight + 5 : 0);
-        if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
+        if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         var xScale = chart.XScale;
         var yScale = chart.ValueScale;
@@ -53,17 +53,17 @@ public sealed partial class SheetLayoutEngine
             // Bubble area follows the size; the largest bubble is a quarter of the plot's shorter side. Larger bubbles go underneath.
             double maxSize = chart.Series.SelectMany(s => s.Sizes ?? []).Where(v => v is > 0).Select(v => v!.Value).DefaultIfEmpty(0).Max();
             double maxDiameter = Math.Min(plotWidth, plotHeight) * 0.25 * chart.BubbleScale / 100;
-            var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label)>();
+            var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label, double Alpha)>();
             foreach (var s in chart.Series)
                 for (int i = 0; i < s.Values.Count; i++)
                     if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x && s.Sizes is { } sizes && i < sizes.Count && sizes[i] is > 0 and var size)
-                        bubbles.Add((size, X(x), Y(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null));
+                        bubbles.Add((size, X(x), Y(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null, s.Alpha));
             foreach (var b in bubbles.OrderByDescending(b => b.Size))
             {
                 double d = maxSize > 0 ? maxDiameter * Math.Sqrt(b.Size / maxSize) : 0;
                 if (d < 1) continue;
-                items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
-                items.Add(new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
+                if (b.Alpha >= 1) items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
+                AddFaded(items, b.Alpha, new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
                 if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color));
             }
         }
@@ -78,6 +78,22 @@ public sealed partial class SheetLayoutEngine
                         points[i] = (X(x), Y(y));
                         if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], X(x), Y(y) - 8, null));
                     }
+                var overlays = new List<LayoutItem>();
+                foreach (var bars in s.ErrorBars ?? [])
+                    for (int i = 0; i < s.Values.Count && i < bars.Plus.Count; i++)
+                    {
+                        if (s.Values[i] is not { } y || s.XValues is not { } xs || i >= xs.Count || xs[i] is not { } x) continue;
+                        if (bars.Horizontal) DrawErrorBar(overlays, true, Y(y), X(x - bars.Minus[i]), X(x + bars.Plus[i]), bars);
+                        else DrawErrorBar(overlays, false, X(x), Y(y - bars.Minus[i]), Y(y + bars.Plus[i]), bars);
+                    }
+                if (s.Trendline is { } trend && s.XValues is { } trendX)
+                {
+                    var known = new List<(double X, double Y)>();
+                    for (int i = 0; i < s.Values.Count && i < trendX.Count; i++) if (s.Values[i] is { } y && trendX[i] is { } x) known.Add((x, y));
+                    if (known.Count > 0)
+                        DrawTrendline(overlays, ChartTrendlines.Fit(trend, known, known.Min(k => k.X), known.Max(k => k.X)).Select(q => (X(q.X), Y(q.Y))).ToList(), trend);
+                }
+                if (overlays.Count > 0) { items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight))); items.AddRange(overlays); items.Add(new PopItem()); }
                 if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
                 if (s.Marker || !s.Line)
                     foreach (var p in points)

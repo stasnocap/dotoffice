@@ -28,6 +28,17 @@ public sealed class PdfCanvas
     internal HashSet<PdfImage> Images { get; } = [];
     internal HashSet<PdfShading> Shadings { get; } = [];
 
+    /// <summary>The opacities (in percent) set with <see cref="SetAlpha"/>; each becomes a graphics state in the page resources.</summary>
+    internal SortedSet<int> Alphas { get; } = [];
+
+    /// <summary>Makes everything painted from now on (until the state is restored) partly transparent: 1 is opaque, 0 invisible.</summary>
+    public PdfCanvas SetAlpha(double opacity)
+    {
+        int percent = (int)Math.Round(Math.Clamp(opacity, 0, 1) * 100);
+        Alphas.Add(percent);
+        return Op($"/GSa{percent} gs");
+    }
+
     public PdfCanvas SaveState()
     {
         _savedCharSpacing.Push(_charSpacing);

@@ -98,9 +98,10 @@ public sealed record ImageItem(double X, double Y, double Width, double Height, 
 /// <summary>
 /// Starts a group: everything up to the matching <see cref="PopItem"/> is clipped to <see cref="Clip"/> (when set) and rotated by
 /// <see cref="Rotation"/> degrees counter-clockwise about (<see cref="CenterX"/>, <see cref="CenterY"/>), and mirrored about that center when
-/// <see cref="FlipH"/> / <see cref="FlipV"/> are set (the mirroring is applied first). Groups nest.
+/// <see cref="FlipH"/> / <see cref="FlipV"/> are set (the mirroring is applied first). Everything in the group is painted with <see cref="Opacity"/>
+/// (1 is opaque). Groups nest.
 /// </summary>
-public sealed record PushItem((double X, double Y, double Width, double Height)? Clip, double Rotation = 0, double CenterX = 0, double CenterY = 0, bool FlipH = false, bool FlipV = false)
+public sealed record PushItem((double X, double Y, double Width, double Height)? Clip, double Rotation = 0, double CenterX = 0, double CenterY = 0, bool FlipH = false, bool FlipV = false, double Opacity = 1)
     : LayoutItem
 {
     public override LayoutItem Offset(double dx, double dy) =>

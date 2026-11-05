@@ -232,4 +232,65 @@ public class XlsxChartTests
         Assert.Equal((ChartKind.Radar, true), (web.Kind, web.Filled));
         Assert.Equal(["Q1", "Q2", "Q3"], web.Categories);
     }
+
+    private static string Line(string sers, string extra = "") =>
+        $"<c:lineChart><c:grouping val=\"standard\"/>{sers}<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" +
+        "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+
+    [Fact]
+    public void Reads_the_opacity_of_a_fill()
+    {
+        var ser = Ser(0, null, null, "S!$B$2:$B$4", "<c:spPr><a:solidFill><a:srgbClr val=\"FF0000\"><a:alpha val=\"40000\"/></a:srgbClr></a:solidFill></c:spPr>");
+        var chart = Read(Space(Bars("col", "clustered", ser))).Sheet.Charts.Single();
+        Assert.Equal(0.4, chart.Series[0].Alpha, 6);
+        Assert.Equal(1, Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single().Series[0].Alpha);
+    }
+
+    [Fact]
+    public void Reads_a_trendline_with_its_type_look_and_extent()
+    {
+        var trend = "<c:trendline><c:spPr><a:ln w=\"12700\"><a:solidFill><a:srgbClr val=\"00FF00\"/></a:solidFill><a:prstDash val=\"sysDash\"/></a:ln></c:spPr>" +
+                    "<c:trendlineType val=\"poly\"/><c:order val=\"3\"/><c:forward val=\"1.5\"/><c:backward val=\"0.5\"/></c:trendline>";
+        var series = Read(Space(Line(Ser(0, null, null, "S!$B$2:$B$4", trend)))).Sheet.Charts.Single().Series[0];
+        var t = Assert.IsType<ChartTrendline>(series.Trendline);
+        Assert.Equal((TrendlineKind.Polynomial, 3, 1.5, 0.5, 1.0, true, new Color(0, 255, 0)), (t.Kind, t.Order, t.Forward, t.Backward, t.Width, t.Dashed, t.Color));
+        var plain = Read(Space(Line(Ser(0, null, null, "S!$B$2:$B$4", "<c:trendline><c:trendlineType val=\"linear\"/></c:trendline>")))).Sheet.Charts.Single().Series[0].Trendline!;
+        Assert.Equal((TrendlineKind.Linear, false, new Color(0x44, 0x72, 0xC4)), (plain.Kind, plain.Dashed, plain.Color));
+    }
+
+    [Theory]
+    [InlineData("<c:errValType val=\"fixedVal\"/><c:val val=\"3\"/>", 3, 3)]
+    [InlineData("<c:errValType val=\"percentage\"/><c:val val=\"10\"/>", 1, 1)]
+    [InlineData("<c:errBarType val=\"plus\"/><c:errValType val=\"fixedVal\"/><c:val val=\"3\"/>", 3, 0)]
+    [InlineData("<c:errBarType val=\"minus\"/><c:errValType val=\"fixedVal\"/><c:val val=\"3\"/>", 0, 3)]
+    [InlineData("<c:errValType val=\"cust\"/><c:plus><c:numLit><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>4</c:v></c:pt></c:numLit></c:plus><c:minus><c:numLit><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>2</c:v></c:pt></c:numLit></c:minus>", 4, 2)]
+    public void Reads_error_bars_of_every_value_type(string body, double plus, double minus)
+    {
+        var bars = "<c:errBars><c:errDir val=\"y\"/>" + (body.Contains("errBarType") ? "" : "<c:errBarType val=\"both\"/>") + body + "<c:noEndCap val=\"1\"/></c:errBars>";
+        var series = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", bars)))).Sheet.Charts.Single().Series[0];
+        var read = Assert.Single(series.ErrorBars!);
+        Assert.Equal((plus, minus, false), (read.Plus[0], read.Minus[0], read.EndCap));
+    }
+
+    [Fact]
+    public void Error_bars_widen_the_automatic_scale()
+    {
+        var plain = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single();
+        var bars = "<c:errBars><c:errBarType val=\"plus\"/><c:errValType val=\"fixedVal\"/><c:val val=\"30\"/></c:errBars>";
+        var wide = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", bars)))).Sheet.Charts.Single();
+        Assert.True(wide.ValueMax > plain.ValueMax);
+    }
+
+    [Fact]
+    public void Reads_manual_layouts_given_from_the_edge_and_ignores_factor_mode()
+    {
+        string Layout(string mode) => "<c:layout><c:manualLayout><c:layoutTarget val=\"inner\"/>" + mode + "<c:x val=\"0.1\"/><c:y val=\"0.2\"/><c:w val=\"0.7\"/><c:h val=\"0.6\"/></c:manualLayout></c:layout>";
+        string Chart(string layout) => $"<c:chartSpace {Ns}><c:chart><c:title>{(layout == "" ? "" : "<c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.3\"/><c:y val=\"0.02\"/></c:manualLayout></c:layout>")}</c:title><c:plotArea>{layout}" +
+                                       Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")) + "</c:plotArea></c:chart></c:chartSpace>";
+        var chart = Read(Chart(Layout("<c:xMode val=\"edge\"/><c:yMode val=\"edge\"/>"))).Sheet.Charts.Single();
+        Assert.Equal(new ChartBox(0.1, 0.2, 0.7, 0.6, true), chart.PlotArea);
+        Assert.Equal((0.3, 0.02), chart.TitlePosition);
+        Assert.Null(Read(Chart(Layout(""))).Sheet.Charts.Single().PlotArea);
+        Assert.Null(Read(Chart("<c:layout/>")).Sheet.Charts.Single().PlotArea);
+    }
 }

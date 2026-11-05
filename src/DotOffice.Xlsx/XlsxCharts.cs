@@ -186,9 +186,67 @@ internal static class XlsxCharts
                     return string.Join("; ", parts);
                 }).ToList();
             }
-            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth));
+            double alpha = Opacity(spPr);
+            if (alpha >= 1 && lineLike) alpha = 1;
+            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind)));
         }
         return series;
+        }
+
+        ChartTrendline? ReadTrendline(XElement ser, Color seriesColor)
+        {
+            if (Child(ser, "trendline") is not { } t) return null;
+            var type = (string?)Child(t, "trendlineType")?.Attribute("val") switch
+            {
+                "exp" => TrendlineKind.Exponential, "log" => TrendlineKind.Logarithmic, "power" => TrendlineKind.Power, "poly" => TrendlineKind.Polynomial,
+                "movingAvg" => TrendlineKind.MovingAverage, _ => TrendlineKind.Linear,
+            };
+            var ln = Path(t, "spPr", "ln");
+            string? dash = (string?)Child(ln, "prstDash")?.Attribute("val");
+            double width = ln?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 ? emu / 12700 : 2.25;
+            return new ChartTrendline(type, SolidFill(ln, theme) ?? seriesColor, width, dash is not null and not "solid",
+                (int)Math.Clamp(Number(Child(t, "order"), "val", 2), 2, 6), (int)Math.Clamp(Number(Child(t, "period"), "val", 2), 2, 100),
+                Number(Child(t, "forward"), "val"), Number(Child(t, "backward"), "val"));
+        }
+
+        IReadOnlyList<ChartErrorBars>? ReadErrorBars(XElement ser, List<double?> values, List<double?>? xValues, ChartKind seriesKind)
+        {
+            var result = new List<ChartErrorBars>();
+            foreach (var bars in ser.Elements().Where(e => e.Name.LocalName == "errBars"))
+            {
+                bool horizontal = (string?)Child(bars, "errDir")?.Attribute("val") == "x" && xValues is not null;
+                var data = horizontal ? xValues! : values;
+                var type = (string?)Child(bars, "errBarType")?.Attribute("val") ?? "both";
+                var valueType = (string?)Child(bars, "errValType")?.Attribute("val") ?? "fixedVal";
+                double amount = Number(Child(bars, "val"), "val", 1);
+                var present = data.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+                double mean = present.Count > 0 ? present.Average() : 0;
+                double deviation = present.Count > 1 ? Math.Sqrt(present.Sum(v => (v - mean) * (v - mean)) / (present.Count - 1)) : 0;
+                var plus = new double[data.Count];
+                var minus = new double[data.Count];
+                var customPlus = valueType == "cust" ? Numbers(Child(bars, "plus")).Values : null;
+                var customMinus = valueType == "cust" ? Numbers(Child(bars, "minus")).Values : null;
+                for (int i = 0; i < data.Count; i++)
+                {
+                    if (data[i] is not { } v) continue;
+                    double up = valueType switch
+                    {
+                        "percentage" => Math.Abs(v) * amount / 100,
+                        "stdDev" => amount * deviation,
+                        "stdErr" => present.Count > 0 ? deviation / Math.Sqrt(present.Count) : 0,
+                        "cust" => customPlus is not null && customPlus.Count > 0 ? customPlus[Math.Min(i, customPlus.Count - 1)] ?? 0 : 0,
+                        _ => amount,
+                    };
+                    double down = valueType == "cust" ? (customMinus is not null && customMinus.Count > 0 ? customMinus[Math.Min(i, customMinus.Count - 1)] ?? 0 : 0) : up;
+                    plus[i] = type == "minus" ? 0 : Math.Abs(up);
+                    minus[i] = type == "plus" ? 0 : Math.Abs(down);
+                }
+                var line = Path(bars, "spPr", "ln");
+                double lineWidth = line?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 ? emu / 12700 : 1;
+                result.Add(new ChartErrorBars(horizontal, plus, minus, !Flag(Child(bars, "noEndCap"), "val"), SolidFill(line, theme), lineWidth));
+            }
+            return result.Count > 0 ? result : null;
         }
 
         var kind = KindOf(group);
@@ -265,6 +323,11 @@ internal static class XlsxCharts
             {
                 foreach (var v in list.SelectMany(s => s.Values))
                     if (v is { } x) { (lo, hi) = (Math.Min(lo, x), Math.Max(hi, x)); if (x > 0) loPositive = Math.Min(loPositive, x); }
+                // Error bars extend the automatic scale.
+                foreach (var sr in list)
+                    foreach (var bars in sr.ErrorBars?.Where(b => !b.Horizontal) ?? [])
+                        for (int p = 0; p < sr.Values.Count && p < bars.Plus.Count; p++)
+                            if (sr.Values[p] is { } x) (lo, hi) = (Math.Min(lo, x - bars.Minus[p]), Math.Max(hi, x + bars.Plus[p]));
                 if (g == ChartGrouping.Stacked)
                     for (int p = 0; p < points; p++)
                     {
@@ -289,6 +352,10 @@ internal static class XlsxCharts
             double xlo = double.MaxValue, xhi = double.MinValue, xPositive = double.MaxValue;
             foreach (var v in series.SelectMany(sr => sr.XValues ?? []))
                 if (v is { } x) { (xlo, xhi) = (Math.Min(xlo, x), Math.Max(xhi, x)); if (x > 0) xPositive = Math.Min(xPositive, x); }
+            foreach (var sr in series)
+                foreach (var bars in sr.ErrorBars?.Where(b => b.Horizontal) ?? [])
+                    for (int p = 0; p < (sr.XValues?.Count ?? 0) && p < bars.Plus.Count; p++)
+                        if (sr.XValues![p] is { } x) (xlo, xhi) = (Math.Min(xlo, x - bars.Minus[p]), Math.Max(xhi, x + bars.Plus[p]));
             string? xFallback = null;
             (xMin, xMax, xTicks, xLog, reverseX) = ValueScale(categoryAxis, xlo, xhi, xPositive, ChartGrouping.Clustered, xFallback);
         }
@@ -335,6 +402,23 @@ internal static class XlsxCharts
         }
         else if (!Flag(Child(chart, "autoTitleDeleted"), "val") && series.Count == 1 && slices) title = series[0].Name;
 
+        // Manual layouts count only when they are positions measured from the chart's edge, as Excel writes them.
+        static (double X, double Y, double W, double H, bool Inner, bool HasSize)? ManualLayout(XElement? holder)
+        {
+            var m = Path(holder, "layout", "manualLayout");
+            if (m is null || (string?)Child(m, "xMode")?.Attribute("val") != "edge" || (string?)Child(m, "yMode")?.Attribute("val") != "edge") return null;
+            if (Child(m, "x") is null || Child(m, "y") is null) return null;
+            double x = Number(Child(m, "x"), "val"), y = Number(Child(m, "y"), "val");
+            double w = Number(Child(m, "w"), "val"), h = Number(Child(m, "h"), "val");
+            if ((string?)Child(m, "wMode")?.Attribute("val") == "edge") w -= x;
+            if ((string?)Child(m, "hMode")?.Attribute("val") == "edge") h -= y;
+            return (x, y, w, h, (string?)Child(m, "layoutTarget")?.Attribute("val") == "inner", Child(m, "w") is not null && Child(m, "h") is not null);
+        }
+        ChartBox? plotBox = null;
+        if (ManualLayout(plot) is { HasSize: true } pl && pl.X >= 0 && pl.Y >= 0 && pl.W > 0.05 && pl.H > 0.05 && pl.X + pl.W <= 1.001 && pl.Y + pl.H <= 1.001)
+            plotBox = new ChartBox(pl.X, pl.Y, pl.W, pl.H, pl.Inner);
+        (double X, double Y)? titlePosition = ManualLayout(titleElement) is { } tl && tl.X is >= 0 and < 1 && tl.Y is >= 0 and < 1 ? (tl.X, tl.Y) : null;
+
         var legendElement = Child(chart, "legend");
         var legend = legendElement is null ? LegendPosition.None : (string?)Child(legendElement, "legendPos")?.Attribute("val") switch
         {
@@ -374,6 +458,7 @@ internal static class XlsxCharts
             ReverseCategories = (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") == "maxMin" && !xy,
             ExtraGroups = extraGroups, SecondaryTicks = secondaryTicks, SecondaryMin = secondaryMin, SecondaryMax = secondaryMax,
             SecondaryAxisTitle = secondaryTitle, ShowSecondaryAxis = secondaryShown,
+            PlotArea = plotBox, TitlePosition = titlePosition,
         };
     }
 
