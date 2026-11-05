@@ -333,6 +333,16 @@ public class SheetShapeLayoutTests
         Assert.Equal((left + 50, top + 20), (tiles.Min(t => t.X), tiles.Min(t => t.Y)));
         Assert.All(tiles, t => Assert.Equal((30.0, 20.0), (t.Width, t.Height)));
         Assert.All(tiles, t => Assert.Equal(4, t.Clip!.Count));
+        // Mirrored tiles: every other tile across x, y or both is flipped, with a clip that still follows the outline once flipped back.
+        List<LayoutItem> Mirrored(string flip) => Page(Shape(fill: Red) with { FillImage = picture, FillTile = new ShapeTile(30, 20, 0, 0, "tl", flip) }).Items;
+        Assert.DoesNotContain(Mirrored("none").OfType<PushItem>(), p => p.FlipH || p.FlipV);
+        Assert.Equal(4, Mirrored("x").OfType<PushItem>().Count(p => p.FlipH && !p.FlipV));   // columns 1 and 3 of both rows
+        Assert.Equal(4, Mirrored("y").OfType<PushItem>().Count(p => p.FlipV && !p.FlipH));   // the second row
+        Assert.Equal(6, Mirrored("xy").OfType<PushItem>().Count(p => p.FlipH || p.FlipV));   // every tile of an odd row or column
+        var flippedClips = Mirrored("x").OfType<ImageItem>().Where(t => t.Clip is not null).Select(t => t.Clip!.Min(p => p.X)).Distinct().OrderBy(v => v).ToList();
+        // The frame starts at left + 50 and is 100 wide: tile column 1 is centered 45 and column 3 105 points in, so its outline is mirrored about those.
+        Assert.Contains(flippedClips, v => Math.Abs(v - (left + 40)) < 1e-6);
+        Assert.Contains(flippedClips, v => Math.Abs(v - (left + 160)) < 1e-6);
         // From the bottom-right corner (and shifted 5 points right) the grid lines up with that corner instead.
         var right = Page(Shape(fill: Red) with { FillImage = picture, FillTile = new ShapeTile(30, 20, 5, 0, "br") }).Items.OfType<ImageItem>().ToList();
         Assert.Contains(right, t => Math.Abs(t.X + t.Width - (left + 155)) < 1e-6 && Math.Abs(t.Y + t.Height - (top + 60)) < 1e-6);

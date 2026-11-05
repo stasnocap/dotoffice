@@ -108,7 +108,7 @@ public sealed record ShapeShadow(Color Color, double Opacity, double Dx, double 
 /// A picture fill repeated over the shape: tiles of <paramref name="Width"/> x <paramref name="Height"/> points, shifted by the offsets, starting
 /// from the corner or edge <paramref name="Alignment"/> names (tl, t, tr, l, ctr, r, bl, b, br).
 /// </summary>
-public sealed record ShapeTile(double Width, double Height, double OffsetX, double OffsetY, string Alignment = "tl");
+public sealed record ShapeTile(double Width, double Height, double OffsetX, double OffsetY, string Alignment = "tl", string Flip = "none");
 
 /// <summary>A glow: the shape's outline spread by <paramref name="Radius"/> points in a translucent color.</summary>
 public sealed record ShapeGlow(Color Color, double Opacity, double Radius);

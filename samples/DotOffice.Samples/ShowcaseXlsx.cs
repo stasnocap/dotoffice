@@ -481,6 +481,7 @@ internal static class ShowcaseXlsx
         // Tiled and translucent picture fills, a glow, soft edges and a rotated group.
         string Blip(string inside, string rest) => $"<a:blipFill><a:blip r:embed=\"rId1\">{inside}</a:blip>{rest}</a:blipFill>";
         anchors.Append(OneCell(1, 31, 0, 0, 100, 60, Shape("rect", "Tiled picture", "", Line("404040", 1), Text("Tiled picture", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("", "<a:tile tx=\"0\" ty=\"0\" sx=\"30000\" sy=\"30000\" algn=\"tl\" flip=\"none\"/>"))));
+        anchors.Append(OneCell(5, 37, 0, 0, 100, 60, Shape("rect", "Mirrored tiles", "", Line("404040", 1), Text("Mirrored tiles", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("", "<a:tile tx=\"0\" ty=\"0\" sx=\"30000\" sy=\"30000\" algn=\"tl\" flip=\"xy\"/>"))));
         anchors.Append(OneCell(3, 31, 0, 0, 100, 60, Shape("rect", "Translucent picture", "", Line("404040", 1), Text("Translucent picture", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("<a:alphaModFix amt=\"45000\"/>", "<a:stretch><a:fillRect/></a:stretch>"))));
         anchors.Append(OneCell(5, 31, 0, 0, 100, 50, Shadowed("Glow", "ellipse", "5B9BD5", "<a:effectLst><a:glow rad=\"101600\"><a:srgbClr val=\"FFC000\"><a:alpha val=\"45000\"/></a:srgbClr></a:glow></a:effectLst>")));
         anchors.Append(OneCell(7, 31, 0, 0, 100, 50, Shadowed("Soft edges", "rect", "C00000", "<a:effectLst><a:softEdge rad=\"127000\"/></a:effectLst>")));

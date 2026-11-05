@@ -276,7 +276,7 @@ if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "
 fills_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape fills" ] && fills_page=$p; done
 fills_text=$(page_text "$fills_page")
-for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides" "Blurred shadow" "Picture fill" "Cut to an ellipse" "Rectangular" "Circular" "Tiled picture" "Translucent picture" "Glow" "Soft edges" "A rotated group"; do
+for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides" "Blurred shadow" "Picture fill" "Cut to an ellipse" "Rectangular" "Circular" "Tiled picture" "Mirrored tiles" "Translucent picture" "Glow" "Soft edges" "A rotated group"; do
   [[ $fills_text == *"$text"* ]] || fail "missing shape text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape fills"; then fail "the shape fills sheet should not warn"; fi

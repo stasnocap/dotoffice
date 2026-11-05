@@ -235,7 +235,18 @@ public sealed partial class SheetLayoutEngine
         if ((long)(lastColumn - firstColumn + 1) * (lastRow - firstRow + 1) > 2500) return false;
         for (int row = firstRow; row <= lastRow; row++)
             for (int column = firstColumn; column <= lastColumn; column++)
-                items.Add(new ImageItem(originX + column * tile.Width, originY + row * tile.Height, tile.Width, tile.Height, picture) { Clip = outline });
+            {
+                double tileX = originX + column * tile.Width, tileY = originY + row * tile.Height;
+                // A mirrored fill flips every other tile (counted from the one at the origin) across x, y or both.
+                bool flipH = tile.Flip is "x" or "xy" && ((column % 2) + 2) % 2 == 1, flipV = tile.Flip is "y" or "xy" && ((row % 2) + 2) % 2 == 1;
+                if (!flipH && !flipV) { items.Add(new ImageItem(tileX, tileY, tile.Width, tile.Height, picture) { Clip = outline }); continue; }
+                // The picture is mirrored about its tile's center; the clip is given mirrored too, so that it comes back to the outline.
+                double cx = tileX + tile.Width / 2, cy = tileY + tile.Height / 2;
+                var clip = outline.Select(p => (flipH ? 2 * cx - p.X : p.X, flipV ? 2 * cy - p.Y : p.Y)).ToList();
+                items.Add(new PushItem(null, 0, cx, cy, flipH, flipV));
+                items.Add(new ImageItem(tileX, tileY, tile.Width, tile.Height, picture) { Clip = clip });
+                items.Add(new PopItem());
+            }
         return true;
     }
 

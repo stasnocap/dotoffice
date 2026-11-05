@@ -342,7 +342,9 @@ public class XlsxShapeTests
         var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"><a:alphaModFix amt=\"40000\"/></a:blip><a:tile tx=\"127000\" ty=\"254000\" sx=\"400000\" sy=\"200000\" algn=\"ctr\"/></a:blipFill>"));
         Assert.NotNull(shape.FillImage);
         var tile = shape.FillTile!;
-        Assert.Equal((6.0, 3.0, 10.0, 20.0, "ctr"), (tile.Width, tile.Height, tile.OffsetX, tile.OffsetY, tile.Alignment));
+        Assert.Equal((6.0, 3.0, 10.0, 20.0, "ctr", "none"), (tile.Width, tile.Height, tile.OffsetX, tile.OffsetY, tile.Alignment, tile.Flip));
+        var mirrored = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile flip=\"xy\"/></a:blipFill>"));
+        Assert.Equal("xy", mirrored.FillTile!.Flip);
         Assert.Equal(0.4, shape.FillImageAlpha);
         var plain = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:stretch/></a:blipFill>"));
         Assert.Null(plain.FillTile);

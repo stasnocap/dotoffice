@@ -405,10 +405,9 @@ internal static class XlsxDrawings
                 {
                     double scaleX = t.Attribute("sx") is null ? 1 : Number(t, "sx") / 100_000.0, scaleY = t.Attribute("sy") is null ? 1 : Number(t, "sy") / 100_000.0;
                     double width = size.Width / size.Dpi * 72 * scaleX, height = size.Height / size.Dpi * 72 * scaleY;
-                    if (width >= 1 && height >= 1) tile = new ShapeTile(width, height, Number(t, "tx") / EmuPerPoint, Number(t, "ty") / EmuPerPoint, (string?)t.Attribute("algn") ?? "tl");
+                    if (width >= 1 && height >= 1) tile = new ShapeTile(width, height, Number(t, "tx") / EmuPerPoint, Number(t, "ty") / EmuPerPoint, (string?)t.Attribute("algn") ?? "tl", (string?)t.Attribute("flip") ?? "none");
                 }
                 if (tile is null) state.Note("tiled picture fills of this picture are stretched over the shape");
-                else if ((string?)t.Attribute("flip") is { } flip && flip != "none") state.Note("mirrored tiles of a picture fill are drawn unmirrored");
             }
             return (image, tile, alpha);
         }
