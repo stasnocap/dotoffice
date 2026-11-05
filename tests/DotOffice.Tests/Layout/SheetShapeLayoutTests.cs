@@ -152,4 +152,70 @@ public class SheetShapeLayoutTests
         Assert.Equal((Origin.Left + 100, Origin.Left + 150), (xs.Min(p => p.X), xs.Max(p => p.X)));
         Assert.Equal((Origin.Top + 20, Origin.Top + 40), (xs.Min(p => p.Y), xs.Max(p => p.Y)));
     }
+
+    private static readonly IReadOnlyList<GradientStop> RedBlue = [new GradientStop(0, Red), new GradientStop(1, Blue)];
+
+    [Fact]
+    public void A_gradient_fill_is_one_gradient_clipped_to_the_outline()
+    {
+        var fill = new GradientFill { Kind = GradientKind.Linear, Degree = 90, Stops = RedBlue };
+        var rectangle = Page(Shape(fill: Red) with { FillGradient = fill }).Items.OfType<GradientItem>().Single();
+        Assert.Null(rectangle.Clip);
+        Assert.Equal(90, rectangle.Degree);
+        var diamond = Page(Shape(ShapeGeometry.Diamond, Red) with { FillGradient = fill }).Items.OfType<GradientItem>().Single();
+        Assert.Equal(4, diamond.Clip!.Count);
+        var path = Page(Shape(ShapeGeometry.Ellipse, Red) with { FillGradient = new GradientFill { Kind = GradientKind.Path, Left = 0.5, Right = 0.5, Top = 0.5, Bottom = 0.5, Stops = RedBlue } }).Items.OfType<GradientItem>().Single();
+        Assert.True(path.Radial);
+        Assert.Equal(0.5, path.FocusX);
+        Assert.Empty(Page(Shape(fill: Red) with { FillGradient = fill }).Items.OfType<PolygonItem>());
+    }
+
+    [Fact]
+    public void A_line_with_a_triangle_arrowhead_stops_at_its_base()
+    {
+        var shape = Shape(ShapeGeometry.Line, line: Blue) with { TailEnd = new LineEnd(LineEndKind.Triangle, 3, 3), LineWidth = 2 };
+        var page = Page(shape);
+        var head = page.Items.OfType<PolygonItem>().Single();
+        Assert.Equal(Blue, head.Fill);
+        var line = page.Items.OfType<LineItem>().Single();
+        var (left, top) = Origin;
+        var tip = (X: left + 150, Y: top + 60);
+        Assert.Contains(head.Points, p => Math.Abs(p.X - tip.X) < 1e-6 && Math.Abs(p.Y - tip.Y) < 1e-6);
+        double gap = Math.Sqrt(Math.Pow(line.X2 - tip.X, 2) + Math.Pow(line.Y2 - tip.Y, 2));
+        Assert.InRange(gap, 5, 6.5); // 90 % of the 6 pt head length
+        Assert.Equal((left + 50, top + 20), (Math.Round(line.X1, 6), Math.Round(line.Y1, 6))); // no head at the start
+    }
+
+    [Fact]
+    public void Every_arrowhead_kind_draws_something_at_the_end()
+    {
+        foreach (var kind in new[] { LineEndKind.Triangle, LineEndKind.Stealth, LineEndKind.Arrow, LineEndKind.Oval, LineEndKind.Diamond })
+        {
+            var page = Page(Shape(ShapeGeometry.Line, line: Blue) with { HeadEnd = new LineEnd(kind, 3, 3) });
+            Assert.True(page.Items.OfType<PolygonItem>().Any() || page.Items.OfType<EllipseItem>().Any() || page.Items.OfType<LineItem>().Count() > 1, kind.ToString());
+        }
+    }
+
+    [Fact]
+    public void Connector_paths_are_stroked_segment_by_segment_over_the_frame()
+    {
+        var shape = Shape(ShapeGeometry.Line, line: Blue) with { Paths = [new ShapePath([(0, 0), (0.5, 0), (0.5, 1), (1, 1)], false, Fill: false)] };
+        var lines = Page(shape).Items.OfType<LineItem>().ToList();
+        var (left, top) = Origin;
+        Assert.Equal(3, lines.Count);
+        Assert.Equal((left + 50, top + 20), (Math.Round(lines[0].X1, 6), Math.Round(lines[0].Y1, 6)));
+        Assert.Equal((left + 100, top + 20), (Math.Round(lines[0].X2, 6), Math.Round(lines[0].Y2, 6)));
+        Assert.Equal((left + 150, top + 60), (Math.Round(lines[2].X2, 6), Math.Round(lines[2].Y2, 6)));
+    }
+
+    [Fact]
+    public void Custom_paths_are_filled_and_outlined()
+    {
+        var shape = Shape(ShapeGeometry.Custom, Red, Blue) with { Paths = [new ShapePath([(0, 0), (1, 0), (0.5, 1)], true)] };
+        var page = Page(shape);
+        Assert.Equal(3, page.Items.OfType<PolygonItem>().Single().Points.Count);
+        Assert.Equal(3, page.Items.OfType<LineItem>().Count());
+        var noFill = Page(shape with { Paths = [new ShapePath([(0, 0), (1, 0), (0.5, 1)], true, Fill: false)] });
+        Assert.Empty(noFill.Items.OfType<PolygonItem>());
+    }
 }

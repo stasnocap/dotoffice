@@ -128,9 +128,25 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     double radians = gradient.Degree * Math.PI / 180, dx = Math.Cos(radians), dy = Math.Sin(radians);
                     double half = (Math.Abs(gradient.Width * dx) + Math.Abs(gradient.Height * dy)) / 2;
                     double cx = gradient.X + gradient.Width / 2, cy = gradient.Y + gradient.Height / 2;
-                    var shading = _pdf.AddShading(PdfShading.Axial(cx - dx * half, h - (cy - dy * half), cx + dx * half, h - (cy + dy * half),
-                        gradient.Stops.Select(s => new ShadingStop(s.Position, s.Color.R / 255.0, s.Color.G / 255.0, s.Color.B / 255.0)).ToList()));
-                    canvas.SaveState().Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip().PaintShading(shading).RestoreState();
+                    var stops = gradient.Stops.Select(s => new ShadingStop(s.Position, s.Color.R / 255.0, s.Color.G / 255.0, s.Color.B / 255.0)).ToList();
+                    PdfShading shading;
+                    if (gradient.Radial)
+                    {
+                        // Blends outwards from the focus to the farthest corner.
+                        double fx = gradient.X + gradient.Width * gradient.FocusX, fy = gradient.Y + gradient.Height * gradient.FocusY;
+                        double reachX = Math.Max(fx - gradient.X, gradient.X + gradient.Width - fx), reachY = Math.Max(fy - gradient.Y, gradient.Y + gradient.Height - fy);
+                        shading = _pdf.AddShading(PdfShading.Radial(fx, h - fy, 0, fx, h - fy, Math.Max(Math.Sqrt(reachX * reachX + reachY * reachY), 0.01), stops));
+                    }
+                    else shading = _pdf.AddShading(PdfShading.Axial(cx - dx * half, h - (cy - dy * half), cx + dx * half, h - (cy + dy * half), stops));
+                    canvas.SaveState();
+                    if (gradient.Clip is { Count: >= 3 } clipPolygon)
+                    {
+                        canvas.MoveTo(clipPolygon[0].X, h - clipPolygon[0].Y);
+                        for (int k = 1; k < clipPolygon.Count; k++) canvas.LineTo(clipPolygon[k].X, h - clipPolygon[k].Y);
+                        canvas.ClosePath().Clip();
+                    }
+                    else canvas.Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip();
+                    canvas.PaintShading(shading).RestoreState();
                     break;
                 }
                 case RectItem rect:

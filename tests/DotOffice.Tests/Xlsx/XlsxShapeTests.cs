@@ -140,4 +140,81 @@ public class XlsxShapeTests
         Assert.Equal([0, 2], sheet.Shapes.Select(s => s.ZOrder));
         Assert.Equal(1, sheet.Images[0].ZOrder);
     }
+
+    private static string Connector(string preset, string avLst = "", string ln = "<a:ln w=\"12700\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln>") =>
+        "<xdr:cxnSp><xdr:nvCxnSpPr><xdr:cNvPr id=\"5\" name=\"Connector\"/><xdr:cNvCxnSpPr/></xdr:nvCxnSpPr><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1\" cy=\"1\"/></a:xfrm>" +
+        $"<a:prstGeom prst=\"{preset}\"><a:avLst>{avLst}</a:avLst></a:prstGeom>{ln}</xdr:spPr></xdr:cxnSp>";
+
+    [Fact]
+    public void A_gradient_fill_keeps_its_stops_angle_and_first_color()
+    {
+        var linear = ReadOne(Sp("<a:prstGeom prst=\"ellipse\"/><a:gradFill><a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"FF0000\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"0000FF\"/></a:gs></a:gsLst><a:lin ang=\"5400000\"/></a:gradFill>"));
+        Assert.Equal(new Color(255, 0, 0), linear.Fill);
+        var gradient = linear.FillGradient!;
+        Assert.Equal((GradientKind.Linear, 90.0), (gradient.Kind, gradient.Degree));
+        Assert.Equal([0.0, 1.0], gradient.Stops.Select(g => g.Position));
+        var radial = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:gradFill><a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"FFFFFF\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"000000\"/></a:gs></a:gsLst>" +
+                                "<a:path path=\"circle\"><a:fillToRect l=\"25000\" t=\"50000\" r=\"75000\" b=\"50000\"/></a:path></a:gradFill>")).FillGradient!;
+        Assert.Equal(GradientKind.Path, radial.Kind);
+        Assert.Equal((0.25, 0.25, 0.5, 0.5), (radial.Left, radial.Right, radial.Top, radial.Bottom));
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed)).FillGradient);
+    }
+
+    [Fact]
+    public void Arrowheads_are_read_from_the_line_ends()
+    {
+        var ends = "<a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"00FF00\"/></a:solidFill><a:headEnd type=\"oval\" w=\"lg\" len=\"sm\"/><a:tailEnd type=\"triangle\"/></a:ln>";
+        var shape = ReadOne(Connector("straightConnector1", ln: ends));
+        Assert.Equal(new LineEnd(LineEndKind.Oval, 5, 2), shape.HeadEnd);
+        Assert.Equal(new LineEnd(LineEndKind.Triangle, 3, 3), shape.TailEnd);
+        Assert.Equal(LineEndKind.None, ReadOne(Connector("line")).TailEnd.Kind);
+    }
+
+    [Fact]
+    public void Bent_and_curved_connectors_follow_their_routes_and_adjustments()
+    {
+        var bent = ReadOne(Connector("bentConnector3", "<a:gd name=\"adj1\" fmla=\"val 25000\"/>"));
+        Assert.Equal(ShapeGeometry.Line, bent.Geometry);
+        var path = Assert.Single(bent.Paths!);
+        Assert.False(path.Closed);
+        Assert.Equal([(0.0, 0.0), (0.25, 0.0), (0.25, 1.0), (1.0, 1.0)], path.Points);
+        Assert.Equal([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)], ReadOne(Connector("bentConnector2")).Paths![0].Points);
+        Assert.Equal(6, ReadOne(Connector("bentConnector5")).Paths![0].Points.Count);
+        var curved = ReadOne(Connector("curvedConnector3")).Paths![0].Points;
+        Assert.Equal((0.0, 0.0), curved[0]);
+        Assert.Equal((1.0, 1.0), curved[^1]);
+        Assert.Contains(curved, p => Math.Abs(p.X - 0.5) < 1e-9 && Math.Abs(p.Y - 0.5) < 1e-9); // the S-curve passes the middle
+        Assert.True(curved.Count > 10);
+    }
+
+    [Fact]
+    public void Curved_connectors_with_more_segments_are_approximate_and_say_so()
+    {
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Connector("curvedConnector4")));
+        Assert.Single(sheet.Shapes);
+        Assert.Contains("curved connectors", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void Custom_geometry_becomes_paths_in_fractions_of_the_frame()
+    {
+        var geometry = "<a:custGeom><a:avLst/><a:pathLst><a:path w=\"100\" h=\"50\"><a:moveTo><a:pt x=\"0\" y=\"0\"/></a:moveTo><a:lnTo><a:pt x=\"100\" y=\"0\"/></a:lnTo>" +
+                       "<a:cubicBezTo><a:pt x=\"100\" y=\"25\"/><a:pt x=\"75\" y=\"50\"/><a:pt x=\"50\" y=\"50\"/></a:cubicBezTo><a:close/></a:path></a:pathLst></a:custGeom>";
+        var shape = ReadOne(Sp(geometry + SolidRed));
+        Assert.Equal(ShapeGeometry.Custom, shape.Geometry);
+        var path = Assert.Single(shape.Paths!);
+        Assert.True(path.Closed);
+        Assert.Equal((0.0, 0.0), path.Points[0]);
+        Assert.Equal((1.0, 0.0), path.Points[1]);
+        Assert.Equal((0.5, 1.0), path.Points[^1]);
+    }
+
+    [Fact]
+    public void Custom_geometry_with_guide_formulas_is_still_reported_as_not_drawn()
+    {
+        var geometry = "<a:custGeom><a:avLst/><a:pathLst><a:path w=\"100\" h=\"100\"><a:moveTo><a:pt x=\"l\" y=\"t\"/></a:moveTo><a:lnTo><a:pt x=\"r\" y=\"b\"/></a:lnTo></a:path></a:pathLst></a:custGeom>";
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp(geometry + SolidRed)));
+        Assert.Empty(sheet.Shapes);
+        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing" && w.Message.Contains("custom geometry"));
+    }
 }

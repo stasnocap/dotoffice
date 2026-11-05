@@ -76,7 +76,18 @@ public sealed record EllipseItem(double X, double Y, double Width, double Height
 /// <summary>A rectangle filled with a linear gradient; <see cref="Degree"/> runs clockwise from left-to-right (90 = top to bottom).</summary>
 public sealed record GradientItem(double X, double Y, double Width, double Height, double Degree, IReadOnlyList<GradientStop> Stops) : LayoutItem
 {
-    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+    /// <summary>When set, the gradient is painted only inside this polygon (which lies within the box) instead of the whole box.</summary>
+    public IReadOnlyList<(double X, double Y)>? Clip { get; init; }
+
+    /// <summary>Whether the colors blend outwards from the focus (<see cref="FocusX"/>, <see cref="FocusY"/>, fractions of the box) instead of along <see cref="Degree"/>.</summary>
+    public bool Radial { get; init; }
+
+    public double FocusX { get; init; } = 0.5;
+
+    public double FocusY { get; init; } = 0.5;
+
+    public override LayoutItem Offset(double dx, double dy) =>
+        this with { X = X + dx, Y = Y + dy, Clip = Clip?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem

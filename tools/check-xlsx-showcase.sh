@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Charts" "More charts" "Chart options"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -129,6 +129,23 @@ for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.4392 0.1882 0.6275
 done
 grep -aq '^\[[0-9.]* [0-9.]*\] 0 d$' shapes-qdf.pdf || fail "the dashed outline is missing"
 if grep -E "warning xlsx\.drawing-approximated" "$log"; then fail "the supported shapes should not be reported as approximated"; fi
+
+# Shape paths: gradients are real shadings (axial and radial), arrowheads are filled, custom geometry is filled, nothing is reported.
+path_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape paths" ] && path_page=$p; done
+[ "$path_page" != 0 ] || fail "no page for the shape paths sheet"
+path_text=$(page_text "$path_page")
+for text in "Linear" "Radial" "Rounded" "Custom"; do
+  [[ $path_text == *"$text"* ]] || fail "missing shape text: $text"
+done
+qpdf --qdf --object-streams=disable "$pdf" paths-qdf.pdf
+shadings=$(grep -ac '^/[A-Za-z0-9]* sh$' paths-qdf.pdf || true)
+[ "$shadings" -ge 5 ] || fail "expected at least 5 shaded shapes (4 gradients and a heart), found $shadings"
+grep -aq "/ShadingType 3$" paths-qdf.pdf || fail "the radial gradient should be a type 3 shading"
+for color in "1 0.7529 0" "0.4392 0.1882 0.6275"; do
+  grep -aq "^$color rg$" paths-qdf.pdf || fail "shape or arrowhead fill $color is missing"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape paths"; then fail "the shape paths sheet should not warn"; fi
 
 # Charts: six drawn on one page (titles, legend entries, axis labels, pie percentages, series colors), the stock chart is the only one reported.
 chart_pages=0; chart_page=0

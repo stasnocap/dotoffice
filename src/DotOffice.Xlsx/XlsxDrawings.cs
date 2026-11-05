@@ -232,20 +232,35 @@ internal static class XlsxDrawings
         var spPr = Child(shape, "spPr");
         var xfrm = Child(spPr, "xfrm");
 
-        if (Child(spPr, "custGeom") is not null)
-        {
-            state.Shapes++;
-            return;
-        }
+        IReadOnlyList<ShapePath>? paths = null;
+        ShapeGeometry? geometry;
         var preset = (string?)Child(spPr, "prstGeom")?.Attribute("prst");
-        var geometry = GeometryOf(preset);
-        if (geometry is null)
+        if (Child(spPr, "custGeom") is { } custom)
         {
-            state.Note($"shapes of the geometry '{preset}' are drawn as rectangles");
-            geometry = connector ? ShapeGeometry.Line : ShapeGeometry.Rectangle;
+            paths = ReadCustomGeometry(custom, Number(Child(xfrm, "ext"), "cx"), Number(Child(xfrm, "ext"), "cy"));
+            if (paths is null)
+            {
+                state.Shapes++; // paths that use guide formulas are not evaluated
+                return;
+            }
+            geometry = ShapeGeometry.Custom;
         }
-        else if (connector) geometry = ShapeGeometry.Line;
-        if (connector && preset is not (null or "line" or "straightConnector1")) state.Note("bent and curved connectors are drawn as straight lines");
+        else if (preset is not null && ConnectorPath(preset, Child(spPr, "prstGeom")) is { } route)
+        {
+            paths = [new ShapePath(route, false, Fill: false)];
+            geometry = ShapeGeometry.Line;
+            if (preset is "curvedConnector4" or "curvedConnector5") state.Note("curved connectors with four or five segments are drawn approximately");
+        }
+        else
+        {
+            geometry = GeometryOf(preset);
+            if (geometry is null)
+            {
+                state.Note($"shapes of the geometry '{preset}' are drawn as rectangles");
+                geometry = connector ? ShapeGeometry.Line : ShapeGeometry.Rectangle;
+            }
+            else if (connector) geometry = ShapeGeometry.Line;
+        }
 
         // The theme's style references stand in for what the shape does not state itself.
         var style = Child(shape, "style");
@@ -253,7 +268,9 @@ internal static class XlsxDrawings
         Color? StyleColor(string name) => Resolve(Child(style, name), theme);
         var fillRef = Child(style, "fillRef");
         var lineRef = Child(style, "lnRef");
-        Color? fill = geometry == ShapeGeometry.Line ? null : SolidFill(spPr, theme, Number(fillRef, "idx") > 0 ? StyleColor("fillRef") : null);
+        bool lineOnly = geometry == ShapeGeometry.Line;
+        Color? fill = lineOnly ? null : SolidFill(spPr, theme, Number(fillRef, "idx") > 0 ? StyleColor("fillRef") : null);
+        GradientFill? gradient = lineOnly ? null : ReadGradientFill(spPr, theme, state);
 
         var ln = Child(spPr, "ln");
         Color? lineColor;
@@ -268,6 +285,13 @@ internal static class XlsxDrawings
         if ((string?)Child(ln, "prstDash")?.Attribute("val") is { } dash && dash != "solid")
             lineStyle = dash is "sysDot" or "dot" or "sysDash" ? StrokeStyle.Dotted : StrokeStyle.Dashed;
         if (geometry == ShapeGeometry.Line && lineColor is null && ln is null) lineColor = Color.Black;
+        LineEnd End(string name)
+        {
+            var e = Child(ln, name);
+            var kind = (string?)e?.Attribute("type") switch { "triangle" => LineEndKind.Triangle, "stealth" => LineEndKind.Stealth, "arrow" => LineEndKind.Arrow, "oval" => LineEndKind.Oval, "diamond" => LineEndKind.Diamond, _ => LineEndKind.None };
+            double Size(string attribute) => (string?)e?.Attribute(attribute) switch { "sm" => 2, "lg" => 5, _ => 3 };
+            return new LineEnd(kind, Size("w"), Size("len"));
+        }
 
         // Text: the default color is the style's font color (white on the theme's default shapes).
         var fontColor = Resolve(Child(style, "fontRef"), theme);
@@ -284,6 +308,9 @@ internal static class XlsxDrawings
             ZOrder = state.ZOrder++,
             Geometry = geometry.Value,
             Fill = fill,
+            FillGradient = gradient,
+            Paths = paths,
+            HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
             LineColor = lineColor,
             LineWidth = lineWidth,
             LineStyle = lineStyle,
@@ -292,6 +319,164 @@ internal static class XlsxDrawings
             TextInsets = new Thickness(Inset("tIns", 3.6), Inset("rIns", 7.2), Inset("bIns", 3.6), Inset("lIns", 7.2)),
             WrapText = (string?)body?.Attribute("wrap") != "none",
         });
+    }
+
+    /// <summary>
+    /// A gradient fill of a shape: the stops, and either the angle of a linear gradient or the focus of a path gradient (which is drawn
+    /// radially). Null when the fill is not a gradient.
+    /// </summary>
+    private static GradientFill? ReadGradientFill(XElement? spPr, XlsxTheme theme, State state)
+    {
+        var first = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
+        if (first is null || first.Name.LocalName != "gradFill") return null;
+        var stops = new List<GradientStop>();
+        foreach (var gs in Child(first, "gsLst")?.Elements().Where(e => e.Name.LocalName == "gs") ?? [])
+            if (Resolve(gs, theme) is { } color) stops.Add(new GradientStop(Math.Clamp(Number(gs, "pos") / 100_000.0, 0, 1), color));
+        if (stops.Count < 2) return null;
+        stops = stops.OrderBy(g => g.Position).ToList();
+        var path = Child(first, "path");
+        if (path is not null)
+        {
+            if ((string?)path.Attribute("path") == "rect") state.Note("rectangular path gradients are drawn as radial ones");
+            var focus = Child(path, "fillToRect");
+            double Edge(string name, double fallback) => focus?.Attribute(name) is null ? fallback : Number(focus, name) / 100_000.0;
+            double l = Edge("l", 0.5), t = Edge("t", 0.5), r = Edge("r", 0.5), b = Edge("b", 0.5);
+            return new GradientFill { Kind = GradientKind.Path, Left = l, Right = 1 - r, Top = t, Bottom = 1 - b, Stops = stops };
+        }
+        double degree = Child(first, "lin")?.Attribute("ang") is not null ? Number(Child(first, "lin"), "ang") / 60_000.0 : 0;
+        return new GradientFill { Kind = GradientKind.Linear, Degree = degree, Stops = stops };
+    }
+
+    /// <summary>The route of a bent or curved connector as points in fractions of its frame; null for any other geometry.</summary>
+    private static List<(double X, double Y)>? ConnectorPath(string preset, XElement? prstGeom)
+    {
+        double Adjust(string name, double fallback)
+        {
+            var gd = prstGeom?.Elements().FirstOrDefault(e => e.Name.LocalName == "avLst")?.Elements().FirstOrDefault(e => (string?)e.Attribute("name") == name);
+            return gd?.Attribute("fmla")?.Value is { } f && f.StartsWith("val ", StringComparison.Ordinal) && double.TryParse(f.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v / 100_000.0 : fallback;
+        }
+        static void Curve(List<(double X, double Y)> points, (double X, double Y) p0, (double X, double Y) c1, (double X, double Y) c2, (double X, double Y) p3)
+        {
+            for (int k = 1; k <= 16; k++)
+            {
+                double t = k / 16.0, u = 1 - t;
+                points.Add((u * u * u * p0.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p3.X,
+                            u * u * u * p0.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p3.Y));
+            }
+        }
+        switch (preset)
+        {
+            case "bentConnector2": return [(0, 0), (1, 0), (1, 1)];
+            case "bentConnector3": { double x1 = Adjust("adj1", 0.5); return [(0, 0), (x1, 0), (x1, 1), (1, 1)]; }
+            case "bentConnector4": { double x1 = Adjust("adj1", 0.5), y2 = Adjust("adj2", 0.5); return [(0, 0), (x1, 0), (x1, y2), (1, y2), (1, 1)]; }
+            case "bentConnector5": { double x1 = Adjust("adj1", 0.5), y2 = Adjust("adj2", 0.5), x3 = Adjust("adj3", 0.5); return [(0, 0), (x1, 0), (x1, y2), (x3, y2), (x3, 1), (1, 1)]; }
+            case "curvedConnector2":
+            {
+                var points = new List<(double X, double Y)> { (0, 0) };
+                Curve(points, (0, 0), (0.5, 0), (1, 0.5), (1, 1));
+                return points;
+            }
+            case "curvedConnector3":
+            {
+                double x2 = Adjust("adj1", 0.5);
+                var points = new List<(double X, double Y)> { (0, 0) };
+                Curve(points, (0, 0), (x2 / 2, 0), (x2, 0.25), (x2, 0.5));
+                Curve(points, (x2, 0.5), (x2, 0.75), ((1 + x2) / 2, 1), (1, 1));
+                return points;
+            }
+            case "curvedConnector4" or "curvedConnector5":
+            {
+                // Rounded through the corners of the matching bent connector.
+                var corners = ConnectorPath(preset.Replace("curved", "bent"), prstGeom)!;
+                var points = new List<(double X, double Y)> { corners[0] };
+                for (int i = 0; i + 1 < corners.Count; i++)
+                {
+                    var p0 = corners[Math.Max(i - 1, 0)]; var p1 = corners[i]; var p2 = corners[i + 1]; var p3 = corners[Math.Min(i + 2, corners.Count - 1)];
+                    Curve(points, p1, (p1.X + (p2.X - p0.X) / 6, p1.Y + (p2.Y - p0.Y) / 6), (p2.X - (p3.X - p1.X) / 6, p2.Y - (p3.Y - p1.Y) / 6), p2);
+                }
+                return points;
+            }
+            default: return null;
+        }
+    }
+
+    /// <summary>
+    /// The paths of a custom geometry as polylines in fractions of the shape's frame. Null when the geometry uses guide formulas rather
+    /// than plain numbers, or has nothing to draw.
+    /// </summary>
+    private static List<ShapePath>? ReadCustomGeometry(XElement custGeom, double widthEmu, double heightEmu)
+    {
+        var result = new List<ShapePath>();
+        foreach (var path in Child(custGeom, "pathLst")?.Elements().Where(e => e.Name.LocalName == "path") ?? [])
+        {
+            double w = Number(path, "w"), h = Number(path, "h");
+            if (w <= 0) w = widthEmu;
+            if (h <= 0) h = heightEmu;
+            if (w <= 0 || h <= 0) return null;
+            bool valid = true;
+            (double X, double Y) Pt(XElement? pt)
+            {
+                if (!double.TryParse((string?)pt?.Attribute("x"), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                    !double.TryParse((string?)pt?.Attribute("y"), NumberStyles.Float, CultureInfo.InvariantCulture, out var y)) { valid = false; return (0, 0); }
+                return (x / w, y / h);
+            }
+            bool fill = (string?)path.Attribute("fill") != "none", stroke = (string?)path.Attribute("stroke") is not ("0" or "false");
+            var points = new List<(double X, double Y)>();
+            void Flush(bool closed)
+            {
+                if (points.Count >= 2) result.Add(new ShapePath(points.ToList(), closed, fill, stroke));
+                points.Clear();
+            }
+            foreach (var command in path.Elements())
+            {
+                var pts = command.Elements().Where(e => e.Name.LocalName == "pt").ToList();
+                switch (command.Name.LocalName)
+                {
+                    case "moveTo": Flush(false); points.Add(Pt(pts.FirstOrDefault())); break;
+                    case "lnTo": points.Add(Pt(pts.FirstOrDefault())); break;
+                    case "cubicBezTo" when pts.Count == 3 && points.Count > 0:
+                    {
+                        var (p0, c1, c2, p3) = (points[^1], Pt(pts[0]), Pt(pts[1]), Pt(pts[2]));
+                        for (int k = 1; k <= 16; k++)
+                        {
+                            double t = k / 16.0, u = 1 - t;
+                            points.Add((u * u * u * p0.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p3.X, u * u * u * p0.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p3.Y));
+                        }
+                        break;
+                    }
+                    case "quadBezTo" when pts.Count == 2 && points.Count > 0:
+                    {
+                        var (p0, c, p2) = (points[^1], Pt(pts[0]), Pt(pts[1]));
+                        for (int k = 1; k <= 12; k++)
+                        {
+                            double t = k / 12.0, u = 1 - t;
+                            points.Add((u * u * p0.X + 2 * u * t * c.X + t * t * p2.X, u * u * p0.Y + 2 * u * t * c.Y + t * t * p2.Y));
+                        }
+                        break;
+                    }
+                    case "arcTo" when points.Count > 0:
+                    {
+                        // An arc of an ellipse with radii wR and hR from the current point, starting at stAng and sweeping swAng.
+                        double wr = Number(command, "wR") / w, hr = Number(command, "hR") / h, start = Number(command, "stAng") / 60_000.0 * Math.PI / 180, sweep = Number(command, "swAng") / 60_000.0 * Math.PI / 180;
+                        if (command.Attribute("wR") is null || command.Attribute("hR") is null || command.Attribute("stAng") is null || command.Attribute("swAng") is null) { valid = false; break; }
+                        var current = points[^1];
+                        double cx = current.X - wr * Math.Cos(start), cy = current.Y - hr * Math.Sin(start);
+                        int steps = Math.Max(4, (int)Math.Ceiling(Math.Abs(sweep) * 180 / Math.PI / 6));
+                        for (int k = 1; k <= steps; k++)
+                        {
+                            double angle = start + sweep * k / steps;
+                            points.Add((cx + wr * Math.Cos(angle), cy + hr * Math.Sin(angle)));
+                        }
+                        break;
+                    }
+                    case "close": Flush(true); break;
+                    default: valid = false; break;
+                }
+                if (!valid) return null;
+            }
+            Flush(false);
+        }
+        return result.Count > 0 ? result : null;
     }
 
     private static List<ShapeParagraph> ReadText(XElement? txBody, XlsxTheme theme, Color? defaultColor, out XElement? bodyProperties)

@@ -98,23 +98,100 @@ public sealed partial class SheetLayoutEngine
     private static void EmitOutline(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
     {
         var dash = shape.LineStyle switch { StrokeStyle.Dotted => LineStyle.Dotted, StrokeStyle.Dashed => LineStyle.Dashed, _ => LineStyle.Solid };
-        if (shape.Geometry == ShapeGeometry.Line)
+        double strokeWidth = Math.Max(shape.LineWidth, 0.25);
+        if (shape.Paths is { } paths)
         {
-            if (shape.LineColor is { } lineColor) items.Add(new LineItem(x, y, x + w, y + h, Math.Max(shape.LineWidth, 0.25), lineColor, dash));
+            foreach (var path in paths)
+            {
+                var points = path.Points.Select(p => (X: x + p.X * w, Y: y + p.Y * h)).ToList();
+                if (points.Count < 2) continue;
+                if (path.Fill && points.Count >= 3 && (path.Closed || shape.Geometry == ShapeGeometry.Custom)) EmitFill(shape, points, x, y, w, h, false, items);
+                if (shape.LineColor is not { } color || shape.LineWidth <= 0 || !path.Stroke) continue;
+                EmitStroke(points, path.Closed, strokeWidth, color, dash, path.Closed ? default : shape.HeadEnd, path.Closed ? default : shape.TailEnd, items);
+            }
             return;
         }
-        var points = Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList();
-        if (shape.Fill is { } fill)
+        if (shape.Geometry == ShapeGeometry.Line)
         {
-            if (shape.Geometry == ShapeGeometry.Ellipse) items.Add(new EllipseItem(x, y, w, h, fill));
+            if (shape.LineColor is { } lineColor)
+                EmitStroke([(x, y), (x + w, y + h)], false, strokeWidth, lineColor, dash, shape.HeadEnd, shape.TailEnd, items);
+            return;
+        }
+        var outline = Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList();
+        EmitFill(shape, outline, x, y, w, h, shape.Geometry == ShapeGeometry.Ellipse, items);
+        if (shape.LineColor is { } color2 && shape.LineWidth > 0)
+            EmitStroke(outline, true, shape.LineWidth, color2, dash, default, default, items);
+    }
+
+    /// <summary>Fills an outline: with its gradient, as an ellipse when it is one, else as a polygon.</summary>
+    private static void EmitFill(SheetShape shape, List<(double X, double Y)> points, double x, double y, double w, double h, bool ellipse, List<LayoutItem> items)
+    {
+        if (shape.FillGradient is { } gradient && gradient.Stops.Count >= 2)
+        {
+            bool box = shape.Geometry == ShapeGeometry.Rectangle;
+            items.Add(new GradientItem(x, y, w, h, gradient.Degree, gradient.Stops)
+            {
+                Clip = box ? null : points,
+                Radial = gradient.Kind == GradientKind.Path,
+                FocusX = (gradient.Left + gradient.Right) / 2, FocusY = (gradient.Top + gradient.Bottom) / 2,
+            });
+        }
+        else if (shape.Fill is { } fill)
+        {
+            if (ellipse) items.Add(new EllipseItem(x, y, w, h, fill));
             else items.Add(new PolygonItem(points, fill));
         }
-        if (shape.LineColor is { } color && shape.LineWidth > 0)
-            for (int i = 0; i < points.Count; i++)
-            {
-                var (a, b) = (points[i], points[(i + 1) % points.Count]);
-                items.Add(new LineItem(a.X, a.Y, b.X, b.Y, shape.LineWidth, color, dash));
-            }
+    }
+
+    /// <summary>Strokes a polyline (closed when asked) and puts arrowheads on its open ends.</summary>
+    private static void EmitStroke(List<(double X, double Y)> points, bool closed, double width, Color color, LineStyle dash, LineEnd head, LineEnd tail, List<LayoutItem> items)
+    {
+        points = new List<(double X, double Y)>(points);
+        if (!closed && points.Count >= 2)
+        {
+            // The line stops short of a filled arrowhead so that its square end does not show beside the tip.
+            if (head.Kind != LineEndKind.None) points[0] = ArrowHead(points[0], points[1], head, width, color, items);
+            if (tail.Kind != LineEndKind.None) points[^1] = ArrowHead(points[^1], points[^2], tail, width, color, items);
+        }
+        int segments = closed ? points.Count : points.Count - 1;
+        for (int i = 0; i < segments; i++)
+        {
+            var (a, b) = (points[i], points[(i + 1) % points.Count]);
+            items.Add(new LineItem(a.X, a.Y, b.X, b.Y, width, color, dash));
+        }
+    }
+
+    /// <summary>
+    /// Draws an arrowhead at <paramref name="tip"/> pointing away from <paramref name="next"/> and returns where the line should end.
+    /// </summary>
+    private static (double X, double Y) ArrowHead((double X, double Y) tip, (double X, double Y) next, LineEnd end, double lineWidth, Color color, List<LayoutItem> items)
+    {
+        double dx = tip.X - next.X, dy = tip.Y - next.Y, length = Math.Sqrt(dx * dx + dy * dy);
+        if (length < 1e-6) return tip;
+        (dx, dy) = (dx / length, dy / length);
+        double unit = Math.Max(lineWidth, 1), headWidth = end.Width * unit, headLength = Math.Min(end.Length * unit, length);
+        double px = -dy, py = dx; // perpendicular
+        (double X, double Y) At(double along, double across) => (tip.X - dx * along + px * across, tip.Y - dy * along + py * across);
+        switch (end.Kind)
+        {
+            case LineEndKind.Triangle:
+                items.Add(new PolygonItem([At(0, 0), At(headLength, headWidth / 2), At(headLength, -headWidth / 2)], color));
+                return At(headLength * 0.9, 0);
+            case LineEndKind.Stealth:
+                items.Add(new PolygonItem([At(0, 0), At(headLength, headWidth / 2), At(headLength * 0.65, 0), At(headLength, -headWidth / 2)], color));
+                return At(headLength * 0.65, 0);
+            case LineEndKind.Arrow:
+                items.Add(new LineItem(tip.X, tip.Y, At(headLength, headWidth / 2).X, At(headLength, headWidth / 2).Y, Math.Max(lineWidth, 0.5), color));
+                items.Add(new LineItem(tip.X, tip.Y, At(headLength, -headWidth / 2).X, At(headLength, -headWidth / 2).Y, Math.Max(lineWidth, 0.5), color));
+                return tip;
+            case LineEndKind.Oval:
+                items.Add(new EllipseItem(tip.X - headWidth / 2, tip.Y - headWidth / 2, headWidth, headWidth, color));
+                return tip;
+            case LineEndKind.Diamond:
+                items.Add(new PolygonItem([At(-headLength / 2, 0), At(0, headWidth / 2), At(headLength / 2, 0), At(0, -headWidth / 2)], color));
+                return tip;
+            default: return tip;
+        }
     }
 
     /// <summary>The text of a shape inside its insets, wrapped to the shape's width and placed by its vertical anchor.</summary>

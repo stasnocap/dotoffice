@@ -37,6 +37,7 @@ internal static class ShowcaseXlsx
             ("Gradients", GradientSheet(), "visible"),
             ("Pictures", PicturesSheet(), "visible"),
             ("Shapes", ShapesSheet(), "visible"),
+            ("Shape paths", ShapePathsSheet(), "visible"),
             ("Charts", ChartsSheet(), "visible"),
             ("More charts", MoreChartsSheet(), "visible"),
             ("Chart options", ChartOptionsSheet(), "visible"),
@@ -68,6 +69,7 @@ internal static class ShowcaseXlsx
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
+        WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
         WriteChartOptions(zip, sheets.FindIndex(x => x.Name == "Chart options") + 1);
@@ -353,6 +355,52 @@ internal static class ShowcaseXlsx
         return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>", rows,
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
     }
+
+    private static string Gradient(string from, string to, string direction) =>
+        $"<a:gradFill><a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"{from}\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"{to}\"/></a:gs></a:gsLst>{direction}</a:gradFill>";
+
+    private static string Custom(string name, string path, string fill, string extra, string text = "") =>
+        $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm>" +
+        $"<a:custGeom><a:avLst/><a:pathLst><a:path w=\"100\" h=\"100\">{path}</a:path></a:pathLst></a:custGeom>{fill}{extra}</xdr:spPr>{text}</xdr:sp>";
+
+    private static string Connector(string preset, string color, string ends, string adjust = "", string flip = "") =>
+        $"<xdr:cxnSp><xdr:nvCxnSpPr><xdr:cNvPr id=\"4\" name=\"Connector\"/><xdr:cNvCxnSpPr/></xdr:nvCxnSpPr><xdr:spPr><a:xfrm{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1\" cy=\"1\"/></a:xfrm>" +
+        $"<a:prstGeom prst=\"{preset}\"><a:avLst>{adjust}</a:avLst></a:prstGeom><a:ln w=\"{(long)(2.25 * Emu)}\">{Fill(color)}{ends}</a:ln></xdr:spPr></xdr:cxnSp>";
+
+    private static void WriteShapePaths(ZipArchive zip, int sheetNumber)
+    {
+        string Pt(int x, int y) => $"<a:pt x=\"{x}\" y=\"{y}\"/>";
+        var star = $"<a:moveTo>{Pt(50, 0)}</a:moveTo><a:lnTo>{Pt(62, 38)}</a:lnTo><a:lnTo>{Pt(100, 38)}</a:lnTo><a:lnTo>{Pt(69, 61)}</a:lnTo><a:lnTo>{Pt(81, 100)}</a:lnTo><a:lnTo>{Pt(50, 76)}</a:lnTo>" +
+                   $"<a:lnTo>{Pt(19, 100)}</a:lnTo><a:lnTo>{Pt(31, 61)}</a:lnTo><a:lnTo>{Pt(0, 38)}</a:lnTo><a:lnTo>{Pt(38, 38)}</a:lnTo><a:close/>";
+        var heart = $"<a:moveTo>{Pt(50, 30)}</a:moveTo><a:cubicBezTo>{Pt(50, 0)}{Pt(0, 0)}{Pt(0, 35)}</a:cubicBezTo><a:cubicBezTo>{Pt(0, 65)}{Pt(35, 80)}{Pt(50, 100)}</a:cubicBezTo>" +
+                    $"<a:cubicBezTo>{Pt(65, 80)}{Pt(100, 65)}{Pt(100, 35)}</a:cubicBezTo><a:cubicBezTo>{Pt(100, 0)}{Pt(50, 0)}{Pt(50, 30)}</a:cubicBezTo><a:close/>";
+        var wave = $"<a:moveTo>{Pt(0, 50)}</a:moveTo><a:cubicBezTo>{Pt(20, 0)}{Pt(30, 0)}{Pt(50, 50)}</a:cubicBezTo><a:cubicBezTo>{Pt(70, 100)}{Pt(80, 100)}{Pt(100, 50)}</a:cubicBezTo>";
+        string End(string head, string tail) => (head.Length == 0 ? "" : $"<a:headEnd type=\"{head}\" w=\"med\" len=\"med\"/>") + (tail.Length == 0 ? "" : $"<a:tailEnd type=\"{tail}\" w=\"med\" len=\"med\"/>");
+        var anchors =
+            OneCell(1, 3, 0, 0, 110, 55, Shape("rect", "Linear", "", Line("1F3864"), Text("Linear", "FFFFFF", bold: true)).Replace("<a:noFill/>", Gradient("1F3864", "8FAADC", "<a:lin ang=\"0\"/>"))) +
+            OneCell(3, 3, 0, 0, 90, 55, Shape("ellipse", "Radial", "", Line("7F6000"), Text("Radial", "000000", bold: true)).Replace("<a:noFill/>", Gradient("FFF2CC", "ED7D31", "<a:path path=\"circle\"><a:fillToRect l=\"50000\" t=\"50000\" r=\"50000\" b=\"50000\"/></a:path>"))) +
+            OneCell(5, 3, 0, 0, 110, 55, Shape("roundRect", "Rounded", "", Line("375623"), Text("Rounded", "FFFFFF", bold: true)).Replace("<a:noFill/>", Gradient("A9D18E", "375623", "<a:lin ang=\"5400000\"/>"))) +
+            OneCell(7, 3, 0, 0, 90, 55, Shape("diamond", "Diagonal", "", "", Text("45°", "FFFFFF", bold: true)).Replace("<a:noFill/>", Gradient("C00000", "FFC000", "<a:lin ang=\"2700000\"/>"))) +
+            OneCell(1, 9, 0, 0, 110, 0, Connector("straightConnector1", "C00000", End("", "triangle"))) +
+            OneCell(3, 9, 0, 0, 110, 0, Connector("straightConnector1", "2F5597", End("oval", "stealth"))) +
+            OneCell(5, 9, 0, 0, 110, 0, Connector("straightConnector1", "375623", End("diamond", "arrow"))) +
+            OneCell(7, 9, 0, 0, 90, 30, Connector("straightConnector1", "7030A0", End("triangle", "triangle"), flip: " flipV=\"1\"")) +
+            OneCell(1, 13, 0, 0, 110, 50, Connector("bentConnector3", "C00000", End("oval", "triangle"))) +
+            OneCell(3, 13, 0, 0, 110, 50, Connector("bentConnector3", "2F5597", End("", "triangle"), "<a:gd name=\"adj1\" fmla=\"val 20000\"/>")) +
+            OneCell(5, 13, 0, 0, 110, 50, Connector("bentConnector2", "375623", End("", "stealth"))) +
+            OneCell(7, 13, 0, 0, 90, 50, Connector("curvedConnector3", "7030A0", End("oval", "triangle"))) +
+            OneCell(1, 19, 0, 0, 90, 80, Custom("Star", star, Fill("FFC000"), Line("7F6000", 1.5))) +
+            OneCell(3, 19, 0, 0, 90, 80, Custom("Heart", heart, Gradient("FF7C80", "C00000", "<a:lin ang=\"5400000\"/>"), Line("7F0000", 1))) +
+            OneCell(5, 19, 0, 0, 110, 60, Custom("Wave", wave, "", Line("2F5597", 2.5).Replace("</a:ln>", End("", "triangle") + "</a:ln>"))) +
+            OneCell(7, 19, 0, 0, 100, 70, Custom("Star with text", star, Fill("DDEBF7"), Line("2F5597", 1.5), Text("Custom", "1F3864", bold: true)));
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+    }
+
+    private static string ShapePathsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "Shape paths: gradients, arrowheads, bent connectors, custom geometry", Bold)) + Row(3, Str("A3", "Gradient fills:")) + Row(9, Str("A9", "Arrowheads:")) + Row(13, Str("A13", "Connectors:")) + Row(19, Str("A19", "Custom geometry:")),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ charts
 
