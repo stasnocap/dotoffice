@@ -94,10 +94,10 @@ public class XlsxDrawingTests
     }
 
     [Fact]
-    public void A_flipped_picture_is_drawn_unflipped_with_a_warning()
+    public void Reads_flipped_pictures()
     {
-        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Pic(flip: " flipH=\"1\"")));
-        Assert.Single(sheet.Images);
-        Assert.Equal(["xlsx.image-flip"], warnings.Warnings.Select(w => w.Code));
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Pic(flip: " flipH=\"1\"")) + OneCellAnchor(0, 0, 10, 10, Pic(flip: " flipV=\"true\"")));
+        Assert.Equal([(true, false), (false, true)], sheet.Images.Select(i => (i.FlipH, i.FlipV)));
+        Assert.Empty(warnings.Warnings);
     }
 }

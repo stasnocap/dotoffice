@@ -687,9 +687,9 @@ public sealed class SheetLayoutEngine
         {
             int pushed = 1;
             items.Add(new PushItem(visible));
-            if (image.Rotation != 0)
+            if (image.Rotation != 0 || image.FlipH || image.FlipV)
             {
-                items.Add(new PushItem(null, image.Rotation, x + width / 2, y + height / 2));
+                items.Add(new PushItem(null, image.Rotation, x + width / 2, y + height / 2, image.FlipH, image.FlipV));
                 pushed++;
             }
             double keepX = 1 - image.CropLeft - image.CropRight, keepY = 1 - image.CropTop - image.CropBottom;

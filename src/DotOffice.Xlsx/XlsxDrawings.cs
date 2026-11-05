@@ -80,8 +80,7 @@ internal static class XlsxDrawings
         var src = Child(Child(pic, "blipFill"), "srcRect");
         double Crop(string name) => Math.Clamp(Number(src, name) / 100_000.0, 0, 1);
         var xfrm = Child(Child(pic, "spPr"), "xfrm");
-        if ((string?)xfrm?.Attribute("flipH") is "1" or "true" || (string?)xfrm?.Attribute("flipV") is "1" or "true")
-            context.Options.Warnings.Warn("xlsx.image-flip", $"Sheet '{sheet.Name}' has a flipped picture; it is drawn unflipped.");
+        bool flipH = (string?)xfrm?.Attribute("flipH") is "1" or "true", flipV = (string?)xfrm?.Attribute("flipV") is "1" or "true";
         double rotation = -Number(xfrm, "rot") / 60_000.0; // clockwise in the file, counter-clockwise in the model
 
         var ext = Child(anchor, "ext") ?? Child(xfrm, "ext");
@@ -99,6 +98,7 @@ internal static class XlsxDrawings
             Height = height,
             CropLeft = Crop("l"), CropTop = Crop("t"), CropRight = Crop("r"), CropBottom = Crop("b"),
             Rotation = rotation,
+            FlipH = flipH, FlipV = flipV,
         });
     }
 

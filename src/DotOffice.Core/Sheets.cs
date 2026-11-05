@@ -67,6 +67,10 @@ public sealed record SheetImage
 
     /// <summary>Rotation in degrees counter-clockwise.</summary>
     public double Rotation { get; init; }
+
+    /// <summary>Mirrored left to right / top to bottom (about the picture's center, before the rotation is applied).</summary>
+    public bool FlipH { get; init; }
+    public bool FlipV { get; init; }
 }
 
 public sealed class Worksheet(string name)

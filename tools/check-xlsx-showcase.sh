@@ -87,7 +87,10 @@ for p in "${pic_pages[@]}"; do
   [ "$n" -ge 1 ] || fail "page $p of the pictures sheet has no picture"
 done
 first_n=$(pdfimages -list -f "${pic_pages[0]}" -l "${pic_pages[0]}" "$pdf" | awk 'NR > 2' | wc -l)
-[ "$first_n" -ge 5 ] || fail "expected at least five pictures on the first page of the pictures sheet, found $first_n"
+[ "$first_n" -ge 7 ] || fail "expected at least seven pictures on the first page of the pictures sheet, found $first_n"
+qpdf --qdf --object-streams=disable "$pdf" pictures-qdf.pdf
+grep -aqE "^-1 0 0 1 [0-9.]+ 0 cm$" pictures-qdf.pdf || fail "no horizontally mirrored picture (matrix -1 0 0 1)"
+grep -aqE "^1 0 0 -1 0 [0-9.]+ cm$" pictures-qdf.pdf || fail "no vertically mirrored picture (matrix 1 0 0 -1)"
 grep -E "warning xlsx\.drawing" "$log" | grep -qi "shape" || fail "the shape in the drawing should still be reported"
 if grep -E "warning xlsx\.drawing" "$log" | grep -qi "picture\b.*not rendered\|images"; then fail "pictures must not be reported as unsupported"; fi
 

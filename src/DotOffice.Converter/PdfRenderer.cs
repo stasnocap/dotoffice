@@ -101,7 +101,18 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     saved.Push((fill, stroke));
                     canvas.SaveState();
                     if (push.Clip is { } clip) canvas.Rectangle(clip.X, h - clip.Y - clip.Height, clip.Width, clip.Height).Clip();
-                    if (push.Rotation != 0)
+                    if (push.FlipH || push.FlipV)
+                    {
+                        // Mirror about the center first: the matrix is applied to the content before the rotation below.
+                        double fcy = h - push.CenterY, sx = push.FlipH ? -1 : 1, sy = push.FlipV ? -1 : 1;
+                        if (push.Rotation != 0)
+                        {
+                            double rad = push.Rotation * Math.PI / 180, c = Math.Cos(rad), s = Math.Sin(rad);
+                            canvas.Transform(c, s, -s, c, push.CenterX - push.CenterX * c + fcy * s, fcy - push.CenterX * s - fcy * c);
+                        }
+                        canvas.Transform(sx, 0, 0, sy, push.FlipH ? 2 * push.CenterX : 0, push.FlipV ? 2 * fcy : 0);
+                    }
+                    else if (push.Rotation != 0)
                     {
                         double radians = push.Rotation * Math.PI / 180, cos = Math.Cos(radians), sin = Math.Sin(radians), cy = h - push.CenterY;
                         canvas.Transform(cos, sin, -sin, cos, push.CenterX - push.CenterX * cos + cy * sin, cy - push.CenterX * sin - cy * cos);

@@ -308,9 +308,9 @@ internal static class ShowcaseXlsx
     private const string DmlNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const long Emu = 12700;
 
-    private static string Pic(string name, string extra = "", int rotation = 0) =>
+    private static string Pic(string name, string extra = "", int rotation = 0, string flip = "") =>
         $"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"rId1\"/>{extra}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>" +
-        $"<xdr:spPr><a:xfrm rot=\"{rotation}\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>";
+        $"<xdr:spPr><a:xfrm rot=\"{rotation}\"{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>";
 
     private static string Marker(string tag, int col, int row, double colOffset = 0, double rowOffset = 0) =>
         $"<xdr:{tag}><xdr:col>{col}</xdr:col><xdr:colOff>{(long)(colOffset * Emu)}</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>{(long)(rowOffset * Emu)}</xdr:rowOff></xdr:{tag}>";
@@ -331,6 +331,8 @@ internal static class ShowcaseXlsx
             OneCell(5, 3, 8, 6, 120, 75, Pic("One-cell anchor")) +                                                                // fixed size
             OneCell(5, 9, 4, 4, 120, 75, Pic("Cropped", "<a:srcRect l=\"25000\" r=\"25000\" t=\"10000\"/>")) +                          // crop
             OneCell(1, 10, 10, 10, 120, 75, Pic("Rotated", rotation: 20 * 60000)) +                                               // rotation
+            OneCell(5, 21, 4, 2, 56, 35, Pic("Flipped horizontally", flip: " flipH=\"1\"")) +                                    // mirrored left to right
+            OneCell(5, 24, 4, 2, 56, 35, Pic("Flipped vertically", flip: " flipV=\"1\"")) +                                      // mirrored top to bottom
             Absolute(300, 260, 90, 56, Pic("Absolute")) +                                                                         // measured from A1
             TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
             "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Shape\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
@@ -350,6 +352,7 @@ internal static class ShowcaseXlsx
         rows.Append(Row(3, Str("A3", "twoCell:", Default)));
         rows.Append(Row(11, Str("A11", "Rotated 20°:", Default)));
         rows.Append(Row(16, Str("A16", "Page break below row 20:", Default)));
+        rows.Append(Row(26, Str("A26", "Right: mirrored horizontally (flipH), then vertically (flipV)", Default)));
         rows.Append(Row(27, Str("A27", "End of the sheet", Default)));
         var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(),

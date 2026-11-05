@@ -1072,6 +1072,16 @@ public class SheetImageTests
     }
 
     [Fact]
+    public void A_flipped_picture_is_mirrored_about_the_center_of_its_frame()
+    {
+        var sheet = SheetWith(TwoCell(1, 1, 3, 3) with { FlipH = true });
+        var page = SheetLayoutTests.Layout(sheet).Pages[0];
+        var (left, top) = Origin(sheet);
+        var flip = page.Items.OfType<PushItem>().Single(p => p.FlipH);
+        Assert.Equal((left + 100, top + 40, false), (flip.CenterX, flip.CenterY, flip.FlipV));
+    }
+
+    [Fact]
     public void Pictures_follow_the_page_scale()
     {
         var sheet = SheetWith(TwoCell(0, 0, 2, 2));
