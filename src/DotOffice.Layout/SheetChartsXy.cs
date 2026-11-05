@@ -25,6 +25,18 @@ public sealed partial class SheetLayoutEngine
             PlaceText(yTitle, titleFont, left + titleFont.FontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
             left += titleFont.FontSize + 7;
         }
+        // The secondary vertical axis (right) and horizontal axis (top) of groups on their own pair of value axes.
+        bool secondaryY = chart.ShowSecondaryAxis && chart.ExtraGroups.Any(g => g.Secondary), secondaryX = chart.ShowSecondaryXAxis && chart.ExtraGroups.Any(g => g.Secondary);
+        var secondaryYFont = Styled(font, styles.SecondaryAxis);
+        if (secondaryY && chart.SecondaryAxisTitle is { Length: > 0 } secondaryTitle)
+        {
+            var titleFont = Styled(font with { FontSize = fontSize + 1 }, styles.SecondaryAxisTitle);
+            PlaceText(secondaryTitle, titleFont, right - titleFont.FontSize / 2 - 1, (top + bottom) / 2, Anchor.Middle, true, -90, items);
+            right -= titleFont.FontSize + 7;
+        }
+        double secondaryWidth = secondaryY ? chart.SecondaryTicks.Select(t => MeasureChartText(t.Label, secondaryYFont)).DefaultIfEmpty(0).Max() + 6 : 0;
+        if (secondaryX) top += xFont.FontSize * 1.25 + 4;
+        right -= secondaryWidth;
         double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, yFont)).DefaultIfEmpty(0).Max() : 0;
         double lastWidth = chart.ShowCategoryAxis ? chart.XTicks.Select(t => MeasureChartText(t.Label, xFont)).DefaultIfEmpty(0).Max() : 0;
         double labelHeight = xFont.FontSize * 1.25;
@@ -54,43 +66,45 @@ public sealed partial class SheetLayoutEngine
 
         var labels = new List<(string Text, double X, double Y, Color? Fill)>();
         var trendLabels = new List<LayoutItem>();
-        if (chart.Kind == ChartKind.Bubble)
+        // The groups: the chart's own series on the primary axes, then the further groups on the primary or the secondary pair.
+        var secondaryXScale = chart.SecondaryXScale;
+        var secondaryYScale = chart.SecondaryScale;
+        double SecondaryX(double v) => plotLeft + plotWidth * secondaryXScale.Fraction(v);
+        double SecondaryY(double v) => plotBottom - plotHeight * secondaryYScale.Fraction(v);
+        var drawGroups = new List<(IReadOnlyList<ChartSeries> Series, Func<double, double> X, Func<double, double> Y)> { (chart.Series, X, Y) };
+        foreach (var extra in chart.ExtraGroups) drawGroups.Add((extra.Series, extra.Secondary ? SecondaryX : X, extra.Secondary ? SecondaryY : Y));
+        if (secondaryY)
+            foreach (var tick in chart.SecondaryTicks) PlaceText(tick.Label, secondaryYFont, plotRight + 5, SecondaryY(tick.Value), Anchor.Start, true, 0, items);
+        if (secondaryX)
+            foreach (var tick in chart.SecondaryXTicks) PlaceText(tick.Label, xFont, SecondaryX(tick.Value), plotTop - 4 - xFont.FontSize * 1.25, Anchor.Middle, false, 0, items);
+        double maxSize = chart.Kind == ChartKind.Bubble ? drawGroups.SelectMany(g => g.Series).SelectMany(s => s.Sizes ?? []).Where(v => v is > 0).Select(v => v!.Value).DefaultIfEmpty(0).Max() : 0;
+        var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label, double Alpha)>();
+        foreach (var (groupSeries, GX, GY) in drawGroups)
         {
-            // Bubble area follows the size; the largest bubble is a quarter of the plot's shorter side. Larger bubbles go underneath.
-            double maxSize = chart.Series.SelectMany(s => s.Sizes ?? []).Where(v => v is > 0).Select(v => v!.Value).DefaultIfEmpty(0).Max();
-            double maxDiameter = Math.Min(plotWidth, plotHeight) * 0.25 * chart.BubbleScale / 100;
-            var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label, double Alpha)>();
-            foreach (var s in chart.Series)
-                for (int i = 0; i < s.Values.Count; i++)
-                    if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x && s.Sizes is { } sizes && i < sizes.Count && sizes[i] is > 0 and var size)
-                        bubbles.Add((size, X(x), Y(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null, s.Alpha));
-            foreach (var b in bubbles.OrderByDescending(b => b.Size))
+            if (chart.Kind == ChartKind.Bubble)
             {
-                double d = maxSize > 0 ? maxDiameter * Math.Sqrt(b.Size / maxSize) : 0;
-                if (d < 1) continue;
-                if (b.Alpha >= 1) items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
-                AddFaded(items, b.Alpha, new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
-                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color));
+                foreach (var s in groupSeries)
+                    for (int i = 0; i < s.Values.Count; i++)
+                        if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x && s.Sizes is { } sizes && i < sizes.Count && sizes[i] is > 0 and var size)
+                            bubbles.Add((size, GX(x), GY(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null, s.Alpha));
+                continue;
             }
-        }
-        else
-        {
-            foreach (var s in chart.Series)
+            foreach (var s in groupSeries)
             {
                 var points = new (double X, double Y)?[s.Values.Count];
                 for (int i = 0; i < s.Values.Count; i++)
                     if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x)
                     {
-                        points[i] = (X(x), Y(y));
-                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], X(x), Y(y) - 8, null));
+                        points[i] = (GX(x), GY(y));
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], GX(x), GY(y) - 8, null));
                     }
                 var overlays = new List<LayoutItem>();
                 foreach (var bars in s.ErrorBars ?? [])
                     for (int i = 0; i < s.Values.Count && i < bars.Plus.Count; i++)
                     {
                         if (s.Values[i] is not { } y || s.XValues is not { } xs || i >= xs.Count || xs[i] is not { } x) continue;
-                        if (bars.Horizontal) DrawErrorBar(overlays, true, Y(y), X(x - bars.Minus[i]), X(x + bars.Plus[i]), bars);
-                        else DrawErrorBar(overlays, false, X(x), Y(y - bars.Minus[i]), Y(y + bars.Plus[i]), bars);
+                        if (bars.Horizontal) DrawErrorBar(overlays, true, GY(y), GX(x - bars.Minus[i]), GX(x + bars.Plus[i]), bars);
+                        else DrawErrorBar(overlays, false, GX(x), GY(y - bars.Minus[i]), GY(y + bars.Plus[i]), bars);
                     }
                 if (s.Trendline is { } trend && s.XValues is { } trendX)
                 {
@@ -98,7 +112,7 @@ public sealed partial class SheetLayoutEngine
                     for (int i = 0; i < s.Values.Count && i < trendX.Count; i++) if (s.Values[i] is { } y && trendX[i] is { } x) known.Add((x, y));
                     if (known.Count > 0)
                     {
-                        var drawn = ChartTrendlines.Fit(trend, known, known.Min(k => k.X), known.Max(k => k.X)).Select(q => (X(q.X), Y(q.Y))).ToList();
+                        var drawn = ChartTrendlines.Fit(trend, known, known.Min(k => k.X), known.Max(k => k.X)).Select(q => (GX(q.X), GY(q.Y))).ToList();
                         DrawTrendline(overlays, drawn, trend);
                         if (drawn.Count > 0) AddTrendlineLabel(trendLabels, trend, known, drawn[^1], font, plotLeft, plotTop, plotRight, plotBottom);
                     }
@@ -112,6 +126,19 @@ public sealed partial class SheetLayoutEngine
                             items.Add(new EllipseItem(q.X - 3.2, q.Y - 3.2, 6.4, 6.4, Color.White));
                             items.Add(new EllipseItem(q.X - 2.5, q.Y - 2.5, 5, 5, s.Color));
                         }
+            }
+        }
+        if (chart.Kind == ChartKind.Bubble)
+        {
+            // Bubble area follows the size; the largest bubble is a quarter of the plot's shorter side. Larger bubbles go underneath.
+            double maxDiameter = Math.Min(plotWidth, plotHeight) * 0.25 * chart.BubbleScale / 100;
+            foreach (var b in bubbles.OrderByDescending(b => b.Size))
+            {
+                double d = maxSize > 0 ? maxDiameter * Math.Sqrt(b.Size / maxSize) : 0;
+                if (d < 1) continue;
+                if (b.Alpha >= 1) items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
+                AddFaded(items, b.Alpha, new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
+                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color));
             }
         }
         items.AddRange(trendLabels);

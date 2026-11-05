@@ -197,6 +197,35 @@ public class XlsxChartTests
     }
 
     [Fact]
+    public void A_scatter_group_on_its_own_pair_of_value_axes_gets_secondary_scales()
+    {
+        var secondary = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:min val=\"0\"/><c:max val=\"100\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/></c:valAx>" +
+                        "<c:valAx><c:axId val=\"4\"/><c:scaling><c:min val=\"0\"/><c:max val=\"500\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/><c:title><c:tx><c:rich><a:p><a:r><a:t>Right</a:t></a:r></a:p></c:rich></c:tx></c:title><c:crosses val=\"max\"/></c:valAx>";
+        var plot = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" +
+                   "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:scatterChart>" + XyAxes() + secondary;
+        var (sheet, warnings) = Read(Space(plot));
+        Assert.Empty(warnings.Warnings);
+        var chart = Assert.Single(sheet.Charts);
+        var group = Assert.Single(chart.ExtraGroups);
+        Assert.True(group.Secondary);
+        Assert.Equal(ChartKind.Scatter, group.Kind);
+        Assert.Equal((0.0, 500.0, "Right"), (chart.SecondaryMin, chart.SecondaryMax, chart.SecondaryAxisTitle));
+        Assert.Equal((0.0, 100.0), (chart.SecondaryXMin, chart.SecondaryXMax));
+        Assert.True(chart.ShowSecondaryAxis && chart.ShowSecondaryXAxis);
+        Assert.Equal((0.0, 45.0), (chart.XMin, chart.XMax)); // the primary range comes from the first group alone
+    }
+
+    [Fact]
+    public void A_second_scatter_group_on_the_same_axes_is_drawn_on_them()
+    {
+        var plot = "<c:scatterChart>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" +
+                   "<c:scatterChart>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" + XyAxes();
+        var chart = Read(Space(plot)).Sheet.Charts.Single();
+        Assert.False(Assert.Single(chart.ExtraGroups).Secondary);
+        Assert.False(chart.ShowSecondaryAxis);
+    }
+
+    [Fact]
     public void Reads_a_bubble_chart_with_sizes()
     {
         var plot = "<c:bubbleChart>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:bubbleScale val=\"50\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:bubbleChart>" + XyAxes();

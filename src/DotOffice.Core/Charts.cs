@@ -171,6 +171,21 @@ public sealed record SheetChart : SheetObject
 
     public bool ShowSecondaryAxis { get; init; } = false;
 
+    /// <summary>The secondary horizontal axis of a scatter or bubble chart (on top), used by the XY groups marked <see cref="ChartGroup.Secondary"/>.</summary>
+    public IReadOnlyList<ChartTick> SecondaryXTicks { get; init; } = [];
+
+    public double SecondaryXMin { get; init; }
+
+    public double SecondaryXMax { get; init; } = 1;
+
+    public double SecondaryXLogBase { get; init; }
+
+    public bool ReverseSecondaryX { get; init; }
+
+    public bool ShowSecondaryXAxis { get; init; } = false;
+
+    public AxisScale SecondaryXScale => new(SecondaryXMin, SecondaryXMax, SecondaryXLogBase, ReverseSecondaryX);
+
     public AxisScale ValueScale => new(ValueMin, ValueMax, LogBase, ReverseValues);
 
     public AxisScale XScale => new(XMin, XMax, XLogBase, ReverseX);

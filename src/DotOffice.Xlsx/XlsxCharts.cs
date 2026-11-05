@@ -38,7 +38,9 @@ internal static class XlsxCharts
         // A combination of bar, line and area groups on one category axis is drawn whole (on the primary and the secondary value axis);
         // anything else after the first group is named and left out.
         var categoryTypes = new[] { "barChart", "lineChart", "areaChart" };
-        var extras = categoryTypes.Contains(first.Name.LocalName) ? groups.Skip(1).Where(g => categoryTypes.Contains(g.Name.LocalName)).ToList() : [];
+        // A scatter or bubble chart may add groups of its own kind (on the same axes or on a secondary pair of value axes).
+        var extras = categoryTypes.Contains(first.Name.LocalName) ? groups.Skip(1).Where(g => categoryTypes.Contains(g.Name.LocalName)).ToList()
+            : first.Name.LocalName is "scatterChart" or "bubbleChart" ? groups.Skip(1).Where(g => g.Name == first.Name).ToList() : [];
         var dropped = groups.Skip(1).Where(g => !extras.Contains(g)).ToList();
         if (dropped.Count > 0)
             notes.Add($"a combination chart draws only its {Describe(first.Name.LocalName)} part and not the {string.Join(" and ", dropped.Select(g => Describe(g.Name.LocalName)))} part");
@@ -349,6 +351,10 @@ internal static class XlsxCharts
         string? secondaryTitle = null;
         XElement? secondaryStyleAxis = null;
         var extraGroups = new List<ChartGroup>();
+        XElement? secondaryXAxis = null, secondaryYAxis = null;
+        double secondaryXMin = 0, secondaryXMax = 1, secondaryXLog = 0;
+        bool reverseSecondaryX = false, secondaryXShown = false;
+        var secondaryXTicks = new List<ChartTick>();
         if (xy)
         {
             double xlo = double.MaxValue, xhi = double.MinValue, xPositive = double.MaxValue;
@@ -359,7 +365,36 @@ internal static class XlsxCharts
                     for (int p = 0; p < (sr.XValues?.Count ?? 0) && p < bars.Plus.Count; p++)
                         if (sr.XValues![p] is { } x) (xlo, xhi) = (Math.Min(xlo, x - bars.Minus[p]), Math.Max(xhi, x + bars.Plus[p]));
             string? xFallback = null;
+            // Groups on the primary pair of axes share its horizontal range; those on another pair have their own.
+            bool OnSecondaryPair(XElement extra) => !extra.Elements().Any(i => i.Name.LocalName == "axId" && AxisId(categoryAxis) == (string?)i.Attribute("val"));
+            (double Lo, double Hi, double Positive) XRange(IEnumerable<ChartSeries> list)
+            {
+                double lo = double.MaxValue, hi = double.MinValue, positive = double.MaxValue;
+                foreach (var v in list.SelectMany(sr => sr.XValues ?? []))
+                    if (v is { } x) { (lo, hi) = (Math.Min(lo, x), Math.Max(hi, x)); if (x > 0) positive = Math.Min(positive, x); }
+                foreach (var sr in list)
+                    foreach (var bars in sr.ErrorBars?.Where(b => b.Horizontal) ?? [])
+                        for (int p = 0; p < (sr.XValues?.Count ?? 0) && p < bars.Plus.Count; p++)
+                            if (sr.XValues![p] is { } x) (lo, hi) = (Math.Min(lo, x - bars.Minus[p]), Math.Max(hi, x + bars.Plus[p]));
+                return (lo, hi, positive);
+            }
+            var primaryX = series.Concat(extraSeries.Where(e => !OnSecondaryPair(e.Group)).SelectMany(e => e.Series));
+            (xlo, xhi, xPositive) = XRange(primaryX);
             (xMin, xMax, xTicks, xLog, reverseX) = ValueScale(categoryAxis, xlo, xhi, xPositive, ChartGrouping.Clustered, xFallback);
+            var secondaryXSeries = extraSeries.Where(e => OnSecondaryPair(e.Group)).SelectMany(e => e.Series).ToList();
+            if (secondaryXSeries.Count > 0)
+            {
+                var pair = extraSeries.First(e => OnSecondaryPair(e.Group)).Group.Elements().Where(i => i.Name.LocalName == "axId").Select(i => (string?)i.Attribute("val")).ToList();
+                var axes = valueAxes.Where(a => pair.Contains(AxisId(a))).ToList();
+                secondaryXAxis = axes.FirstOrDefault(a => (string?)Child(a, "axPos")?.Attribute("val") is "b" or "t") ?? axes.FirstOrDefault();
+                secondaryYAxis = axes.FirstOrDefault(a => a != secondaryXAxis);
+                if (secondaryXAxis is not null && secondaryYAxis is not null)
+                {
+                    var (slo, shi, sp) = XRange(secondaryXSeries);
+                    (secondaryXMin, secondaryXMax, secondaryXTicks, secondaryXLog, reverseSecondaryX) = ValueScale(secondaryXAxis, slo, shi, sp, ChartGrouping.Clustered, null);
+                    secondaryXShown = !Flag(Child(secondaryXAxis, "delete"), "val");
+                }
+            }
         }
         if (!slices)
         {
@@ -369,7 +404,8 @@ internal static class XlsxCharts
             XElement? secondaryAxis = null;
             foreach (var (extra, extraKind, read) in extraSeries)
             {
-                var extraAxis = valueAxes.FirstOrDefault(a => extra.Elements().Any(i => i.Name.LocalName == "axId" && (string?)i.Attribute("val") == AxisId(a)));
+                var extraAxis = xy ? secondaryYAxis is not null && extra.Elements().Any(i => i.Name.LocalName == "axId" && (string?)i.Attribute("val") == AxisId(secondaryYAxis)) ? secondaryYAxis : null
+                    : valueAxes.FirstOrDefault(a => extra.Elements().Any(i => i.Name.LocalName == "axId" && (string?)i.Attribute("val") == AxisId(a)));
                 bool onSecondary = extraAxis is not null && extraAxis != valueAxis;
                 var extraGrouping = GroupingOf(extra, extraKind);
                 (onSecondary ? secondary : primary).Add((extraGrouping, read));
@@ -475,6 +511,8 @@ internal static class XlsxCharts
             Filled = filled,
             LogBase = logBase, XLogBase = xLog, SecondaryLogBase = secondaryLog, ReverseValues = reverseValues, ReverseX = reverseX, ReverseSecondary = reverseSecondary,
             ReverseCategories = (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") == "maxMin" && !xy,
+            SecondaryXTicks = secondaryXTicks, SecondaryXMin = secondaryXMin, SecondaryXMax = secondaryXMax, SecondaryXLogBase = secondaryXLog,
+            ReverseSecondaryX = reverseSecondaryX, ShowSecondaryXAxis = secondaryXShown,
             ExtraGroups = extraGroups, SecondaryTicks = secondaryTicks, SecondaryMin = secondaryMin, SecondaryMax = secondaryMax,
             SecondaryAxisTitle = secondaryTitle, ShowSecondaryAxis = secondaryShown,
             PlotArea = plotBox, TitlePosition = titlePosition, LegendBox = legendBox, TextStyles = textStyles,

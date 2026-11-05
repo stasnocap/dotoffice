@@ -625,12 +625,18 @@ internal static class ShowcaseXlsx
         var reversed = Bars("bar", "clustered", 1, true, axes: Axes().Replace("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/>"));
         var log = Bars("col", "clustered", 2, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:logBase val=\"10\"/><c:orientation val=\"minMax\"/>"));
         var flipped = Bars("col", "clustered", 1, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"maxMin\"/>"));
+        // Two scatter groups: the second on its own pair of value axes (a secondary Y axis on the right, a secondary X axis on top).
+        var secondaryXy = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"20\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/><c:crossAx val=\"4\"/></c:valAx>" +
+                          "<c:valAx><c:axId val=\"4\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"5000\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/>" + Rich("title", "Secondary Y", 1000) + "<c:crossAx val=\"3\"/><c:crosses val=\"max\"/></c:valAx>";
+        var scatterPair = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" + XySeries(0, "Charts!$B$4:$B$9", "Charts!$C$4:$C$9") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" +
+                          "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" + XySeries(1, "Charts!$B$4:$B$9", "Charts!$D$4:$D$9") + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:scatterChart>" + XyAxes + secondaryXy;
         string[] charts =
         [
             ChartSpace("Columns and a line on a second axis", combo, "b"), ChartSpace("Smoothed and straight lines", smooth, "b"),
             ChartSpace("Categories reversed", reversed, ""), ChartSpace("Logarithmic axis", log, "b"), ChartSpace("Values reversed", flipped, ""),
+            ChartSpace("Scatter on secondary axes", scatterPair, "b"),
         ];
-        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43)];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43)];
         WriteChartParts(zip, sheetNumber, charts, places, "option");
     }
 

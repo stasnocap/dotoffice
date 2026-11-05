@@ -139,6 +139,25 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_scatter_group_on_secondary_axes_is_scaled_by_them()
+    {
+        var first = new ChartSeries("S", new double?[] { 10 }, Red, Marker: true, XValues: new double?[] { 5 }, Line: false);
+        var other = new ChartSeries("T", new double?[] { 10 }, Blue, Marker: true, XValues: new double?[] { 5 }, Line: false);
+        var chart = Chart(ChartKind.Scatter, first) with
+        {
+            XTicks = [new(0, "0"), new(10, "10")], XMin = 0, XMax = 10, ValueMin = 0, ValueMax = 20,
+            ExtraGroups = [new ChartGroup(ChartKind.Scatter, ChartGrouping.Clustered, [other], true)],
+            ShowSecondaryAxis = true, SecondaryTicks = [new(0, "0"), new(100, "100")], SecondaryMin = 0, SecondaryMax = 100, SecondaryXMin = 0, SecondaryXMax = 20,
+        };
+        var page = Page(chart);
+        var a = page.Items.OfType<EllipseItem>().Single(e => e.Fill == Red);
+        var b = page.Items.OfType<EllipseItem>().Single(e => e.Fill == Blue);
+        Assert.True(a.X > b.X + 20);   // x = 5 of 20 sits left of x = 5 of 10
+        Assert.True(b.Y > a.Y + 40);   // y = 10 of 100 sits below y = 10 of 20
+        Assert.Contains("100", Text(page)); // the secondary scale is labelled on the right
+    }
+
+    [Fact]
     public void Bubble_area_follows_the_size()
     {
         var series = new ChartSeries("S", new double?[] { 5, 15 }, Red, XValues: new double?[] { 2, 8 }, Sizes: new double?[] { 1, 4 });

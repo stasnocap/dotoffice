@@ -257,7 +257,7 @@ if grep -E "warning xlsx\.drawing" "$log" | grep -q "More charts"; then fail "th
 opt_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Chart options" ] && opt_page=$p; done
 opt_text=$(page_text "$opt_page")
-for text in "Columns and a line on a second axis" "Smoothed and straight lines" "Categories reversed" "Logarithmic axis" "Values reversed" "Units" "Rate" "40 %" "100"; do
+for text in "Columns and a line on a second axis" "Smoothed and straight lines" "Categories reversed" "Logarithmic axis" "Values reversed" "Units" "Rate" "40 %" "100" "Scatter on secondary axes" "Secondary Y" "4500"; do
   [[ $opt_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "the chart options sheet should not warn"; fi
