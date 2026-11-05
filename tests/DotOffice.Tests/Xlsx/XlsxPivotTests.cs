@@ -281,4 +281,50 @@ public class XlsxPivotTests
         Assert.Null(At(tableOnly, "B5").Style.Fill);
         Assert.Contains("is not applied", Assert.Single(warnings.Warnings).Message);
     }
+
+    private const string TwoDataFields = "<dataFields count=\"2\"><dataField fld=\"1\"/><dataField fld=\"2\"/></dataFields>";
+
+    [Theory]
+    [InlineData("<reference field=\"4294967294\" count=\"1\"><x v=\"1\"/></reference><reference field=\"0\" count=\"1\"><x v=\"2\"/></reference>", "C6")]   // the second data field of one region
+    [InlineData("<reference field=\"4294967294\" count=\"1\"><x v=\"0\"/></reference>", "B4,B5,B6,B7")]                                                         // the first data field: its column
+    [InlineData("<reference field=\"4294967294\" count=\"2\"><x v=\"0\"/><x v=\"1\"/></reference><reference field=\"0\" count=\"1\"><x v=\"0\"/></reference>", "B4,C4")] // both of them
+    public void Pivot_area_formats_pick_one_of_several_data_fields_that_sit_on_the_columns(string references, string expected)
+    {
+        var columns = "<colFields count=\"1\"><field x=\"-2\"/></colFields><colItems count=\"2\"><i><x/></i><i i=\"1\"><x v=\"1\"/></i></colItems>";
+        var area = $"<pivotArea field=\"0\" type=\"normal\"><references count=\"2\">{references}</references></pivotArea>";
+        var (sheet, warnings) = Read(Definition(extra: FourRegions + columns + TwoDataFields + $"<formats count=\"1\"><format dxfId=\"0\">{area}</format></formats>",
+            location: "<location ref=\"A3:C8\" firstHeaderRow=\"0\" firstDataRow=\"1\" firstDataCol=\"1\"/>"), Dxf("FFC7CE"));
+        // The grand total row is not a region: the first data field column holds rows 4-7 only when the reference names no region.
+        Assert.Equal(expected.Split(','), Filled(sheet).Where(c => c != "B8" && c != "C8"));
+        Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void A_data_field_reference_among_several_without_a_data_axis_is_still_reported()
+    {
+        var area = "<pivotArea field=\"0\" type=\"normal\"><references count=\"2\"><reference field=\"4294967294\" count=\"1\"><x v=\"1\"/></reference><reference field=\"0\" count=\"1\"><x v=\"2\"/></reference></references></pivotArea>";
+        var (_, warnings) = Read(Definition(extra: FourRegions + TwoDataFields + $"<formats count=\"1\"><format dxfId=\"0\">{area}</format></formats>"), Dxf("FFC7CE"));
+        Assert.Contains("not applied", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void Pivot_area_formats_reach_the_page_fields_above_the_table()
+    {
+        // One page field over the table (the cell with its name and, next to it, the item shown), then an empty row, then the table at A3.
+        var pages = "<pageFields count=\"1\"><pageField fld=\"5\" item=\"2\" hier=\"-1\"/></pageFields>";
+        string Format(string area) => $"<format dxfId=\"0\">{area}</format>";
+        var button = "<pivotArea field=\"5\" type=\"button\" dataOnly=\"0\" labelOnly=\"1\" outline=\"0\" axis=\"axisPage\" fieldPosition=\"0\"/>";
+        var item = "<pivotArea dataOnly=\"0\" outline=\"0\" fieldPosition=\"0\"><references count=\"1\"><reference field=\"5\" count=\"1\" selected=\"0\"><x v=\"2\"/></reference></references></pivotArea>";
+        var other = "<pivotArea dataOnly=\"0\" outline=\"0\" fieldPosition=\"0\"><references count=\"1\"><reference field=\"5\" count=\"1\" selected=\"0\"><x v=\"1\"/></reference></references></pivotArea>";
+        var location = "<location ref=\"A3:B8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\" rowPageCount=\"1\" colPageCount=\"1\"/>";
+        List<string> Reached(string area)
+        {
+            var (sheet, warnings) = Read(Definition(extra: FourRegions + pages + $"<dataFields count=\"1\"><dataField fld=\"1\"/></dataFields><formats count=\"1\">{Format(area)}</formats>", location: location), Dxf("FFC7CE"));
+            Assert.Empty(warnings.Warnings);
+            return Filled(sheet).ToList();
+        }
+        Assert.Equal(["A1"], Reached(button));
+        Assert.Equal(["B1"], Reached(item));
+        Assert.Empty(Reached(other)); // another item than the one shown: nothing to format (and nothing reported)
+    }
 }

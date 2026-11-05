@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Pivot fields" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -196,6 +196,12 @@ done
 # gives the header (FFEB9C), the two stripes (DDEBF7 and E4DFEC) and the total row (FFD966) the dxfs its table style names.
 grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot dark'.*PivotStyleDark3.*approximately" || fail "the dark pivot table should be reported as approximated"
 grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot custom'.*Showcase pivot.*approximately" || fail "the custom-style pivot table should be reported as approximated"
+# Pivot fields: a page field and two data fields. The format on the page field's item (green) and on the second data field of East (pink) are applied
+# (the page field's button too), so none is reported as skipped.
+if grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot fields'.*not applied"; then fail "the pivot-area formats on a page field and on one of two data fields should be applied"; fi
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Pivot fields" ] && qpdf "$pdf" --pages . "$p" -- "pf-$p.pdf" && qpdf --qdf --object-streams=disable "pf-$p.pdf" "pf-$p-qdf.pdf" && pf_file="pf-$p-qdf.pdf"; done
+grep -aq "^0.7765 0.9373 0.8078 rg$" "$pf_file" || fail "the page field's item should be green"
+grep -aq "^1 0.7804 0.8078 rg$" "$pf_file" || fail "the units of East should be pink"
 pivot_colors() {
   local name=$1 file=""
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$name" ] && qpdf "$pdf" --pages . "$p" -- "pv-$p.pdf" && qpdf --qdf --object-streams=disable "pv-$p.pdf" "pv-$p-qdf.pdf" && file="pv-$p-qdf.pdf"; done

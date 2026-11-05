@@ -31,6 +31,23 @@ internal static partial class PivotStyling
         public Dictionary<int, int[]> RowPaths = [], ColumnPaths = [];  // sheet row/column -> the item index at each level of the axis
         public int DataFieldCount;
         public bool Compact = true;
+        /// <summary>The page fields (filters) above the table, in order: the pivot field index and the item shown (-1 for "(All)").</summary>
+        public List<(int Field, int Item)> PageFields = [];
+        public int RowPageCount, ColumnPageCount;
+        public bool PageOverThenDown;
+
+        /// <summary>
+        /// The cells of a page field: its name and the item shown. They lie above the table, separated from it by one empty row, in rows of
+        /// <see cref="RowPageCount"/> fields filled down then over (or over then down) with a gap column between the columns of fields.
+        /// </summary>
+        public (int Row, int LabelColumn)? PageCell(int index)
+        {
+            int rows = Math.Max(RowPageCount, 1), columns = Math.Max(ColumnPageCount, 1);
+            int down = PageOverThenDown ? index / columns : index % rows, over = PageOverThenDown ? index % columns : index / rows;
+            int rowCount = PageOverThenDown ? (PageFields.Count + columns - 1) / columns : rows;
+            int row = Range.FirstRow - 1 - rowCount + down;
+            return row < 0 ? null : (row, Range.FirstColumn + over * 3);
+        }
 
         public bool IsHeader(int row) => row - Range.FirstRow < HeaderRows;
         public bool IsLabel(int column) => column - Range.FirstColumn < LabelColumns;
@@ -72,6 +89,11 @@ internal static partial class PivotStyling
 
         geometry.DataFieldCount = Child(definition, "dataFields")?.Elements().Count(e => e.Name.LocalName == "dataField") ?? 0;
         geometry.Compact = Flag(definition, "compact", true);
+        geometry.RowPageCount = Math.Max(Int(location, "rowPageCount", 0), 0);
+        geometry.ColumnPageCount = Math.Max(Int(location, "colPageCount", 0), 0);
+        geometry.PageOverThenDown = Flag(definition, "pageOverThenDown", false);
+        geometry.PageFields = Child(definition, "pageFields")?.Elements().Where(e => e.Name.LocalName == "pageField").Select(e => (Int(e, "fld", -1), Int(e, "item", -1))).ToList() ?? [];
+        if (geometry.RowPageCount == 0 && geometry.PageFields.Count > 0) geometry.RowPageCount = geometry.PageFields.Count;
         geometry.RowFields = Fields("rowFields");
         geometry.ColumnFields = Fields("colFields");
         Paths("rowItems", geometry.RowPaths, range.FirstRow + geometry.HeaderRows, range.LastRow);
@@ -112,8 +134,15 @@ internal static partial class PivotStyling
             var area = Child(format, "pivotArea");
             int id = Int(format, "dxfId", -1);
             var test = area is null ? null : AreaTest(area, geometry);
+            if (test is null && area is not null && PageTest(area, geometry) is not null) test = (_, _) => false;
             if (test is null || id < 0 || id >= env.Dxfs.Count) { skipped++; continue; }
             For(geometry, (row, column) => { if (test(row, column)) ConditionalFormatting.ApplyDxf(sheet, row, column, env.Dxfs[id], env); });
+            // The page fields lie above the table, outside its range.
+            if (PageTest(area!, geometry) is { } pageTest)
+                for (int k = 0; k < geometry.PageFields.Count; k++)
+                    if (geometry.PageCell(k) is var (pageRow, pageColumn))
+                        foreach (int column in new[] { pageColumn, pageColumn + 1 })
+                            if (pageTest(k, column == pageColumn)) ConditionalFormatting.ApplyDxf(sheet, pageRow, column, env.Dxfs[id], env);
         }
         return new Result(styleName, outcome, skipped);
     }
@@ -128,6 +157,37 @@ internal static partial class PivotStyling
     /// Which cells a pivot area selects, when it names whole parts of the table (everything, the corner, the column headings, the data, the
     /// labels, the grand totals, the field buttons). Areas that pick particular items through <c>references</c> give null.
     /// </summary>
+    /// <summary>
+    /// A pivot area on the page fields: the field's button (its name) with <c>axis="axisPage"</c>, or a <c>reference</c> to a page field and
+    /// the item shown (the cell with the item). Gives which of the cells of the field with a given index it covers (label cell or item cell).
+    /// </summary>
+    private static Func<int, bool, bool>? PageTest(XElement area, Geometry g)
+    {
+        if (g.PageFields.Count == 0) return null;
+        string type = (string?)area.Attribute("type") ?? "normal";
+        var references = area.Elements().FirstOrDefault(e => e.Name.LocalName == "references")?.Elements().Where(e => e.Name.LocalName == "reference").ToList() ?? [];
+        long.TryParse((string?)area.Attribute("field"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long areaField);
+        if ((string?)area.Attribute("axis") == "axisPage" && references.Count == 0)
+        {
+            if (type != "button") return area.Attribute("field") is null ? null : (index, label) => g.PageFields[index].Field == areaField && !label;
+            return (index, label) => label && (area.Attribute("field") is null || g.PageFields[index].Field == areaField);
+        }
+        if (references.Count == 0) return null;
+        // References to page fields only: the item cell of each, when the item named is the one shown (or the field shows all).
+        var picks = new List<(int Field, HashSet<int> Items)>();
+        foreach (var reference in references)
+        {
+            if (!int.TryParse((string?)reference.Attribute("field"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int field) || g.PageFields.All(p => p.Field != field)) return null;
+            picks.Add((field, reference.Elements().Where(e => e.Name.LocalName == "x").Select(e => int.TryParse((string?)e.Attribute("v"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0).ToHashSet()));
+        }
+        bool labelOnly = (string?)area.Attribute("labelOnly") is "1" or "true";
+        return (index, label) =>
+        {
+            var (field, item) = g.PageFields[index];
+            return !label && !labelOnly && picks.Any(p => p.Field == field && (item < 0 || p.Items.Contains(item)));
+        };
+    }
+
     private static Func<int, int, bool>? AreaTest(XElement area, Geometry g)
     {
         if (area.Elements().FirstOrDefault(e => e.Name.LocalName == "references" && e.HasElements) is { } references) return ItemTest(area, references, g);
@@ -141,6 +201,7 @@ internal static partial class PivotStyling
             case "origin": return (r, c) => g.IsHeader(r) && g.IsLabel(c);
             case "topRight": return (r, c) => g.IsHeader(r) && !g.IsLabel(c);
             case "button":
+                if (axis == "axisPage") return null;
                 return axis == "axisCol" ? (r, c) => r == g.Range.FirstRow && c == g.Range.FirstColumn + g.LabelColumns
                     : (r, c) => r == g.Range.FirstRow + Math.Max(g.HeaderRows - 1, 0) && g.IsLabel(c);
             case "normal" or "data":
@@ -170,7 +231,8 @@ internal static partial class PivotStyling
             // Excel writes the data field as the unsigned 4294967294.
             if (!long.TryParse((string?)reference.Attribute("field"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long wide)) return null;
             int field = wide == 4294967294 ? -2 : (int)wide;
-            if (field == -2) { if (g.DataFieldCount > 1) return null; continue; }
+            // With several data fields the data-field "field" is a level of an axis (its items are the data fields' indexes); with one it adds no condition.
+            if (field == -2 && g.DataFieldCount <= 1) continue;
             var items = reference.Elements().Where(e => e.Name.LocalName == "x").Select(e => int.TryParse((string?)e.Attribute("v"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0).ToHashSet();
             if (items.Count == 0) return null;
             int level = g.RowFields.IndexOf(field);

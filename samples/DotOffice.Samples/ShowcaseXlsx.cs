@@ -52,6 +52,7 @@ internal static class ShowcaseXlsx
             ("Pivot banded", PivotSheet("Pivot table with a banded Medium style and formats on the East data (pink) and the North label (green) (approximated, reported)"), "visible"),
             ("Pivot dark", PivotSheet("Pivot table with a banded Dark style (approximated, reported)"), "visible"),
             ("Pivot custom", PivotSheet("Pivot table with the workbook's own table style from styles.xml (header, two stripes, total row; reported)"), "visible"),
+            ("Pivot fields", PivotFieldsSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
@@ -90,6 +91,7 @@ internal static class ShowcaseXlsx
             "<format dxfId=\"1\"><pivotArea dataOnly=\"0\" labelOnly=\"1\" field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"0\"/></reference></references></pivotArea></format></formats>", stripes: true);
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot dark") + 1, "PivotStyleDark3", "", stripes: true);
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot custom") + 1, "Showcase pivot", "", stripes: true);
+        WritePivotFields(zip, sheets.FindIndex(x => x.Name == "Pivot fields") + 1);
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
         WriteShapeFills(zip, sheets.FindIndex(x => x.Name == "Shape fills") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
@@ -1179,6 +1181,34 @@ internal static class ShowcaseXlsx
             $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\"/>" +
             "<rowFields count=\"1\"><field x=\"0\"/></rowFields><rowItems count=\"5\"><i><x/></i><i><x v=\"1\"/></i><i><x v=\"2\"/></i><i><x v=\"3\"/></i><i t=\"grand\"><x/></i></rowItems>" + formats +
             (style.Length == 0 ? "" : $"<pivotTableStyleInfo name=\"{style}\" showRowHeaders=\"1\" showColHeaders=\"1\" showRowStripes=\"{(stripes ? 1 : 0)}\" showColStripes=\"0\"/>") + "</pivotTableDefinition>");
+    }
+
+    /// <summary>A pivot table with a page field above it and two data fields side by side; formats reach the page item and one data field of one region.</summary>
+    private static string PivotFieldsSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(2, Str("A2", "Year", Bold) + Num("B2", 2024)));
+        rows.Append(Row(4, Str("A4", "Row Labels", Bold) + Str("B4", "Sum of Sales", Bold) + Str("C4", "Sum of Units", Bold)));
+        (string Region, double Sales, double Units)[] data = [("North", 1250, 31), ("South", 980.5, 24), ("East", 1610, 40), ("West", 745, 18)];
+        for (int i = 0; i < data.Length; i++) rows.Append(Row(5 + i, Str($"A{5 + i}", data[i].Region) + Num($"B{5 + i}", data[i].Sales, Money) + Num($"C{5 + i}", data[i].Units)));
+        rows.Append(Row(9, Str("A9", "Grand Total", Bold) + Num("B9", data.Sum(d => d.Sales), Money) + Num("C9", data.Sum(d => d.Units))));
+        rows.Append(Row(11, Str("A11", "Pivot table with a page field (its item in green) and two data fields (the units of East in pink)", Bold)));
+        return Sheet("<cols><col min=\"1\" max=\"3\" width=\"20\" customWidth=\"1\"/></cols>", rows.ToString(), "<pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static void WritePivotFields(ZipArchive zip, int sheetNumber)
+    {
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable{sheetNumber}.xml\"/></Relationships>");
+        Entry(zip, $"xl/pivotTables/pivotTable{sheetNumber}.xml",
+            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A4:C9\" firstHeaderRow=\"0\" firstDataRow=\"1\" firstDataCol=\"1\" rowPageCount=\"1\" colPageCount=\"1\"/>" +
+            "<rowFields count=\"1\"><field x=\"0\"/></rowFields><rowItems count=\"5\"><i><x/></i><i><x v=\"1\"/></i><i><x v=\"2\"/></i><i><x v=\"3\"/></i><i t=\"grand\"><x/></i></rowItems>" +
+            "<colFields count=\"1\"><field x=\"-2\"/></colFields><colItems count=\"2\"><i><x/></i><i i=\"1\"><x v=\"1\"/></i></colItems>" +
+            "<pageFields count=\"1\"><pageField fld=\"3\" item=\"0\" hier=\"-1\"/></pageFields><dataFields count=\"2\"><dataField name=\"Sum of Sales\" fld=\"1\"/><dataField name=\"Sum of Units\" fld=\"2\"/></dataFields>" +
+            "<formats count=\"3\">" +
+            "<format dxfId=\"1\"><pivotArea dataOnly=\"0\" outline=\"0\" fieldPosition=\"0\"><references count=\"1\"><reference field=\"3\" count=\"1\" selected=\"0\"><x v=\"0\"/></reference></references></pivotArea></format>" +
+            "<format dxfId=\"0\"><pivotArea field=\"0\" type=\"normal\"><references count=\"2\"><reference field=\"4294967294\" count=\"1\" selected=\"0\"><x v=\"1\"/></reference><reference field=\"0\" count=\"1\" selected=\"0\"><x v=\"2\"/></reference></references></pivotArea></format>" +
+            "<format dxfId=\"1\"><pivotArea field=\"3\" type=\"button\" dataOnly=\"0\" labelOnly=\"1\" outline=\"0\" axis=\"axisPage\" fieldPosition=\"0\"/></format></formats></pivotTableDefinition>");
     }
 
     private static string Limits() =>
