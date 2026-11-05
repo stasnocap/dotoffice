@@ -637,7 +637,7 @@ internal static class ShowcaseXlsx
         var log = Bars("col", "clustered", 2, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:logBase val=\"10\"/><c:orientation val=\"minMax\"/>"));
         var flipped = Bars("col", "clustered", 1, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"maxMin\"/>"));
         // Two scatter groups: the second on its own pair of value axes (a secondary Y axis on the right, a secondary X axis on top).
-        var secondaryXy = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"20\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/><c:crossAx val=\"4\"/></c:valAx>" +
+        var secondaryXy = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"20\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/>" + Rich("title", "Secondary X", 1000) + "<c:crossAx val=\"4\"/></c:valAx>" +
                           "<c:valAx><c:axId val=\"4\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"5000\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/>" + Rich("title", "Secondary Y", 1000) + "<c:crossAx val=\"3\"/><c:crosses val=\"max\"/></c:valAx>";
         var scatterPair = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" + XySeries(0, "Charts!$B$4:$B$9", "Charts!$C$4:$C$9") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" +
                           "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" + XySeries(1, "Charts!$B$4:$B$9", "Charts!$D$4:$D$9") + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:scatterChart>" + XyAxes + secondaryXy;
@@ -724,13 +724,31 @@ internal static class ShowcaseXlsx
         var formatted = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + Series(0, trendLabel) + Series(1) + Series(2) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
         var formattedSpace = ChartSpace("Trendline label format, legend size", formatted, "")
             .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.55\"/><c:y val=\"0.12\"/><c:w val=\"0.4\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout><c:overlay val=\"1\"/></c:legend>");
+        // Labels of single points with their own position (inside the base, centered) and text (a field and a literal), under a series position.
+        string Turn(string degrees) => $"<c:txPr><a:bodyPr rot=\"{degrees}\" vert=\"horz\"/><a:p><a:pPr><a:defRPr sz=\"900\"/></a:pPr><a:endParaRPr lang=\"en-US\"/></a:p></c:txPr>";
+        var positioned = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" +
+                         Series(0, "<c:dLbls><c:dLbl><c:idx val=\"1\"/><c:dLblPos val=\"inBase\"/>" + Show + "</c:dLbl>" +
+                                   "<c:dLbl><c:idx val=\"2\"/><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Peak </a:t></a:r><a:fld id=\"{1A2B3C4D-0000-0000-0000-000000000001}\" type=\"VALUE\"><a:t>[VALUE]</a:t></a:fld></a:p></c:rich></c:tx>" + Show + "</c:dLbl>" +
+                                   "<c:dLbl><c:idx val=\"3\"/><c:dLblPos val=\"ctr\"/>" + Show + "</c:dLbl>" +
+                                   "<c:dLblPos val=\"outEnd\"/>" + Show + "</c:dLbls>") +
+                         "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" + Axes();
+        var turnedBars = Bars("bar", "clustered", 1, true, axes: Axes().Replace("<c:crossAx val=\"2\"/></c:catAx>", Turn("-2700000") + "<c:crossAx val=\"2\"/></c:catAx>")
+                                                                   .Replace("<c:crossAx val=\"1\"/></c:valAx>", Turn("2700000") + "<c:crossAx val=\"1\"/></c:valAx>"));
+        var turnedValues = Bars("col", "clustered", 1, true, axes: Axes().Replace("<c:crossAx val=\"1\"/></c:valAx>", Turn("-5400000") + "<c:crossAx val=\"1\"/></c:valAx>")
+                                                                   .Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"maxMin\"/>")
+                                                                   .Replace("<c:crossAx val=\"2\"/></c:catAx>", Turn("-2700000") + "<c:crossAx val=\"2\"/></c:catAx>"));
+        var squeezed = ChartSpace("Legend that shrinks the plot", columns.Replace(Trend("linear", "", labels: true), ""), "")
+            .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.7\"/><c:y val=\"0.3\"/><c:w val=\"0.25\"/><c:h val=\"0.3\"/></c:manualLayout></c:layout><c:overlay val=\"0\"/></c:legend>");
         string[] charts =
         [
             ChartSpace("Columns: equation and R²", columns, ""), ChartSpace("Bars with a trendline", bars, ""), ChartSpace("Stacked columns: trend of the totals", stacked, "b"),
             ChartSpace("Polynomial: equation and R²", scatter, ""), styledSpace,
             ChartSpace("Turned labels and point labels", turned, ""), formattedSpace,
+            ChartSpace("Label positions and own text", positioned, ""), ChartSpace("Turned bar labels", turnedBars, ""),
+            ChartSpace("Turned labels, reversed values", turnedValues, ""), squeezed,
         ];
-        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43), (0, 44, 3, 57)];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43), (0, 44, 3, 57),
+            (3, 44, 6, 57), (0, 58, 3, 71), (3, 58, 6, 71), (0, 72, 3, 85)];
         WriteChartParts(zip, sheetNumber, charts, places, "text");
     }
 

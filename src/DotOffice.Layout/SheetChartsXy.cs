@@ -35,6 +35,12 @@ public sealed partial class SheetLayoutEngine
             right -= titleFont.FontSize + 7;
         }
         double secondaryWidth = secondaryY ? chart.SecondaryTicks.Select(t => MeasureChartText(t.Label, secondaryYFont)).DefaultIfEmpty(0).Max() + 6 : 0;
+        if (secondaryX && chart.SecondaryXAxisTitle is { Length: > 0 } secondaryXTitle)
+        {
+            var titleFont = Styled(font with { FontSize = fontSize + 1 }, styles.SecondaryXAxisTitle);
+            PlaceText(secondaryXTitle, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items);
+            top += titleFont.FontSize + 7;
+        }
         if (secondaryX) top += xFont.FontSize * 1.25 + 4;
         right -= secondaryWidth;
         double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, yFont)).DefaultIfEmpty(0).Max() : 0;
@@ -66,7 +72,7 @@ public sealed partial class SheetLayoutEngine
         if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), 0.75, ChartGrid));
         if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, 0.75, ChartGrid));
 
-        var labels = new List<(string Text, double X, double Y, Color? Fill, ChartTextStyle? Style)>();
+        var labels = new List<(string Text, double X, double Y, Color? Fill, ChartTextStyle? Style, LabelSide Side)>();
         var trendLabels = new List<LayoutItem>();
         // The groups: the chart's own series on the primary axes, then the further groups on the primary or the secondary pair.
         var secondaryXScale = chart.SecondaryXScale;
@@ -98,7 +104,18 @@ public sealed partial class SheetLayoutEngine
                     if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x)
                     {
                         points[i] = (GX(x), GY(y));
-                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], GX(x), GY(y) - 8, null, LabelStyleAt(s, i)));
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0)
+                        {
+                            double gx = GX(x), gy = GY(y);
+                            labels.Add(LabelPlacementAt(s, i) switch
+                            {
+                                ChartLabelPlacement.Center => (l[i], gx, gy, null, LabelStyleAt(s, i), LabelSide.Center),
+                                ChartLabelPlacement.Below => (l[i], gx, gy + 8, null, LabelStyleAt(s, i), LabelSide.Center),
+                                ChartLabelPlacement.Left => (l[i], gx - 6, gy, null, LabelStyleAt(s, i), LabelSide.Left),
+                                ChartLabelPlacement.Right => (l[i], gx + 6, gy, null, LabelStyleAt(s, i), LabelSide.Right),
+                                _ => (l[i], gx, gy - 8, null, LabelStyleAt(s, i), LabelSide.Center),
+                            });
+                        }
                     }
                 var overlays = new List<LayoutItem>();
                 foreach (var bars in s.ErrorBars ?? [])
@@ -140,12 +157,13 @@ public sealed partial class SheetLayoutEngine
                 if (d < 1) continue;
                 if (b.Alpha >= 1) items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
                 AddFaded(items, b.Alpha, new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
-                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color, b.Style));
+                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color, b.Style, LabelSide.Center));
             }
         }
         items.AddRange(trendLabels);
-        foreach (var (text, lx, ly, fill, pointStyle) in labels)
-            PlaceText(text, Styled(Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), pointStyle), lx, ly, Anchor.Middle, true, 0, items);
+        foreach (var (text, lx, ly, fill, pointStyle, side) in labels)
+            PlaceText(text, Styled(Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), pointStyle), lx, ly,
+                side switch { LabelSide.Left => Anchor.End, LabelSide.Right => Anchor.Start, _ => Anchor.Middle }, true, 0, items);
     }
 
     /// <summary>A label under a horizontal axis, turned by <paramref name="angle"/> degrees counter-clockwise (negative: clockwise) from its tick.</summary>

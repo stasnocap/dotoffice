@@ -34,7 +34,14 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
-    IReadOnlyList<ChartTextStyle?>? LabelStyles = null);
+    IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null);
+
+/// <summary>
+/// Where a data label sits relative to its point or bar (<c>dLblPos</c>). <see cref="InsideEnd"/>, <see cref="InsideBase"/> and
+/// <see cref="OutsideEnd"/> belong to bars and columns; <see cref="Above"/>, <see cref="Below"/>, <see cref="Left"/> and
+/// <see cref="Right"/> to points of lines and scatter charts; <see cref="Center"/> to both.
+/// </summary>
+public enum ChartLabelPlacement { Center, InsideEnd, InsideBase, OutsideEnd, Above, Below, Left, Right }
 
 public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial, MovingAverage }
 
@@ -67,6 +74,7 @@ public sealed record ChartTextStyles
     public ChartTextStyle? ValueAxisTitle { get; init; }
     public ChartTextStyle? CategoryAxisTitle { get; init; }
     public ChartTextStyle? SecondaryAxisTitle { get; init; }
+    public ChartTextStyle? SecondaryXAxisTitle { get; init; }
     public ChartTextStyle? Legend { get; init; }
     public ChartTextStyle? DataLabels { get; init; }
 }
@@ -177,6 +185,8 @@ public sealed record SheetChart : SheetObject
     public double SecondaryMax { get; init; } = 1;
 
     public string? SecondaryAxisTitle { get; init; }
+    /// <summary>The title of the secondary horizontal axis (along the top) of a scatter or bubble chart.</summary>
+    public string? SecondaryXAxisTitle { get; init; }
 
     public bool ShowSecondaryAxis { get; init; } = false;
 
@@ -242,6 +252,8 @@ public sealed record SheetChart : SheetObject
 
     /// <summary>A manual position of the legend (top-left in fractions of the chart; the size, when given, is not used); null means automatic.</summary>
     public ChartBox? LegendBox { get; init; }
+    /// <summary>Whether the legend is drawn over the plot area (<c>overlay</c>) instead of making the plot area give way to it.</summary>
+    public bool LegendOverlay { get; init; }
 
     /// <summary>Formatting of the text of the title, axes, legend and labels beyond the base size.</summary>
     public ChartTextStyles TextStyles { get; init; } = new();

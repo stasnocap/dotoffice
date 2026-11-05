@@ -199,7 +199,7 @@ public class XlsxChartTests
     [Fact]
     public void A_scatter_group_on_its_own_pair_of_value_axes_gets_secondary_scales()
     {
-        var secondary = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:min val=\"0\"/><c:max val=\"100\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/></c:valAx>" +
+        var secondary = "<c:valAx><c:axId val=\"3\"/><c:scaling><c:min val=\"0\"/><c:max val=\"100\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"t\"/><c:title><c:tx><c:rich><a:p><a:r><a:t>Top</a:t></a:r></a:p></c:rich></c:tx></c:title></c:valAx>" +
                         "<c:valAx><c:axId val=\"4\"/><c:scaling><c:min val=\"0\"/><c:max val=\"500\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/><c:title><c:tx><c:rich><a:p><a:r><a:t>Right</a:t></a:r></a:p></c:rich></c:tx></c:title><c:crosses val=\"max\"/></c:valAx>";
         var plot = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" +
                    "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:scatterChart>" + XyAxes() + secondary;
@@ -212,6 +212,7 @@ public class XlsxChartTests
         Assert.Equal((0.0, 500.0, "Right"), (chart.SecondaryMin, chart.SecondaryMax, chart.SecondaryAxisTitle));
         Assert.Equal((0.0, 100.0), (chart.SecondaryXMin, chart.SecondaryXMax));
         Assert.True(chart.ShowSecondaryAxis && chart.ShowSecondaryXAxis);
+        Assert.Equal("Top", chart.SecondaryXAxisTitle);
         Assert.Equal((0.0, 45.0), (chart.XMin, chart.XMax)); // the primary range comes from the first group alone
     }
 
@@ -403,6 +404,8 @@ public class XlsxChartTests
         var legend = "<c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.6\"/><c:y val=\"0.1\"/><c:w val=\"0.3\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout></c:legend>";
         var box = Read(Space(Plot(""), legend)).Sheet.Charts.Single().LegendBox!.Value;
         Assert.Equal((0.3, 0.2), (box.Width, box.Height));
+        Assert.False(Read(Space(Plot(""), legend)).Sheet.Charts.Single().LegendOverlay);
+        Assert.True(Read(Space(Plot(""), legend.Replace("</c:legend>", "<c:overlay val=\"1\"/></c:legend>"))).Sheet.Charts.Single().LegendOverlay);
     }
 
     [Fact]
@@ -420,5 +423,19 @@ public class XlsxChartTests
         var only = "<c:dLbls><c:dLbl><c:idx val=\"2\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbl><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/></c:dLbls>";
         var single = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", only)))).Sheet.Charts.Single().Series[0];
         Assert.Equal(["", "", "40"], single.Labels);
+    }
+
+    [Fact]
+    public void A_points_label_can_have_its_own_position_and_rich_text_with_fields()
+    {
+        var labels = "<c:dLbls>" +
+                     "<c:dLbl><c:idx val=\"0\"/><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Low:</a:t></a:r><a:fld id=\"{A}\" type=\"VALUE\"><a:t>[VALUE]</a:t></a:fld></a:p></c:rich></c:tx><c:dLblPos val=\"inBase\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbl>" +
+                     "<c:dLbl><c:idx val=\"1\"/><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Mid</a:t></a:r></a:p><a:p><a:fld id=\"{B}\" type=\"SERIESNAME\"><a:t>[SERIES NAME]</a:t></a:fld></a:p></c:rich></c:tx><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/></c:dLbl>" +
+                     "<c:dLblPos val=\"outEnd\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>";
+        var series = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", labels)))).Sheet.Charts.Single().Series[0];
+        Assert.Equal(["Low:10", "Mid " + series.Name, "40"], series.Labels);
+        Assert.Equal([ChartLabelPlacement.InsideBase, ChartLabelPlacement.OutsideEnd, ChartLabelPlacement.OutsideEnd], series.LabelPlacements);
+        var noPlace = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", "<c:dLbls><c:dLblPos val=\"bestFit\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>")))).Sheet.Charts.Single().Series[0];
+        Assert.Null(noPlace.LabelPlacements);
     }
 }

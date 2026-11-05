@@ -418,17 +418,24 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
-    public void A_manual_legend_sits_at_its_position_and_leaves_the_plot_alone()
+    public void A_manual_legend_sits_at_its_position_and_the_plot_gives_way_to_its_size_unless_it_overlays()
     {
         var chart = Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with { Legend = LegendPosition.Right, Border = null, Background = null };
         var automatic = Page(chart);
-        var manual = Page(chart with { LegendBox = new ChartBox(0.1, 0.8, 0.3, 0.1, false) });
+        var box = new ChartBox(0.1, 0.8, 0.3, 0.1, false);
+        var manual = Page(chart with { LegendBox = box });
         var swatch = manual.Items.OfType<RectItem>().Where(r => r.Fill == Red && r.Width < 10).Single();
         Assert.Equal(OriginX + 30, swatch.X, 3);
         Assert.InRange(swatch.Y, OriginY + 160, OriginY + 175);
-        // The automatic legend takes room on the right; the manual one does not, so the columns are wider.
         double Width(LayoutPage page) => page.Items.OfType<RectItem>().Where(r => r.Fill == Red && r.Height > 10).Max(r => r.X + r.Width);
-        Assert.True(Width(manual) > Width(automatic));
+        var overlay = Page(chart with { LegendBox = box, LegendOverlay = true });
+        // The manual legend's own width (a third of the chart) is wider than the automatic one, so the plot is narrower; overlaying it keeps the plot whole.
+        Assert.True(Width(manual) < Width(automatic));
+        Assert.True(Width(overlay) > Width(automatic));
+        // A manual legend above the plot pushes the plot down by its height.
+        double Top(LayoutPage page) => page.Items.OfType<RectItem>().Where(r => r.Fill == Red && r.Height > 10).Min(r => r.Y);
+        var top = chart with { Legend = LegendPosition.Top, LegendBox = new ChartBox(0.1, 0.02, 0.5, 0.2, false) };
+        Assert.True(Top(Page(top)) > Top(Page(top with { LegendOverlay = true })));
     }
 
     [Fact]
@@ -498,6 +505,41 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void Value_axis_labels_and_the_labels_of_horizontal_bars_turn_too()
+    {
+        static IEnumerable<PushItem> Turned(LayoutPage page) => page.Items.OfType<PushItem>().Where(p => p.Rotation != 0);
+        var column = Chart(ChartKind.Column, Series(Red, 5, 10, 20));
+        int ticks = column.Ticks.Count;
+        var valueTurned = Turned(Page(column with { TextStyles = new ChartTextStyles { ValueAxis = new ChartTextStyle(Rotation: 90) } })).ToList();
+        Assert.Equal(ticks, valueTurned.Count);
+        Assert.All(valueTurned, p => Assert.Equal(90, p.Rotation));
+        // The turned labels are centered on their gridline, so the plot is not narrower than the widest label allows.
+        var bar = Chart(ChartKind.Bar, Series(Red, 5, 10, 20));
+        var styles = new ChartTextStyles { CategoryAxis = new ChartTextStyle(Rotation: 45), ValueAxis = new ChartTextStyle(Rotation: -45) };
+        var turned = Turned(Page(bar with { TextStyles = styles })).ToList();
+        Assert.Equal(3 + bar.Ticks.Count, turned.Count);
+        Assert.Equal(3, turned.Count(p => p.Rotation == 45));
+        Assert.Equal(bar.Ticks.Count, turned.Count(p => p.Rotation == -45));
+        Assert.Empty(Turned(Page(bar)));
+    }
+
+    [Fact]
+    public void Turned_category_labels_of_a_reversed_value_axis_stay_above_the_plot()
+    {
+        var chart = Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with
+        {
+            ReverseValues = true,
+            TextStyles = new ChartTextStyles { CategoryAxis = new ChartTextStyle(Rotation: -30) },
+        };
+        var items = Page(chart).Items;
+        var turned = items.OfType<PushItem>().Where(p => p.Rotation != 0).ToList();
+        Assert.Equal(3, turned.Count);
+        Assert.All(turned, p => Assert.Equal(-30, p.Rotation));
+        double top = items.OfType<LineItem>().Where(l => l.X1 != l.X2).Min(l => l.Y1);
+        Assert.All(turned, p => Assert.True(p.CenterY < top)); // each label is anchored above the first gridline
+    }
+
+    [Fact]
     public void A_scatter_chart_turns_its_x_labels_too()
     {
         var series = new ChartSeries("S", new double?[] { 0, 20 }, Red, Marker: true, XValues: new double?[] { 0, 10 }, Line: false);
@@ -536,5 +578,52 @@ public class SheetChartLayoutTests
         Assert.Equal(16, texts.Single(t => t.Text == "a3").FontSize);
         Assert.Equal(green, texts.Single(t => t.Text == "a3").Color);
         Assert.NotEqual(16, texts.Single(t => t.Text == "a1").FontSize);
+    }
+
+    [Fact]
+    public void A_data_label_sits_where_its_position_puts_it()
+    {
+        double Baseline(ChartSeries series, ChartKind kind = ChartKind.Column) =>
+            Page(Chart(kind, series)).Items.OfType<TextItem>().Single(t => t.Text == "lab").Baseline;
+        double X(ChartSeries series, ChartKind kind) => Page(Chart(kind, series)).Items.OfType<TextItem>().Single(t => t.Text == "lab").X;
+        ChartSeries With(ChartLabelPlacement? place) => new("S", new double?[] { 20 }, Red, false, null, new[] { "lab" }, LabelPlacements: new ChartLabelPlacement?[] { place });
+        double outside = Baseline(With(ChartLabelPlacement.OutsideEnd)), center = Baseline(With(ChartLabelPlacement.Center));
+        double inEnd = Baseline(With(ChartLabelPlacement.InsideEnd)), inBase = Baseline(With(ChartLabelPlacement.InsideBase));
+        Assert.True(outside < inEnd && inEnd < center && center < inBase, $"{outside} {inEnd} {center} {inBase}");
+        Assert.Equal(outside, Baseline(With(null)), 3); // no position: the usual outside end of a clustered column
+        // Horizontal bars: inside the end lies left of the outside end, the base further left still.
+        double barOutside = X(With(ChartLabelPlacement.OutsideEnd), ChartKind.Bar), barInEnd = X(With(ChartLabelPlacement.InsideEnd), ChartKind.Bar);
+        double barBase = X(With(ChartLabelPlacement.InsideBase), ChartKind.Bar);
+        Assert.True(barBase < barInEnd && barInEnd < barOutside);
+    }
+
+    [Fact]
+    public void Points_of_a_line_chart_put_their_label_on_the_requested_side()
+    {
+        ChartSeries With(ChartLabelPlacement? place) => new("S", new double?[] { 10, 20 }, Red, true, null, new[] { "", "lab" }, LabelPlacements: new ChartLabelPlacement?[] { null, place });
+        TextItem Label(ChartLabelPlacement? place) => Page(Chart(ChartKind.Line, With(place))).Items.OfType<TextItem>().Single(t => t.Text == "lab");
+        var above = Label(null);
+        Assert.True(Label(ChartLabelPlacement.Below).Baseline > Label(ChartLabelPlacement.Center).Baseline);
+        Assert.True(Label(ChartLabelPlacement.Center).Baseline > above.Baseline);
+        Assert.True(Label(ChartLabelPlacement.Left).X < above.X && above.X < Label(ChartLabelPlacement.Right).X);
+    }
+
+    [Fact]
+    public void A_scatter_chart_titles_its_secondary_horizontal_axis_above_the_plot()
+    {
+        var primary = new ChartSeries("A", new double?[] { 1, 2 }, Red, Marker: true, XValues: new double?[] { 0, 10 }, Line: false);
+        var other = new ChartSeries("B", new double?[] { 1, 2 }, Red, Marker: true, XValues: new double?[] { 0, 5 }, Line: false);
+        var chart = Chart(ChartKind.Scatter, primary) with
+        {
+            XTicks = [new(0, "0"), new(10, "10")], XMin = 0, XMax = 10,
+            ExtraGroups = [new ChartGroup(ChartKind.Scatter, ChartGrouping.Clustered, [other], true, 150, 0)],
+            ShowSecondaryXAxis = true, SecondaryXTicks = [new(0, "0"), new(5, "5")], SecondaryXMin = 0, SecondaryXMax = 5, SecondaryMin = 0, SecondaryMax = 2,
+            SecondaryXAxisTitle = "Top axis",
+        };
+        double Tick(LayoutPage page) => page.Items.OfType<TextItem>().First(t => t.Text == "5").Baseline;
+        var titled = Page(chart);
+        var title = titled.Items.OfType<TextItem>().Single(t => t.Text.Contains("Top"));
+        Assert.True(title.Baseline < Tick(titled)); // the title sits above the axis' labels
+        Assert.True(Tick(titled) > Tick(Page(chart with { SecondaryXAxisTitle = null }))); // and takes room from the plot
     }
 }

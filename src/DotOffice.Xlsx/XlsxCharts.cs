@@ -175,17 +175,37 @@ internal static class XlsxCharts
             var dLbls = Child(ser, "dLbls") ?? groupLabels;
             IReadOnlyList<string>? labels = null;
             List<ChartTextStyle?>? labelStyles = null;
+            List<ChartLabelPlacement?>? labelPlacements = null;
             var pointLabels = dLbls?.Elements().Where(e => e.Name.LocalName == "dLbl").ToList() ?? [];
-            bool Shows(XElement? holder) => holder is not null && (Flag(Child(holder, "showVal"), "val") || Flag(Child(holder, "showPercent"), "val"));
+            // A point's own label may carry its own text (tx/rich): runs are kept, fields are replaced by what they stand for.
+            XElement? RichText(XElement? holder) => Path(holder, "tx", "rich");
+            bool Shows(XElement? holder) => holder is not null && (Flag(Child(holder, "showVal"), "val") || Flag(Child(holder, "showPercent"), "val") || RichText(holder) is not null);
+            var rangeCache = ser.Descendants().FirstOrDefault(e => e.Name.LocalName == "dlblRangeCache");
+            string? CellRangeText(int k) => rangeCache?.Elements().Where(e => e.Name.LocalName == "pt" && (int)Number(e, "idx", -1) == k).Select(e => (string?)Child(e, "v")).FirstOrDefault();
             if (Shows(dLbls) || pointLabels.Any(Shows))
             {
                 double total = values.Sum(v => v is { } x && x > 0 ? x : 0);
-                string LabelOf(double x, XElement holder, XElement? fallback)
+                string LabelOf(int k, double x, XElement holder, XElement? fallback)
                 {
                     bool showValue = Flag(Child(holder, "showVal"), "val"), showPercent = Flag(Child(holder, "showPercent"), "val") && slices;
                     var numFmt = Child(holder, "numFmt") ?? Child(fallback, "numFmt");
                     string? code = numFmt is not null && !Flag(numFmt, "sourceLinked") ? (string?)numFmt.Attribute("formatCode") : format;
                     var parts = new List<string>();
+                    if (RichText(holder) is { } rich && k >= 0)
+                        return string.Join(" ", rich.Elements().Where(para => para.Name.LocalName == "p").Select(para => string.Concat(para.Elements().Select(run => run.Name.LocalName switch
+                        {
+                            "r" => (string?)Child(run, "t") ?? "",
+                            "fld" => ((string?)run.Attribute("type")) switch
+                            {
+                                "VALUE" or "YVALUE" => Format(x, code),
+                                "CATEGORYNAME" or "XVALUE" => k < categories.Count ? categories[k] : "",
+                                "SERIESNAME" => name,
+                                "PERCENTAGE" => total > 0 ? (x / total).ToString("0%", CultureInfo.InvariantCulture) : "0%",
+                                "CELLRANGE" => CellRangeText(k) ?? "",
+                                _ => (string?)Child(run, "t") ?? "",
+                            },
+                            _ => "",
+                        }))).Where(t => t.Length > 0));
                     if (showValue) parts.Add(Format(x, code));
                     if (showPercent) parts.Add(total > 0 ? (x / total).ToString("0%", CultureInfo.InvariantCulture) : "0%");
                     return string.Join("; ", parts);
@@ -193,23 +213,33 @@ internal static class XlsxCharts
                 var own = pointLabels.Where(e => (int)Number(Child(e, "idx"), "val", -1) is >= 0).ToDictionary(e => (int)Number(Child(e, "idx"), "val", -1));
                 var texts = new List<string>();
                 var styles = new List<ChartTextStyle?>();
+                var places = new List<ChartLabelPlacement?>();
                 for (int k = 0; k < values.Count; k++)
                 {
                     var holder = own.GetValueOrDefault(k);
-                    if (values[k] is not { } x || holder is not null && (Flag(Child(holder, "delete"), "val") || !Shows(holder))) { texts.Add(""); styles.Add(null); continue; }
-                    texts.Add(holder is null ? Shows(dLbls) ? LabelOf(x, dLbls!, null) : "" : LabelOf(x, holder, dLbls));
-                    styles.Add(holder is null ? null : TextStyleOf(Child(holder, "txPr"), theme));
+                    if (values[k] is not { } x || holder is not null && (Flag(Child(holder, "delete"), "val") || !Shows(holder))) { texts.Add(""); styles.Add(null); places.Add(null); continue; }
+                    texts.Add(holder is null ? Shows(dLbls) ? LabelOf(k, x, dLbls!, null) : "" : LabelOf(k, x, holder, dLbls));
+                    styles.Add(holder is null ? null : TextStyleOf(Child(holder, "txPr") ?? RichText(holder), theme));
+                    places.Add(LabelPlacement((string?)Child(holder, "dLblPos")?.Attribute("val") ?? (string?)Child(dLbls, "dLblPos")?.Attribute("val")));
                 }
+                if (places.Any(pl => pl is not null)) labelPlacements = places;
                 labels = texts;
                 if (styles.Any(st => st is not null)) labelStyles = styles;
             }
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements));
         }
         return series;
         }
+
+        static ChartLabelPlacement? LabelPlacement(string? value) => value switch
+        {
+            "ctr" => ChartLabelPlacement.Center, "inEnd" => ChartLabelPlacement.InsideEnd, "inBase" => ChartLabelPlacement.InsideBase,
+            "outEnd" => ChartLabelPlacement.OutsideEnd, "t" => ChartLabelPlacement.Above, "b" => ChartLabelPlacement.Below,
+            "l" => ChartLabelPlacement.Left, "r" => ChartLabelPlacement.Right, _ => null,
+        };
 
         ChartTrendline? ReadTrendline(XElement ser, Color seriesColor)
         {
@@ -381,6 +411,7 @@ internal static class XlsxCharts
         XElement? secondaryXAxis = null, secondaryYAxis = null;
         double secondaryXMin = 0, secondaryXMax = 1, secondaryXLog = 0;
         bool reverseSecondaryX = false, secondaryXShown = false;
+        string? secondaryXTitle = null;
         var secondaryXTicks = new List<ChartTick>();
         if (xy)
         {
@@ -420,6 +451,7 @@ internal static class XlsxCharts
                     var (slo, shi, sp) = XRange(secondaryXSeries);
                     (secondaryXMin, secondaryXMax, secondaryXTicks, secondaryXLog, reverseSecondaryX) = ValueScale(secondaryXAxis, slo, shi, sp, ChartGrouping.Clustered, null);
                     secondaryXShown = !Flag(Child(secondaryXAxis, "delete"), "val");
+                    secondaryXTitle = TextOf(Path(secondaryXAxis, "title", "tx", "rich"));
                 }
             }
         }
@@ -504,6 +536,7 @@ internal static class XlsxCharts
             ValueAxis = Part(Child(valueAxis, "txPr")), CategoryAxis = Part(Child(categoryAxis, "txPr")),
             ValueAxisTitle = Part(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = Part(Path(categoryAxis, "title", "tx", "rich")),
             SecondaryAxis = Part(Child(secondaryStyleAxis, "txPr")), SecondaryAxisTitle = Part(Path(secondaryStyleAxis, "title", "tx", "rich")),
+            SecondaryXAxisTitle = Part(Path(secondaryXAxis, "title", "tx", "rich")),
             Legend = Part(Child(legendElement, "txPr")), DataLabels = Part(labelProperties),
         };
 
@@ -539,10 +572,10 @@ internal static class XlsxCharts
             LogBase = logBase, XLogBase = xLog, SecondaryLogBase = secondaryLog, ReverseValues = reverseValues, ReverseX = reverseX, ReverseSecondary = reverseSecondary,
             ReverseCategories = (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") == "maxMin" && !xy,
             SecondaryXTicks = secondaryXTicks, SecondaryXMin = secondaryXMin, SecondaryXMax = secondaryXMax, SecondaryXLogBase = secondaryXLog,
-            ReverseSecondaryX = reverseSecondaryX, ShowSecondaryXAxis = secondaryXShown,
+            ReverseSecondaryX = reverseSecondaryX, ShowSecondaryXAxis = secondaryXShown, SecondaryXAxisTitle = secondaryXTitle,
             ExtraGroups = extraGroups, SecondaryTicks = secondaryTicks, SecondaryMin = secondaryMin, SecondaryMax = secondaryMax,
             SecondaryAxisTitle = secondaryTitle, ShowSecondaryAxis = secondaryShown,
-            PlotArea = plotBox, TitlePosition = titlePosition, LegendBox = legendBox, TextStyles = textStyles,
+            PlotArea = plotBox, TitlePosition = titlePosition, LegendBox = legendBox, LegendOverlay = Flag(Child(legendElement, "overlay"), "val"), TextStyles = textStyles,
         };
     }
 
