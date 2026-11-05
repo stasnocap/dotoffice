@@ -47,7 +47,8 @@ internal static class ShowcaseXlsx
             ("Conditional links", ConditionalLinksSheet(), "visible"),
             ("Conditional lookups", ConditionalLookupsSheet(), "visible"),
             ("Pivot", PivotSheet("Pivot table cached cells (no pivot style: nothing to warn about)"), "visible"),
-            ("Pivot styled", PivotSheet("Pivot table with a pivot style (reported)"), "visible"),
+            ("Pivot styled", PivotSheet("Pivot table with a pivot style and a pivot-area format on the corner (approximated, reported)"), "visible"),
+            ("Pivot banded", PivotSheet("Pivot table with a banded Medium style (approximated, reported)"), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
@@ -79,7 +80,9 @@ internal static class ShowcaseXlsx
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot") + 1, "");
-        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16");
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16",
+            "<formats count=\"1\"><format dxfId=\"5\"><pivotArea type=\"origin\" outline=\"0\" fieldPosition=\"0\"/></format></formats>");
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot banded") + 1, "PivotStyleMedium2", "", stripes: true);
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
         WriteShapeFills(zip, sheets.FindIndex(x => x.Name == "Shape fills") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
@@ -930,13 +933,13 @@ internal static class ShowcaseXlsx
         return Sheet("<cols><col min=\"1\" max=\"2\" width=\"20\" customWidth=\"1\"/></cols>", rows.ToString(), "<pageSetup paperSize=\"9\"/>" + HeaderFooter);
     }
 
-    private static void WritePivot(ZipArchive zip, int sheetNumber, string style)
+    private static void WritePivot(ZipArchive zip, int sheetNumber, string style, string formats = "", bool stripes = false)
     {
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable{sheetNumber}.xml\"/></Relationships>");
         Entry(zip, $"xl/pivotTables/pivotTable{sheetNumber}.xml",
-            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\"/>" +
-            (style.Length == 0 ? "" : $"<pivotTableStyleInfo name=\"{style}\" showRowHeaders=\"1\"/>") + "</pivotTableDefinition>");
+            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\"/>" + formats +
+            (style.Length == 0 ? "" : $"<pivotTableStyleInfo name=\"{style}\" showRowHeaders=\"1\" showColHeaders=\"1\" showRowStripes=\"{(stripes ? 1 : 0)}\" showColStripes=\"0\"/>") + "</pivotTableDefinition>");
     }
 
     private static string Limits() =>

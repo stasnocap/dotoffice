@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -168,10 +168,22 @@ done
 grep -aq '^\[[0-9.]* [0-9.]*\] 0 d$' shapes-qdf.pdf || fail "the dashed outline is missing"
 if grep -E "warning xlsx\.drawing-approximated" "$log"; then fail "the supported shapes should not be reported as approximated"; fi
 
-# Pivot tables: the cached cells print; only the table with a pivot style is reported, and the warning names the style.
+# Pivot tables: the cached cells print; the styled tables are drawn approximately and reported with their style, the plain one is not.
 for needle in "North" "Grand Total" "4,585.50"; do grep -qF -- "$needle" all.txt || fail "missing pivot text: $needle"; done
-grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot styled'.*PivotStyleLight16" || fail "the styled pivot table should be reported with its style"
-[ "$(grep -cE "warning xlsx\.pivot" "$log")" = 1 ] || fail "only the styled pivot table should be reported"
+grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot styled'.*PivotStyleLight16.*approximately" || fail "the styled pivot table should be reported as approximated, with its style"
+grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot banded'.*PivotStyleMedium2.*approximately" || fail "the banded pivot table should be reported as approximated, with its style"
+for name in "Pivot styled" "Pivot banded"; do
+  for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$name" ] && qpdf "$pdf" --pages . "$p" -- "pivot-$p.pdf" && qpdf --qdf --object-streams=disable "pivot-$p.pdf" "pivot-$p-qdf.pdf" && pivot_file="pivot-$p-qdf.pdf"; done
+  # Light 16 tints its header (accent 1 at 80 %); Medium 2 fills it with accent 1 itself and bands every other row with that tint.
+  if [ "$name" = "Pivot styled" ]; then
+    grep -aq "^0.8549 0.8902 0.9529 rg$" "$pivot_file" || fail "the Light 16 header tint is missing"
+    grep -aq "^1 0.851 0.4 rg$" "$pivot_file" || fail "the pivot-area format (gold corner) is missing"
+  else
+    grep -aq "^0.2667 0.4471 0.7686 rg$" "$pivot_file" || fail "the Medium 2 header fill is missing"
+    grep -aq "^0.8549 0.8902 0.9529 rg$" "$pivot_file" || fail "the Medium 2 row bands are missing"
+  fi
+done
+[ "$(grep -cE "warning xlsx\.pivot" "$log")" = 2 ] || fail "only the two styled pivot tables should be reported"
 
 # Shape paths: gradients are real shadings (axial and radial), arrowheads are filled, custom geometry is filled, nothing is reported.
 path_page=0

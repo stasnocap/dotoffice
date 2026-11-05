@@ -342,9 +342,11 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     }
 
     /// <summary>
-    /// A pivot table's cells are ordinary cells of the sheet, holding the values Excel last calculated, so they print as they are. That is
-    /// faithful unless the table gets its look from a pivot style or pivot-area formats (neither is applied) or is set to refresh when the
-    /// file opens (Excel then shows other values); only those cases warn, and the warning says which.
+    /// A pivot table's cells are ordinary cells of the sheet, holding the values Excel last calculated, so they print as they are. The look
+    /// Excel gives the table from a pivot style and from pivot-area formats is applied to the cells here (see <see cref="PivotStyling"/>):
+    /// a few style families approximately, and formats that select whole parts of the table. The table warns when its style is only
+    /// approximated or unknown, when a format picks particular items, or when it is set to refresh when the file opens (Excel then shows
+    /// other values); the warning says which.
     /// </summary>
     private void ReadPivotTable(Worksheet sheet, string part)
     {
@@ -361,10 +363,10 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             return;
         }
         var reasons = new List<string>();
-        if ((string?)root.Elements().FirstOrDefault(e => e.Name.LocalName == "pivotTableStyleInfo")?.Attribute("name") is { Length: > 0 } style)
-            reasons.Add($"its table style '{style}' is not applied");
-        if (root.Elements().FirstOrDefault(e => e.Name.LocalName == "formats")?.HasElements == true)
-            reasons.Add("its pivot-area formats are not applied");
+        var look = PivotStyling.Apply(sheet, root, Theme, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette));
+        if (look.Style == PivotStyling.StyleOutcome.NotApplied) reasons.Add($"its table style '{look.StyleName}' is not applied");
+        else if (look.Style == PivotStyling.StyleOutcome.Approximated) reasons.Add($"its table style '{look.StyleName}' is drawn approximately (what the style highlights, not every shade)");
+        if (look.FormatsSkipped > 0) reasons.Add(look.FormatsSkipped == 1 ? "a pivot-area format that selects particular items is not applied" : $"{look.FormatsSkipped} pivot-area formats that select particular items are not applied");
         var cache = Package.FindRelationship(part, "pivotCacheDefinition");
         if (cache is not null && !cache.IsExternal && Package.Exists(cache.Target))
         {

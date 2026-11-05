@@ -96,10 +96,12 @@ public class XlsxWarningTests
         Assert.Contains("'Sales'", styled);
         Assert.Contains("PivotStyleLight16", styled);
         Assert.DoesNotContain("refresh", styled);
-        var all = Messages(WithPivot($"<pivotTableDefinition {PivotNs} name=\"P\"><formats count=\"1\"><format dxfId=\"0\"/></formats><pivotTableStyleInfo name=\"PivotStyleMedium9\"/></pivotTableDefinition>",
+        var all = Messages(WithPivot($"<pivotTableDefinition {PivotNs} name=\"P\"><location ref=\"A1:B3\"/><formats count=\"1\"><format dxfId=\"0\"><pivotArea field=\"0\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"1\"/></reference></references></pivotArea></format></formats><pivotTableStyleInfo name=\"PivotStyleDark3\"/></pivotTableDefinition>",
             $"<pivotCacheDefinition {PivotNs} refreshOnLoad=\"1\"/>"));
-        Assert.Contains("PivotStyleMedium9", all);
-        Assert.Contains("pivot-area formats", all);
+        Assert.Contains("PivotStyleDark3", all);
+        Assert.Contains("is not applied", all);
+        Assert.Contains("pivot-area format", all);
+        Assert.Contains("particular items", all);
         Assert.Contains("refresh when the file opens", all);
         Assert.Equal(["xlsx.pivot"], Codes(WithPivot($"<pivotTableDefinition {PivotNs} name=\"P\"/>", $"<pivotCacheDefinition {PivotNs} refreshOnLoad=\"true\"/>")));
     }

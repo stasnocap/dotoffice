@@ -846,6 +846,16 @@ internal static class ConditionalFormatting
 
     // ---- writing the outcome into the cell
 
+    /// <summary>Formats a cell like a dxf of a rule would (fonts, fill, borders, number format); an empty cell is only created for a fill or borders.</summary>
+    internal static void ApplyDxf(Worksheet sheet, int row, int column, Dxf dxf, Environment env)
+    {
+        var outcome = new Outcome();
+        outcome.Add(dxf);
+        if (sheet.Cells.TryGetValue((row, column), out var cell)) sheet.Cells[(row, column)] = Bake(cell, outcome, env);
+        else if (outcome.Fill is not null || outcome.Left is not null || outcome.Right is not null || outcome.Top is not null || outcome.Bottom is not null)
+            sheet.Cells[(row, column)] = Bake(new Cell(), outcome, env);
+    }
+
     private static Cell Bake(Cell cell, Outcome o, Environment env)
     {
         RunProperties Font(RunProperties f) => f with
