@@ -192,9 +192,10 @@ internal static class XlsxCharts
                     string? code = numFmt is not null && !Flag(numFmt, "sourceLinked") ? (string?)numFmt.Attribute("formatCode") : format;
                     var parts = new List<string>();
                     if (RichText(holder) is { } rich && k >= 0)
-                        return string.Join(" ", rich.Elements().Where(para => para.Name.LocalName == "p").Select(para => string.Concat(para.Elements().Select(run => run.Name.LocalName switch
+                        return string.Join("\n", rich.Elements().Where(para => para.Name.LocalName == "p").Select(para => string.Concat(para.Elements().Select(run => run.Name.LocalName switch
                         {
                             "r" => (string?)Child(run, "t") ?? "",
+                            "br" => "\n",
                             "fld" => ((string?)run.Attribute("type")) switch
                             {
                                 "VALUE" or "YVALUE" => Format(x, code),
@@ -238,7 +239,7 @@ internal static class XlsxCharts
         {
             "ctr" => ChartLabelPlacement.Center, "inEnd" => ChartLabelPlacement.InsideEnd, "inBase" => ChartLabelPlacement.InsideBase,
             "outEnd" => ChartLabelPlacement.OutsideEnd, "t" => ChartLabelPlacement.Above, "b" => ChartLabelPlacement.Below,
-            "l" => ChartLabelPlacement.Left, "r" => ChartLabelPlacement.Right, _ => null,
+            "l" => ChartLabelPlacement.Left, "r" => ChartLabelPlacement.Right, "bestFit" => ChartLabelPlacement.BestFit, _ => null,
         };
 
         ChartTrendline? ReadTrendline(XElement ser, Color seriesColor)

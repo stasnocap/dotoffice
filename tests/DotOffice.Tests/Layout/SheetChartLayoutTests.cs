@@ -626,4 +626,46 @@ public class SheetChartLayoutTests
         Assert.True(title.Baseline < Tick(titled)); // the title sits above the axis' labels
         Assert.True(Tick(titled) > Tick(Page(chart with { SecondaryXAxisTitle = null }))); // and takes room from the plot
     }
+
+    private static double Distance(TextItem t, double width) => Math.Sqrt(Math.Pow(t.X + width / 2 - (OriginX + 150), 2) + Math.Pow(t.Baseline - (OriginY + 100), 2));
+
+    [Fact]
+    public void Pie_labels_sit_at_the_asked_position()
+    {
+        ChartSeries Pie(ChartLabelPlacement? place) => new("S", [1, 1, 2], Red, PointColors: [Red, Blue, Color.Black], Labels: ["A", "B", "C"],
+            LabelPlacements: place is { } p ? [p, p, p] : null);
+        TextItem Label(ChartLabelPlacement? place, string text) => Page(Chart(ChartKind.Pie, Pie(place))).Items.OfType<TextItem>().Single(t => t.Text == text);
+        double cx = OriginX + 150, cy = OriginY + 100;
+        // The first slice runs from 12 to 3 o'clock: its middle points up and to the right.
+        var inside = Label(null, "A"); var center = Label(ChartLabelPlacement.Center, "A"); var inEnd = Label(ChartLabelPlacement.InsideEnd, "A"); var outside = Label(ChartLabelPlacement.OutsideEnd, "A");
+        Assert.True(Distance(center, 5) < Distance(inside, 5) && Distance(inside, 5) < Distance(inEnd, 5));
+        Assert.True(outside.X > cx + 30 && outside.Baseline < cy - 30 && Distance(outside, 5) > Distance(inEnd, 5) + 5);  // beyond the rim, on the right
+        // On the left the label ends at the rim instead of starting there.
+        var left = Label(ChartLabelPlacement.OutsideEnd, "C");   // the last slice (half of the pie) points to the lower left
+        Assert.True(left.X < cx - 20);
+        // Outside labels are in the plain text color, not the slice's contrast color.
+        Assert.NotEqual(Label(null, "C").Color, left.Color);
+    }
+
+    [Fact]
+    public void A_best_fit_label_stays_inside_a_wide_slice_and_moves_out_of_a_narrow_one()
+    {
+        var series = new ChartSeries("S", [90, 5, 5], Red, PointColors: [Red, Blue, Color.Black], Labels: ["Big", "TinyLongLabelHere", "T2"],
+            LabelPlacements: [ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit]);
+        var items = Page(Chart(ChartKind.Pie, series)).Items.OfType<TextItem>().ToList();
+        double cx = OriginX + 150, cy = OriginY + 100;
+        double Reach(string text) { var t = items.Single(i => i.Text == text); return Math.Sqrt(Math.Pow(t.X - cx, 2) + Math.Pow(t.Baseline - cy, 2)); }
+        Assert.True(Reach("Big") < 70);          // inside
+        Assert.True(Reach("TinyLongLabelHere") > 90 || items.Single(i => i.Text == "TinyLongLabelHere").X + 10 < cx - 70);  // outside the rim
+    }
+
+    [Fact]
+    public void A_label_with_several_lines_draws_every_line()
+    {
+        var page = Page(Chart(ChartKind.Column, new ChartSeries("S", [5, 10, 20], Red, Labels: ["Top\nBottom", "x", "y"])));
+        var lines = page.Items.OfType<TextItem>().Where(t => t.Text is "Top" or "Bottom").OrderBy(t => t.Baseline).ToList();
+        Assert.True(lines.Count == 2, string.Join("|", page.Items.OfType<TextItem>().Select(t => t.Text)));
+        Assert.Equal(["Top", "Bottom"], lines.Select(t => t.Text));
+        Assert.True(lines[1].Baseline - lines[0].Baseline > 5);
+    }
 }

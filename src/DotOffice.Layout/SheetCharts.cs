@@ -200,15 +200,29 @@ public sealed partial class SheetLayoutEngine
     private double PlaceText(string text, RunProperties font, double ax, double ay, Anchor anchor, bool centerVertically, double rotation, List<LayoutItem> items)
     {
         if (text.Length == 0) return 0;
+        if (text.Contains('\n') && rotation == 0)
+        {
+            // The paragraphs and line breaks of a rich label: one line each, stacked, every line aligned to the anchor.
+            var parts = text.Split('\n');
+            double pitchOf(string part) => part.Length == 0 ? BuildBlock(ChartCell("x", font), "x", 1e7).Height : BuildBlock(ChartCell(part, font), part, 1e7).Height;
+            double total = parts.Sum(pitchOf), at = centerVertically ? ay - total / 2 : ay;
+            foreach (var part in parts)
+            {
+                PlaceText(part, font, ax, at, anchor, false, 0, items);
+                at += pitchOf(part);
+            }
+            return total;
+        }
+        text = text.Replace('\n', ' ');
         var block = BuildBlock(ChartCell(text, font), text, 1e7);
         if (block.Lines.Count == 0) return 0;
+        double y = centerVertically ? ay - block.Height / 2 : ay;
+        if (rotation != 0) items.Add(new PushItem(null, rotation, ax, ay));
         var (pitch, ascent, descent) = block.Metrics[0];
         double width = block.Width;
         double x0 = anchor switch { Anchor.Middle => ax - width / 2, Anchor.End => ax - width, _ => ax };
-        double top = centerVertically ? ay - pitch / 2 : ay;
-        if (rotation != 0) items.Add(new PushItem(null, rotation, ax, ay));
         if (block.Lines[0].Atoms.Count > 0)
-            EmitLine(block.Lines[0], x0, top + (pitch - (ascent + descent)) / 2 + ascent, ax - 1e5, ax + 1e5, items);
+            EmitLine(block.Lines[0], x0, y + (pitch - (ascent + descent)) / 2 + ascent, ax - 1e5, ax + 1e5, items);
         if (rotation != 0) items.Add(new PopItem());
         return pitch;
     }
@@ -586,7 +600,7 @@ public sealed partial class SheetLayoutEngine
                 switch (side)
                 {
                     case LabelSide.Center: PlaceText(text, labelFont, lx, ly, Anchor.Middle, true, 0, items); break;
-                    case LabelSide.Above: PlaceText(text, labelFont, lx, ly - labelFont.FontSize * 1.25, Anchor.Middle, false, 0, items); break;
+                    case LabelSide.Above: PlaceText(text, labelFont, lx, ly - labelFont.FontSize * 1.25 * (1 + text.Count(c => c == '\n')), Anchor.Middle, false, 0, items); break;
                     case LabelSide.Below: PlaceText(text, labelFont, lx, ly, Anchor.Middle, false, 0, items); break;
                     case LabelSide.Left: PlaceText(text, labelFont, lx, ly, Anchor.End, true, 0, items); break;
                     default: PlaceText(text, labelFont, lx, ly, Anchor.Start, true, 0, items); break;
@@ -705,10 +719,12 @@ public sealed partial class SheetLayoutEngine
     private void EmitPie(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
     {
         if (chart.Series.Count == 0) return;
-        double radius = Math.Min(right - left, bottom - top) / 2 - 4;
+        // Labels outside the pie (and best-fit ones, which may end up there) need room around it.
+        bool outside = chart.Kind == ChartKind.Pie && chart.Series[0].LabelPlacements is { } places && places.Any(p => p is ChartLabelPlacement.OutsideEnd or ChartLabelPlacement.BestFit);
+        double radius = Math.Min(right - left, bottom - top) / 2 - 4 - (outside ? font.FontSize * 2 : 0);
         if (radius < 5) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
-        var labels = new List<(string Text, double X, double Y, Color Fill, ChartTextStyle? Style)>();
+        var labels = new List<PieLabel>();
         if (chart.Kind == ChartKind.Pie)
             DrawSlices(chart, chart.Series[0], cx, cy, 0, radius, labels, items);
         else
@@ -718,13 +734,40 @@ public sealed partial class SheetLayoutEngine
             for (int k = 0; k < chart.Series.Count; k++)
                 DrawSlices(chart, chart.Series[k], cx, cy, hole + k * ring, hole + (k + 1) * ring, labels, items);
         }
-        foreach (var (text, lx, ly, fill, pointStyle) in labels)
-            PlaceText(text, Styled(Styled(font with { Color = ContrastColor(fill) }, chart.TextStyles.DataLabels), pointStyle), lx, ly, Anchor.Middle, true, 0, items);
+        foreach (var label in labels)
+        {
+            RunProperties StyleFor(Color? color) => Styled(Styled(font with { Color = color }, chart.TextStyles.DataLabels), label.Style);
+            var style = StyleFor(font.Color);
+            double mid = label.MidAngle * Math.PI / 180, cos = Math.Cos(mid), sin = Math.Sin(mid);
+            var placement = label.Placement;
+            if (placement == ChartLabelPlacement.BestFit)
+            {
+                // Inside when the text fits across the slice at that radius, else outside.
+                double textWidth = BuildBlock(ChartCell(label.Text, style), label.Text, 1e7).Width, chord = 2 * label.Radius * 0.65 * Math.Sin(Math.Min(label.Sweep, 180) / 2 * Math.PI / 180);
+                placement = textWidth + 4 <= chord && textWidth + 4 <= label.Radius * 0.9 ? null : ChartLabelPlacement.OutsideEnd;
+            }
+            if (placement == ChartLabelPlacement.OutsideEnd && label.Inner <= 0)
+            {
+                // Beside the rim, in the plain text color; the side follows where the slice's middle points.
+                double gap = 5;
+                var anchor = cos > 0.3 ? Anchor.Start : cos < -0.3 ? Anchor.End : Anchor.Middle;
+                double ox = cx + (label.Radius + gap) * cos, oy = cy + (label.Radius + gap) * sin;
+                // Straight above or below the pie the text is pushed clear of the rim by half its own height.
+                if (anchor == Anchor.Middle) oy += sin * style.FontSize * 0.7 * (1 + label.Text.Count(c => c == '\n'));
+                PlaceText(label.Text, style, ox, oy, anchor, true, 0, items);
+                continue;
+            }
+            double r = label.Inner > 0 ? (label.Inner + label.Radius) / 2
+                : placement switch { ChartLabelPlacement.Center => label.Radius * 0.5, ChartLabelPlacement.InsideEnd => label.Radius * 0.82, _ => label.Radius * 0.65 };
+            PlaceText(label.Text, StyleFor(ContrastColor(label.Fill)), cx + r * cos, cy + r * sin, Anchor.Middle, true, 0, items);
+        }
     }
 
+    /// <summary>A pie or doughnut label to place once all slices are drawn: where its slice's middle points, how wide the slice is, and where the label was asked to go.</summary>
+    private readonly record struct PieLabel(string Text, Color Fill, ChartTextStyle? Style, ChartLabelPlacement? Placement, double MidAngle, double Sweep, double Inner, double Radius);
+
     /// <summary>Draws the slices of one series between two radii (the inner one is 0 for a pie).</summary>
-    private static void DrawSlices(SheetChart chart, ChartSeries series, double cx, double cy, double inner, double outer,
-        List<(string Text, double X, double Y, Color Fill, ChartTextStyle? Style)> labels, List<LayoutItem> items)
+    private static void DrawSlices(SheetChart chart, ChartSeries series, double cx, double cy, double inner, double outer, List<PieLabel> labels, List<LayoutItem> items)
     {
         var values = series.Values.Select(v => v is { } x && x > 0 ? x : 0).ToList();
         double total = values.Sum();
@@ -757,10 +800,7 @@ public sealed partial class SheetLayoutEngine
                 items.Add(new LineItem(cx + inner * Math.Cos(a1), cy + inner * Math.Sin(a1), cx + outer * Math.Cos(a1), cy + outer * Math.Sin(a1), 0.75, Color.White));
             }
             if (series.Labels is { } l && i < l.Count && l[i].Length > 0)
-            {
-                double mid = (start + sweep / 2) * Math.PI / 180, r = inner > 0 ? (inner + outer) / 2 : outer * 0.65;
-                labels.Add((l[i], cx + r * Math.Cos(mid), cy + r * Math.Sin(mid), color, LabelStyleAt(series, i)));
-            }
+                labels.Add(new PieLabel(l[i], color, LabelStyleAt(series, i), LabelPlacementAt(series, i), start + sweep / 2, sweep, inner, outer));
             start += sweep;
         }
     }

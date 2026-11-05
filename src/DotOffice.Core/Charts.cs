@@ -39,9 +39,10 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
 /// <summary>
 /// Where a data label sits relative to its point or bar (<c>dLblPos</c>). <see cref="InsideEnd"/>, <see cref="InsideBase"/> and
 /// <see cref="OutsideEnd"/> belong to bars and columns; <see cref="Above"/>, <see cref="Below"/>, <see cref="Left"/> and
-/// <see cref="Right"/> to points of lines and scatter charts; <see cref="Center"/> to both.
+/// <see cref="Right"/> to points of lines and scatter charts; <see cref="Center"/> to both. Pie slices take <see cref="Center"/>, <see cref="InsideEnd"/>,
+/// <see cref="OutsideEnd"/> and <see cref="BestFit"/> (inside when the text fits the slice, else outside).
 /// </summary>
-public enum ChartLabelPlacement { Center, InsideEnd, InsideBase, OutsideEnd, Above, Below, Left, Right }
+public enum ChartLabelPlacement { Center, InsideEnd, InsideBase, OutsideEnd, Above, Below, Left, Right, BestFit }
 
 public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial, MovingAverage }
 

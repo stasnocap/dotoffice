@@ -793,6 +793,13 @@ internal static class ShowcaseXlsx
                                                                    .Replace("<c:crossAx val=\"2\"/></c:catAx>", Turn("-2700000") + "<c:crossAx val=\"2\"/></c:catAx>"));
         var squeezed = ChartSpace("Legend that shrinks the plot", columns.Replace(Trend("linear", "", labels: true), ""), "")
             .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.7\"/><c:y val=\"0.3\"/><c:w val=\"0.25\"/><c:h val=\"0.3\"/></c:manualLayout></c:layout><c:overlay val=\"0\"/></c:legend>");
+        // Pie labels at the rim (outEnd), at best fit and centered, and a label of two paragraphs.
+        string PieLabels(string position) => "<c:dLbls><c:dLblPos val=\"" + position + "\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"1\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/><c:separator> </c:separator></c:dLbls>";
+        string PieOf(string labels) => "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("<c:cat>", labels + "<c:cat>") + "</c:pieChart>";
+        var twoLines = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" +
+                       Series(0, "<c:dLbls><c:dLbl><c:idx val=\"2\"/><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Best quarter</a:t></a:r></a:p><a:p><a:fld id=\"{1A2B3C4D-0000-0000-0000-000000000002}\" type=\"VALUE\"><a:t>[VALUE]</a:t></a:fld></a:p></c:rich></c:tx>" + Show + "</c:dLbl>" +
+                                 "<c:dLblPos val=\"outEnd\"/>" + Show + "</c:dLbls>") +
+                       "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" + Axes();
         string[] charts =
         [
             ChartSpace("Columns: equation and R²", columns, ""), ChartSpace("Bars with a trendline", bars, ""), ChartSpace("Stacked columns: trend of the totals", stacked, "b"),
@@ -800,9 +807,10 @@ internal static class ShowcaseXlsx
             ChartSpace("Turned labels and point labels", turned, ""), formattedSpace,
             ChartSpace("Label positions and own text", positioned, ""), ChartSpace("Turned bar labels", turnedBars, ""),
             ChartSpace("Turned labels, reversed values", turnedValues, ""), squeezed,
+            ChartSpace("Pie labels at the rim", PieOf(PieLabels("outEnd")), "r"), ChartSpace("Pie labels at best fit", PieOf(PieLabels("bestFit")), "r"), ChartSpace("Two-line label", twoLines, ""),
         ];
         (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43), (0, 44, 3, 57),
-            (3, 44, 6, 57), (0, 58, 3, 71), (3, 58, 6, 71), (0, 72, 3, 85)];
+            (3, 44, 6, 57), (0, 58, 3, 71), (3, 58, 6, 71), (0, 72, 3, 85), (3, 72, 6, 85), (0, 86, 3, 99), (3, 86, 6, 99)];
         WriteChartParts(zip, sheetNumber, charts, places, "text");
     }
 

@@ -433,9 +433,9 @@ public class XlsxChartTests
                      "<c:dLbl><c:idx val=\"1\"/><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Mid</a:t></a:r></a:p><a:p><a:fld id=\"{B}\" type=\"SERIESNAME\"><a:t>[SERIES NAME]</a:t></a:fld></a:p></c:rich></c:tx><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/></c:dLbl>" +
                      "<c:dLblPos val=\"outEnd\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>";
         var series = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", labels)))).Sheet.Charts.Single().Series[0];
-        Assert.Equal(["Low:10", "Mid " + series.Name, "40"], series.Labels);
+        Assert.Equal(["Low:10", "Mid\n" + series.Name, "40"], series.Labels);
         Assert.Equal([ChartLabelPlacement.InsideBase, ChartLabelPlacement.OutsideEnd, ChartLabelPlacement.OutsideEnd], series.LabelPlacements);
         var noPlace = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", "<c:dLbls><c:dLblPos val=\"bestFit\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>")))).Sheet.Charts.Single().Series[0];
-        Assert.Null(noPlace.LabelPlacements);
+        Assert.Equal([ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit], noPlace.LabelPlacements);
     }
 }
