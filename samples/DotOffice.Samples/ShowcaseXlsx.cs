@@ -624,8 +624,8 @@ internal static class ShowcaseXlsx
     private const string DmlNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const long Emu = 12700;
 
-    private static string Pic(string name, string extra = "", int rotation = 0, string flip = "") =>
-        $"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"rId1\"/>{extra}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>" +
+    private static string Pic(string name, string extra = "", int rotation = 0, string flip = "", string embed = "rId1") =>
+        $"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{embed}\"/>{extra}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>" +
         $"<xdr:spPr><a:xfrm rot=\"{rotation}\"{flip}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>";
 
     private static string Marker(string tag, int col, int row, double colOffset = 0, double rowOffset = 0) =>
@@ -650,15 +650,71 @@ internal static class ShowcaseXlsx
             OneCell(5, 21, 4, 2, 56, 35, Pic("Flipped horizontally", flip: " flipH=\"1\"")) +                                    // mirrored left to right
             OneCell(5, 24, 4, 2, 56, 35, Pic("Flipped vertically", flip: " flipV=\"1\"")) +                                      // mirrored top to bottom
             Absolute(300, 260, 90, 56, Pic("Absolute")) +                                                                         // measured from A1
+            OneCell(1, 28, 4, 2, 90, 56, Pic("Bitmap", embed: "rId2")) +                                                          // BMP
+            OneCell(4, 28, 4, 2, 90, 56, Pic("Animated-format GIF", embed: "rId3")) +                                            // GIF with a transparent corner
             TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
             "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Freeform\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:custGeom/></xdr:spPr></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
-            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/></Relationships>");
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/></Relationships>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
         using (var media = zip.CreateEntry("xl/media/image1.png").Open()) media.Write(ShowcaseDocx.GradientPng(160, 100));
-        content.Append("<Default Extension=\"png\" ContentType=\"image/png\"/>");
+        using (var media = zip.CreateEntry("xl/media/image2.bmp").Open()) media.Write(GradientBmp(90, 56));
+        using (var media = zip.CreateEntry("xl/media/image3.gif").Open()) media.Write(CheckerGif(48, 32));
+        content.Append("<Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"bmp\" ContentType=\"image/bmp\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/>");
+    }
+
+    /// <summary>A 24-bit bottom-up BMP: red grows to the right, blue towards the top.</summary>
+    private static byte[] GradientBmp(int width, int height)
+    {
+        int stride = (width * 3 + 3) / 4 * 4;
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write("BM"u8.ToArray()); w.Write(54 + stride * height); w.Write(0); w.Write(54);
+        w.Write(40); w.Write(width); w.Write(height); w.Write((short)1); w.Write((short)24); w.Write(0); w.Write(stride * height); w.Write(0); w.Write(0); w.Write(0); w.Write(0);
+        for (int y = height - 1; y >= 0; y--)
+        {
+            var row = new byte[stride];
+            for (int x = 0; x < width; x++)
+            {
+                row[x * 3] = (byte)(255 * y / height);        // blue
+                row[x * 3 + 1] = 90;                           // green
+                row[x * 3 + 2] = (byte)(255 * x / width);     // red
+            }
+            // BMP rows run bottom-up: the first row written is the bottom of the picture.
+            w.Write(row);
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>A GIF with a 2-color checkerboard of 8-pixel squares and a transparent top-left square (index 2), LZW with a clear code every 64 pixels.</summary>
+    private static byte[] CheckerGif(int width, int height)
+    {
+        var ms = new MemoryStream();
+        ms.Write("GIF89a"u8);
+        ms.Write([(byte)width, 0, (byte)height, 0, 0x80 | 1, 0, 0]);
+        ms.Write([200, 40, 40, 40, 80, 200, 255, 255, 255, 0, 0, 0]);
+        ms.Write([0x21, 0xF9, 4, 1, 0, 0, 2, 0]);
+        ms.Write([0x2C, 0, 0, 0, 0, (byte)width, 0, (byte)height, 0, 0, 2]);
+        var bits = new List<bool>();
+        void Put(int code) { for (int i = 0; i < 3; i++) bits.Add((code >> i & 1) != 0); }
+        for (int i = 0; i < width * height; i++)
+        {
+            int x = i % width, y = i / width;
+            Put(4);                                              // clear before each pixel keeps 3-bit codes
+            Put(x < 8 && y < 8 ? 2 : ((x / 8 + y / 8) % 2));
+        }
+        Put(5);
+        var data = new byte[(bits.Count + 7) / 8];
+        for (int i = 0; i < bits.Count; i++) if (bits[i]) data[i / 8] |= (byte)(1 << i % 8);
+        for (int i = 0; i < data.Length; i += 255)
+        {
+            int n = Math.Min(255, data.Length - i);
+            ms.WriteByte((byte)n); ms.Write(data, i, n);
+        }
+        ms.Write([0, 0x3B]);
+        return ms.ToArray();
     }
 
     private static string PicturesSheet()
@@ -670,6 +726,7 @@ internal static class ShowcaseXlsx
         rows.Append(Row(16, Str("A16", "Page break below row 20:", Default)));
         rows.Append(Row(26, Str("A26", "Right: mirrored horizontally (flipH), then vertically (flipV)", Default)));
         rows.Append(Row(27, Str("A27", "End of the sheet", Default)));
+        rows.Append(Row(29, Str("A29", "BMP, GIF:", Default)));
         var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +

@@ -237,10 +237,13 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
             {
                 ImageFormat.Jpeg => PdfImage.FromJpeg(data.Data),
                 ImageFormat.Png => PdfImage.FromPng(data.Data),
+                ImageFormat.Bmp => PdfImage.FromBmp(data.Data),
+                ImageFormat.Gif => PdfImage.FromGif(data.Data),
+                ImageFormat.Tiff => PdfImage.FromTiff(data.Data),
                 _ => null,
             };
             if (image is null)
-                warnings.Warn("pdf.image-format", $"Image format {data.Format} ('{data.Name}') is not supported yet; a placeholder was drawn.");
+                warnings.Warn("pdf.image-format", $"Image format {data.Format} ('{data.Name}') is not supported; a placeholder was drawn.");
         }
         catch (Exception e) when (e is InvalidDataException or NotSupportedException)
         {

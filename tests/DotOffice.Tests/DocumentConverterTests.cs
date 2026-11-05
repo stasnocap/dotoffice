@@ -110,7 +110,7 @@ public class DocumentConverterTests
     public async Task Unsupported_images_become_placeholders()
     {
         var b = new DocxBuilder();
-        var gif = b.AddImage("x.gif", "GIF89a\x01\0\x01\0\0\0\0;"u8.ToArray());
+        var gif = b.AddImage("x.wmf", [0xD7, 0xCD, 0xC6, 0x9A, 0, 0, 0, 0]);
         b.Body = P(InlineImage(gif, 30, 30));
         var warnings = new ConversionWarningList();
         var pdf = await Convert(b, new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false, Warnings = warnings });

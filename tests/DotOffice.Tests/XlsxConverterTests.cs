@@ -34,6 +34,20 @@ public class XlsxConverterTests
     }
 
     [Fact]
+    public async Task Bmp_and_gif_pictures_are_drawn_instead_of_placeholders()
+    {
+        byte[] bmp = [.. "BM"u8, 58, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0, 40, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 24, 0,
+            0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30, 0];
+        byte[] gif = [.. "GIF89a"u8, 1, 0, 1, 0, 0x80, 0, 0, 255, 0, 0, 0, 0, 0, 0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3B];
+        var warnings = new ConversionWarningList();
+        var xlsx = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: DrawingElement)
+            .AddDrawing(1, TwoCellAnchor(0, 1, 2, 3, Pic("rId1")) + TwoCellAnchor(3, 1, 5, 3, Pic("rId2")), bmp, gif);
+        var pdf = Encoding.Latin1.GetString(await Convert(xlsx, warnings));
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code.StartsWith("pdf.image"));
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(pdf, "/Subtype /Image").Count);
+    }
+
+    [Fact]
     public async Task Surfaces_reader_warnings()
     {
         var warnings = new ConversionWarningList();

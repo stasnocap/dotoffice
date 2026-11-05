@@ -102,6 +102,10 @@ done
 first_n=$(pdfimages -list -f "${pic_pages[0]}" -l "${pic_pages[0]}" "$pdf" | awk 'NR > 2' | wc -l)
 [ "$first_n" -ge 7 ] || fail "expected at least seven pictures on the first page of the pictures sheet, found $first_n"
 qpdf --qdf --object-streams=disable "$pdf" pictures-qdf.pdf
+# The BMP and the GIF (with a soft mask for its transparent square) are decoded, not drawn as placeholders.
+if grep -q "pdf.image" "$log"; then fail "a BMP or GIF picture was not decoded: $(grep 'pdf.image' "$log" | head -1)"; fi
+last_n=$(pdfimages -list -f "${pic_pages[-1]}" -l "${pic_pages[-1]}" "$pdf" | awk 'NR > 2' | wc -l)
+[ "$last_n" -ge 3 ] || fail "the last page of the pictures sheet should hold the continued, BMP and GIF pictures, found $last_n"
 [ "$(pdftotext -layout "$pdf" - | grep -c "purple, not red")" -ge 1 ] || fail "missing the indexed-color note"
 grep -aq "^0.4392 0.1882 0.6275 rg$" pictures-qdf.pdf || fail "[Color3] should use the workbook palette (purple)"
 grep -aqE "^-1 0 0 1 [0-9.]+ 0 cm$" pictures-qdf.pdf || fail "no horizontally mirrored picture (matrix -1 0 0 1)"

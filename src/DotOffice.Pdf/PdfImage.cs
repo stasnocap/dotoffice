@@ -76,6 +76,17 @@ public sealed class PdfImage
             isJpeg: false, alpha: png.Alpha);
     }
 
+    /// <summary>Decodes a BMP (1–32 bits per pixel, uncompressed or bitfields).</summary>
+    public static PdfImage FromBmp(byte[] data) => From(RasterDecoders.DecodeBmp(data));
+
+    /// <summary>Decodes the first frame of a GIF, with its transparency.</summary>
+    public static PdfImage FromGif(byte[] data) => From(RasterDecoders.DecodeGif(data));
+
+    /// <summary>Decodes a baseline TIFF (stored or PackBits).</summary>
+    public static PdfImage FromTiff(byte[] data) => From(RasterDecoders.DecodeTiff(data));
+
+    private static PdfImage From(RasterImage r) => new(r.Rgb, r.Width, r.Height, "/DeviceRGB", isJpeg: false, alpha: r.Alpha);
+
     internal void Write(PdfWriter writer, int id)
     {
         var dict = $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace {_colorSpace} /BitsPerComponent 8";
