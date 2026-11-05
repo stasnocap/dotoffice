@@ -113,6 +113,12 @@ public sealed record ShapeTile(double Width, double Height, double OffsetX, doub
 /// <summary>A glow: the shape's outline spread by <paramref name="Radius"/> points in a translucent color.</summary>
 public sealed record ShapeGlow(Color Color, double Opacity, double Radius);
 
+/// <summary>
+/// A reflection: the shape mirrored below its bottom edge (<paramref name="Distance"/> points further down), fading from
+/// <paramref name="StartOpacity"/> at the edge to <paramref name="EndOpacity"/> at <paramref name="EndPosition"/> (a fraction of the shape's height).
+/// </summary>
+public sealed record ShapeReflection(double StartOpacity, double EndOpacity, double EndPosition, double Distance);
+
 /// <summary>A shape, text box or line of a drawing.</summary>
 public sealed record SheetShape : SheetObject
 {
@@ -141,6 +147,8 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>A glow around the outline; null means none.</summary>
     public ShapeGlow? Glow { get; init; }
+
+    public ShapeReflection? Reflection { get; init; }
 
     /// <summary>Radius in points over which the edges of the shape fade out (a soft-edge effect); 0 means hard edges.</summary>
     public double SoftEdge { get; init; }

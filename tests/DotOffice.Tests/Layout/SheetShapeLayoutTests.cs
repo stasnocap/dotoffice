@@ -394,6 +394,70 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void Soft_edges_of_a_notched_outline_move_every_edge_inwards_and_the_reflex_corner_out_of_the_way()
+    {
+        // An L: a bar along the top (the frame is 100 x 40) with a leg on the left. Fractions of the frame: the notch's corner is at (0.4, 0.4).
+        var l = Shape(ShapeGeometry.Custom, Red) with
+        {
+            Paths = [new ShapePath([(0, 0), (1, 0), (1, 0.4), (0.4, 0.4), (0.4, 1), (0, 1)], true)], SoftEdge = 6,
+        };
+        var fills = Page(l).Items.OfType<PolygonItem>().Where(p => p.Fill == Red).ToList();
+        Assert.Equal(6, fills.Count);
+        var (left, top) = Origin;
+        var (x0, y0) = (left + 50, top + 20);
+        // The last copy lies 5 points inside the outline: the reflex corner (40, 16) moves to (35, 11) and the others by 5 along both axes.
+        (double X, double Y)[] expected = [(5, 5), (95, 5), (95, 11), (35, 11), (35, 35), (5, 35)];
+        Assert.Equal(expected.Length, fills[^1].Points.Count);
+        foreach (var (ex, ey) in expected)
+            Assert.Contains(fills[^1].Points, q => Math.Abs(q.X - (x0 + ex)) < 1e-6 && Math.Abs(q.Y - (y0 + ey)) < 1e-6);
+    }
+
+    [Fact]
+    public void Inset_polygons_give_way_when_a_part_is_too_thin_or_the_polygon_degenerates()
+    {
+        (double, double)[] strip = [(0, 0), (100, 0), (100, 6), (0, 6)];
+        Assert.NotNull(SheetLayoutEngine.InsetPolygon(strip, 2));
+        Assert.Null(SheetLayoutEngine.InsetPolygon(strip, 4));                      // the strip is only 6 thick: 2 x 4 turns it inside out
+        Assert.Null(SheetLayoutEngine.InsetPolygon([(0, 0), (10, 0)], 1));          // not a polygon
+        Assert.Null(SheetLayoutEngine.InsetPolygon([(0, 0), (5, 0), (10, 0)], 1));  // no area
+        // Either winding gives the same inset.
+        var clockwise = SheetLayoutEngine.InsetPolygon([(0, 0), (0, 10), (10, 10), (10, 0)], 2)!;
+        var counter = SheetLayoutEngine.InsetPolygon([(0, 0), (10, 0), (10, 10), (0, 10)], 2)!;
+        Assert.Equal(counter.OrderBy(q => q.X).ThenBy(q => q.Y), clockwise.OrderBy(q => q.X).ThenBy(q => q.Y));
+        Assert.Equal((2, 2), counter.Min(q => q.X) == 2 ? (counter.Min(q => q.X), counter.Min(q => q.Y)) : (0, 0));
+    }
+
+    [Fact]
+    public void A_reflection_is_the_shape_mirrored_under_its_bottom_edge_in_nested_layers_that_add_up_to_the_fade()
+    {
+        var page = Page(Shape(fill: Red) with { Reflection = new ShapeReflection(0.5, 0, 1, 6), Paragraphs = [] });
+        var mirrors = page.Items.OfType<PushItem>().Where(p => p.FlipV && p.Clip is null).ToList();
+        Assert.Equal(16, mirrors.Count);
+        var (left, top) = Origin;
+        // The frame's bottom is at top + 60; a distance of 6 puts the mirror line 3 points below it.
+        Assert.All(mirrors, m => Assert.Equal(top + 60 + 3, m.CenterY, 6));
+        // Layer k reaches from the reflection's top (6 points under the shape) to the end of the k-th band of the shape's height (40).
+        var clips = page.Items.OfType<PushItem>().Where(p => p.Clip is { } c && c.Y > top + 60).Select(p => p.Clip!.Value).ToList();
+        Assert.Equal(16, clips.Count);
+        Assert.All(clips, c => Assert.Equal(top + 66, c.Y, 6));
+        for (int k = 0; k < 16; k++) Assert.Equal(40.0 * (k + 1) / 16, clips[k].Height, 6);
+        // The layers that reach band j (index j or later) together have the opacity of the fade there: 50 % down to 0 over the height.
+        for (int j = 0; j < 16; j++)
+        {
+            double clear = 1;
+            for (int k = j; k < 16; k++) clear *= 1 - mirrors[k].Opacity;
+            Assert.Equal(0.5 + (0 - 0.5) * (j + 0.5) / 16, 1 - clear, 6);
+        }
+        // The reflection comes before the shape itself, so that the shape covers a reflection that touches it.
+        var items = page.Items.ToList();
+        Assert.True(items.FindIndex(i => i is PushItem { FlipV: true }) < items.FindLastIndex(i => i is PolygonItem));
+        // A reflection that has faded out by half the height covers only that part; one that starts transparent is not drawn at all.
+        var half = Page(Shape(fill: Red) with { Reflection = new ShapeReflection(0.5, 0, 0.5, 0) }).Items.OfType<PushItem>().Where(p => p.Clip is { } c && c.Y >= top + 60 - 1e-9).ToList();
+        Assert.Equal(20, half.Max(p => p.Clip!.Value.Height), 6);
+        Assert.DoesNotContain(Page(Shape(fill: Red) with { Reflection = new ShapeReflection(0, 0, 1, 0) }).Items.OfType<PushItem>(), p => p.FlipV);
+    }
+
+    [Fact]
     public void A_rotated_group_swings_its_children_about_the_groups_center()
     {
         // The group frame is the whole 100 x 40 shape frame; the child is its left half (center 25 left of the group's center).

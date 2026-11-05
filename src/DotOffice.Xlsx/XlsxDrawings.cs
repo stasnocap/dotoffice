@@ -257,7 +257,6 @@ internal static class XlsxDrawings
         {
             paths = [new ShapePath(route, false, Fill: false)];
             geometry = ShapeGeometry.Line;
-            if (preset is "curvedConnector4" or "curvedConnector5") state.Note("curved connectors with four or five segments are drawn approximately");
         }
         else
         {
@@ -301,6 +300,7 @@ internal static class XlsxDrawings
         }
         var effects = Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } themedEffects ? theme.EffectStyle((int)Number(themedEffects, "idx")) : null);
         var glow = lineOnly ? null : ReadGlow(effects, theme, Resolve(Child(style, "effectRef"), theme));
+        var reflection = lineOnly ? null : ReadReflection(effects, state);
         double softEdge = lineOnly || Child(effects, "softEdge") is not { } soft ? 0 : Number(soft, "rad") / EmuPerPoint;
         var shadow = lineOnly ? null : ReadShadow(Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } effectRef ? theme.EffectStyle((int)Number(effectRef, "idx")) : null), theme, Resolve(Child(style, "effectRef"), theme));
 
@@ -343,7 +343,7 @@ internal static class XlsxDrawings
             FillGradient = gradient,
             FillPattern = pattern,
             FillImage = fillImage, FillTile = fillTile, FillImageAlpha = fillAlpha,
-            Shadow = shadow, Glow = glow, SoftEdge = softEdge,
+            Shadow = shadow, Glow = glow, SoftEdge = softEdge, Reflection = reflection,
             Paths = paths,
             HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
             LineColor = lineColor,
@@ -452,6 +452,23 @@ internal static class XlsxDrawings
         return new ShapeShadow(color, ColorOpacity(shadow), distance * Math.Cos(direction), distance * Math.Sin(direction), blur);
     }
 
+    /// <summary>
+    /// A reflection from an <c>effectLst</c>: the start and end opacities (<c>stA</c> default 100 %, <c>endA</c> default 0), where it has
+    /// faded out (<c>endPos</c>, default the whole height) and its distance from the shape. A reflection that is not straight below the shape,
+    /// scaled, skewed or blurred is drawn as the plain, unblurred reflection below it, which is noted.
+    /// </summary>
+    private static ShapeReflection? ReadReflection(XElement? effects, State state)
+    {
+        if (Child(effects, "reflection") is not { } r) return null;
+        double Fraction(string name, double fallback) => r.Attribute(name) is null ? fallback : Math.Clamp(Number(r, name) / 100_000, 0, 1);
+        double end = Fraction("endPos", 1);
+        if (end <= 0) return null;
+        bool plain = (r.Attribute("dir") is null || Math.Abs(Number(r, "dir") - 5_400_000) < 1) && (r.Attribute("sy") is null || Math.Abs(Number(r, "sy") + 100_000) < 1)
+            && (r.Attribute("sx") is null || Math.Abs(Number(r, "sx") - 100_000) < 1) && (r.Attribute("kx") is null || Number(r, "kx") == 0) && (r.Attribute("ky") is null || Number(r, "ky") == 0);
+        if (!plain || Number(r, "blurRad") > 0) state.Note("reflections are drawn straight below the shape, full size and unblurred");
+        return new ShapeReflection(Fraction("stA", 1), Fraction("endA", 0), end, Number(r, "dist") / EmuPerPoint);
+    }
+
     /// <summary>A glow from an <c>effectLst</c>: its radius, color and opacity.</summary>
     private static ShapeGlow? ReadGlow(XElement? effects, XlsxTheme theme, Color? placeholder)
     {
@@ -499,16 +516,29 @@ internal static class XlsxDrawings
                 Curve(points, (x2, 0.5), (x2, 0.75), ((1 + x2) / 2, 1), (1, 1));
                 return points;
             }
-            case "curvedConnector4" or "curvedConnector5":
+            case "curvedConnector4":
             {
-                // Rounded through the corners of the matching bent connector.
-                var corners = ConnectorPath(preset.Replace("curved", "bent"), prstGeom)!;
-                var points = new List<(double X, double Y)> { corners[0] };
-                for (int i = 0; i + 1 < corners.Count; i++)
-                {
-                    var p0 = corners[Math.Max(i - 1, 0)]; var p1 = corners[i]; var p2 = corners[i + 1]; var p3 = corners[Math.Min(i + 2, corners.Count - 1)];
-                    Curve(points, p1, (p1.X + (p2.X - p0.X) / 6, p1.Y + (p2.Y - p0.Y) / 6), (p2.X - (p3.X - p1.X) / 6, p2.Y - (p3.Y - p1.Y) / 6), p2);
-                }
+                // The preset's own guides: the vertical run at x2 = adj1 of the width, the horizontal one at y4 = adj2 of the height.
+                double x2 = Adjust("adj1", 0.5), y4 = Adjust("adj2", 0.5);
+                double x1 = x2 / 2, x3 = (1 + x2) / 2, x4 = (x2 + x3) / 2, x5 = (x3 + 1) / 2;
+                double y1 = y4 / 2, y2 = y1 / 2, y3 = (y1 + y4) / 2, y5 = (1 + y4) / 2;
+                var points = new List<(double X, double Y)> { (0, 0) };
+                Curve(points, (0, 0), (x1, 0), (x2, y2), (x2, y1));
+                Curve(points, (x2, y1), (x2, y3), (x4, y4), (x3, y4));
+                Curve(points, (x3, y4), (x5, y4), (1, y5), (1, 1));
+                return points;
+            }
+            case "curvedConnector5":
+            {
+                // Vertical runs at x3 = adj1 and x6 = adj3 of the width, the horizontal one between them at y4 = adj2 of the height.
+                double x3 = Adjust("adj1", 0.5), y4 = Adjust("adj2", 0.5), x6 = Adjust("adj3", 0.5);
+                double x1 = (x3 + x6) / 2, x2 = x3 / 2, x4 = (x3 + x1) / 2, x5 = (x6 + x1) / 2, x7 = (x6 + 1) / 2;
+                double y1 = y4 / 2, y2 = y1 / 2, y3 = (y1 + y4) / 2, y5 = (1 + y4) / 2, y6 = (y5 + y4) / 2, y7 = (y5 + 1) / 2;
+                var points = new List<(double X, double Y)> { (0, 0) };
+                Curve(points, (0, 0), (x2, 0), (x3, y2), (x3, y1));
+                Curve(points, (x3, y1), (x3, y3), (x4, y4), (x1, y4));
+                Curve(points, (x1, y4), (x5, y4), (x6, y6), (x6, y5));
+                Curve(points, (x6, y5), (x6, y7), (x7, 1), (1, 1));
                 return points;
             }
             default: return null;

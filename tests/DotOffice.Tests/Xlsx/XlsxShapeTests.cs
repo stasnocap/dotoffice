@@ -188,11 +188,29 @@ public class XlsxShapeTests
     }
 
     [Fact]
-    public void Curved_connectors_with_more_segments_are_approximate_and_say_so()
+    public void Curved_connectors_with_four_and_five_segments_follow_the_presets_curves()
     {
         var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Connector("curvedConnector4")));
         Assert.Single(sheet.Shapes);
-        Assert.Contains("curved connectors", Assert.Single(warnings.Warnings).Message);
+        Assert.Empty(warnings.Warnings);
+        // curvedConnector4 (adj1 = adj2 = 50 %): runs down the middle (x = 0.5, from y = 0.25 on), crosses at y = 0.5 and ends at the corner.
+        var four = ReadOne(Connector("curvedConnector4")).Paths![0].Points;
+        Assert.Equal((0.0, 0.0), four[0]);
+        Assert.Equal((1.0, 1.0), four[^1]);
+        Assert.Equal(49, four.Count);                                                     // three Bézier segments of 16 steps and the start
+        Assert.Contains(four, p => Math.Abs(p.X - 0.5) < 1e-9 && Math.Abs(p.Y - 0.25) < 1e-9);   // the end of the first segment (x2, y1)
+        Assert.Contains(four, p => Math.Abs(p.X - 0.75) < 1e-9 && Math.Abs(p.Y - 0.5) < 1e-9);   // the end of the second (x3, y4)
+        // Both adjustments move the runs: x2 = 20 %, y4 = 80 %.
+        var moved = ReadOne(Connector("curvedConnector4", "<a:gd name=\"adj1\" fmla=\"val 20000\"/><a:gd name=\"adj2\" fmla=\"val 80000\"/>")).Paths![0].Points;
+        Assert.Contains(moved, p => Math.Abs(p.X - 0.2) < 1e-9 && Math.Abs(p.Y - 0.4) < 1e-9);   // (x2, y1 = y4 / 2)
+        Assert.Contains(moved, p => Math.Abs(p.X - 0.6) < 1e-9 && Math.Abs(p.Y - 0.8) < 1e-9);   // (x3 = (1 + x2) / 2, y4)
+        // curvedConnector5: vertical runs at x3 = adj1 and x6 = adj3, joined along y4 = adj2.
+        var five = ReadOne(Connector("curvedConnector5", "<a:gd name=\"adj1\" fmla=\"val 20000\"/><a:gd name=\"adj2\" fmla=\"val 60000\"/><a:gd name=\"adj3\" fmla=\"val 80000\"/>")).Paths![0].Points;
+        Assert.Equal(65, five.Count);
+        Assert.Equal((1.0, 1.0), five[^1]);
+        Assert.Contains(five, p => Math.Abs(p.X - 0.2) < 1e-9 && Math.Abs(p.Y - 0.3) < 1e-9);    // (x3, y1)
+        Assert.Contains(five, p => Math.Abs(p.X - 0.5) < 1e-9 && Math.Abs(p.Y - 0.6) < 1e-9);    // (x1 = (x3 + x6) / 2, y4)
+        Assert.Contains(five, p => Math.Abs(p.X - 0.8) < 1e-9 && Math.Abs(p.Y - 0.8) < 1e-9);    // (x6, y5 = (1 + y4) / 2)
     }
 
     [Fact]
@@ -353,6 +371,17 @@ public class XlsxShapeTests
         var (tiny, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile sx=\"10000\" sy=\"10000\"/></a:blipFill>")));
         Assert.Null(Assert.Single(tiny.Shapes).FillTile);
         Assert.Contains("tiled picture fills of this picture are stretched", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+    }
+
+    [Fact]
+    public void A_reflection_is_read_from_the_effects_and_a_skewed_one_is_noted()
+    {
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst><a:reflection blurRad=\"0\" stA=\"52000\" endA=\"300\" endPos=\"55000\" dist=\"127000\" dir=\"5400000\" sy=\"-100000\" algn=\"bl\" rotWithShape=\"0\"/></a:effectLst>"));
+        Assert.Equal(new ShapeReflection(0.52, 0.003, 0.55, 10), shape.Reflection);
+        var plain = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst><a:reflection/></a:effectLst>"));
+        Assert.Equal(new ShapeReflection(1, 0, 1, 0), plain.Reflection);
+        var (_, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst><a:reflection blurRad=\"63500\" sy=\"-50000\"/></a:effectLst>")));
+        Assert.Contains("reflections are drawn straight below", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
     }
 
     [Fact]

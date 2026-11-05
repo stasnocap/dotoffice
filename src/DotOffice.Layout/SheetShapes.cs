@@ -21,6 +21,7 @@ public sealed partial class SheetLayoutEngine
         }
         bool flipped = shape.FlipH || shape.FlipV;
         if (shape.Glow is { } glow) EmitGlow(shape, glow, x, y, width, height, flipped, items);
+        if (shape.Reflection is { } reflection && shape.Geometry != ShapeGeometry.Line) EmitReflection(shape, reflection, x, y, width, height, items);
         if (shape.Shadow is { } shadow)
         {
             // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 3 x 3 grid of such copies spread
@@ -51,6 +52,34 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>
+    /// A reflection: the shape (without its text and effects) mirrored about a line half the reflection's distance under its bottom edge,
+    /// faded by layers. Layer k covers the reflected area from its top down to the end of the k-th band, so the opacity at a band is that of
+    /// the layers reaching it (those with a band index at or after its own); each layer's opacity is picked so that they add up to the
+    /// opacity the fade has there (from the start to the end opacity, down to where the reflection has faded out). Nested layers leave no seams.
+    /// </summary>
+    private static void EmitReflection(SheetShape shape, ShapeReflection reflection, double x, double y, double w, double h, List<LayoutItem> items)
+    {
+        const int Bands = 16;
+        double cx = x + w / 2, bottom = y + h, top = bottom + reflection.Distance, axis = bottom + reflection.Distance / 2;
+        var mirrored = shape with { Paragraphs = [], Glow = null, Shadow = null, SoftEdge = 0, Reflection = null };
+        bool flipped = shape.FlipH || shape.FlipV;
+        double span = h * reflection.EndPosition;
+        double Target(int band) => band >= Bands ? 0 : Math.Clamp(reflection.StartOpacity + (reflection.EndOpacity - reflection.StartOpacity) * (band + 0.5) / Bands, 0, 0.999);
+        for (int k = 0; k < Bands; k++)
+        {
+            double opacity = 1 - (1 - Target(k)) / (1 - Target(k + 1));
+            if (opacity <= 0.002) continue;
+            items.Add(new PushItem((x - w, top, w * 3, span * (k + 1) / Bands)));
+            items.Add(new PushItem(null, 0, cx, axis, false, true, opacity));
+            if (flipped) items.Add(new PushItem(null, 0, cx, y + h / 2, shape.FlipH, shape.FlipV));
+            EmitOutline(mirrored, x, y, w, h, items);
+            if (flipped) items.Add(new PopItem());
+            items.Add(new PopItem());
+            items.Add(new PopItem());
+        }
+    }
+
+    /// <summary>
     /// A glow: the outline stroked four times, from thin to as wide as the glow's radius reaches, each translucent, under the shape. Near the
     /// outline all four overlap and the glow is at its strongest; it fades out to the radius.
     /// </summary>
@@ -76,21 +105,72 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>
-    /// A shape with soft edges: its fill drawn as copies shrunk step by step towards the middle, each translucent enough that the opacity rises
-    /// evenly from nothing at the outline to full one radius inside it. The outline stroke fades with it, so it is left out.
+    /// A shape with soft edges: its fill drawn as copies of the outline moved inwards step by step (a real inset of the polygon, which
+    /// follows notches and corners; not a scaled copy), each translucent enough that the opacity rises evenly from nothing at the outline to
+    /// full one radius inside it. The outline stroke fades with it, so it is left out. The fill keeps its place in the frame and is cut at each
+    /// inset outline.
     /// </summary>
     private static void EmitSoftEdged(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
     {
         const int Steps = 6;
         var plain = shape with { LineColor = null, SoftEdge = 0, Glow = null, Shadow = null };
+        var outlines = new List<List<(double X, double Y)>>();
+        if (shape.Paths is { } paths)
+            outlines.AddRange(paths.Where(p => p.Fill && p.Points.Count >= 3 && (p.Closed || shape.Geometry == ShapeGeometry.Custom))
+                .Select(p => p.Points.Select(q => (X: x + q.X * w, Y: y + q.Y * h)).ToList()));
+        else outlines.Add(Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList());
         double radius = Math.Min(shape.SoftEdge, Math.Min(w, h) / 2 - 0.5);
         for (int j = 1; j <= Steps; j++)
         {
             double inset = radius * (j - 1) / Steps;
+            var insets = outlines.Select(o => inset == 0 ? o : InsetPolygon(o, inset)).ToList();
+            if (insets.Any(o => o is null)) break; // a notch or a thin part has closed up: nothing further inside
             items.Add(new PushItem(null, Opacity: 1.0 / (Steps - j + 1)));
-            EmitOutline(plain, x + inset, y + inset, Math.Max(w - 2 * inset, 0.5), Math.Max(h - 2 * inset, 0.5), items);
+            foreach (var polygon in insets) EmitFill(plain, polygon!, x, y, w, h, false, items, clip: true);
             items.Add(new PopItem());
         }
+    }
+
+    /// <summary>
+    /// The polygon moved <paramref name="distance"/> inwards: every edge is moved along its inward normal and neighbouring edges are joined
+    /// at their intersection (a mitre, limited at very sharp corners), so a reflex corner moves out of the way and a convex one in. Null when
+    /// an edge would turn round (a feature narrower than twice the distance) or the polygon vanishes.
+    /// </summary>
+    internal static List<(double X, double Y)>? InsetPolygon(IReadOnlyList<(double X, double Y)> polygon, double distance)
+    {
+        var p = new List<(double X, double Y)>();
+        foreach (var q in polygon)
+            if (p.Count == 0 || Math.Abs(q.X - p[^1].X) > 1e-9 || Math.Abs(q.Y - p[^1].Y) > 1e-9) p.Add(q);
+        if (p.Count > 1 && Math.Abs(p[0].X - p[^1].X) < 1e-9 && Math.Abs(p[0].Y - p[^1].Y) < 1e-9) p.RemoveAt(p.Count - 1);
+        int n = p.Count;
+        if (n < 3) return null;
+        double area = 0;
+        for (int i = 0; i < n; i++) area += p[i].X * p[(i + 1) % n].Y - p[(i + 1) % n].X * p[i].Y;
+        if (Math.Abs(area) < 1e-9) return null;
+        double side = area > 0 ? 1 : -1; // the interior lies to the left of an edge when the area is positive
+        var normals = new (double X, double Y)[n];
+        for (int i = 0; i < n; i++)
+        {
+            var (a, b) = (p[i], p[(i + 1) % n]);
+            double dx = b.X - a.X, dy = b.Y - a.Y, length = Math.Sqrt(dx * dx + dy * dy);
+            normals[i] = (-dy / length * side, dx / length * side);
+        }
+        var result = new List<(double X, double Y)>(n);
+        for (int i = 0; i < n; i++)
+        {
+            var (n1, n2) = (normals[(i + n - 1) % n], normals[i]);
+            double scale = distance / Math.Max(1 + n1.X * n2.X + n1.Y * n2.Y, 0.2);
+            result.Add((p[i].X + (n1.X + n2.X) * scale, p[i].Y + (n1.Y + n2.Y) * scale));
+        }
+        double after = 0;
+        for (int i = 0; i < n; i++)
+        {
+            var (a, b) = (result[i], result[(i + 1) % n]);
+            after += a.X * b.Y - b.X * a.Y;
+            var (oa, ob) = (p[i], p[(i + 1) % n]);
+            if ((b.X - a.X) * (ob.X - oa.X) + (b.Y - a.Y) * (ob.Y - oa.Y) <= 0) return null;
+        }
+        return after * area > 0 ? result : null;
     }
 
     private static List<(double X, double Y)> Outline(SheetShape shape, double w, double h)
@@ -190,11 +270,11 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>Fills an outline: with its gradient, as an ellipse when it is one, else as a polygon.</summary>
-    private static void EmitFill(SheetShape shape, List<(double X, double Y)> points, double x, double y, double w, double h, bool ellipse, List<LayoutItem> items)
+    private static void EmitFill(SheetShape shape, List<(double X, double Y)> points, double x, double y, double w, double h, bool ellipse, List<LayoutItem> items, bool clip = false)
     {
         if (shape.FillGradient is { } gradient && gradient.Stops.Count >= 2)
         {
-            bool box = shape.Geometry == ShapeGeometry.Rectangle;
+            bool box = shape.Geometry == ShapeGeometry.Rectangle && !clip;
             items.Add(new GradientItem(x, y, w, h, gradient.Degree, gradient.Stops)
             {
                 Clip = box ? null : points,
@@ -209,7 +289,7 @@ public sealed partial class SheetLayoutEngine
         {
             if (shape.FillImageAlpha < 1) items.Add(new PushItem(null, Opacity: shape.FillImageAlpha));
             if (shape.FillTile is not { } tile || !EmitTiles(picture, tile, points, x, y, w, h, items))
-                items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle ? null : points });
+                items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle && !clip ? null : points });
             if (shape.FillImageAlpha < 1) items.Add(new PopItem());
         }
         else if (shape.Fill is { } fill)

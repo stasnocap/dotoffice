@@ -490,6 +490,15 @@ internal static class ShowcaseXlsx
         anchors.Append(OneCell(1, 37, 0, 0, 200, 70,
             "<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id=\"9\" name=\"Rotated group\"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm rot=\"1200000\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2540000\" cy=\"889000\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"2540000\" cy=\"889000\"/></a:xfrm></xdr:grpSpPr>" +
             Child("Group A", "2F5597", 0, 0, 1000000, 889000) + Child("Group B", "70AD47", 1270000, 0, 1270000, 444500) + "</xdr:grpSp>"));
+        // A reflection under a shape, soft edges that follow a notched outline, and curved connectors with four and five segments.
+        const string Reflect = "<a:effectLst><a:reflection blurRad=\"0\" stA=\"55000\" endA=\"0\" endPos=\"80000\" dist=\"0\" dir=\"5400000\" sy=\"-100000\" algn=\"bl\" rotWithShape=\"0\"/></a:effectLst>";
+        anchors.Append(OneCell(1, 43, 0, 0, 100, 44, Shape("roundRect", "Reflection", "2F5597", Line("1F3864", 1) + Reflect, Text("Reflection", "FFFFFF", bold: true))));
+        string Lt(int x, int y) => $"<a:lnTo><a:pt x=\"{x}\" y=\"{y}\"/></a:lnTo>";
+        var notch = "<a:moveTo><a:pt x=\"0\" y=\"0\"/></a:moveTo>" + Lt(100, 0) + Lt(100, 40) + Lt(40, 40) + Lt(40, 100) + Lt(0, 100) + "<a:close/>";
+        anchors.Append(OneCell(3, 43, 0, 0, 90, 70, Custom("Notched soft edges", notch, Fill("C00000"), "<a:effectLst><a:softEdge rad=\"190500\"/></a:effectLst>", Text("Notched soft edges", "FFFFFF", 800, bold: true))));
+        const string Arrow = "<a:tailEnd type=\"triangle\" w=\"med\" len=\"med\"/>";
+        anchors.Append(OneCell(5, 43, 0, 0, 90, 60, Connector("curvedConnector4", "7030A0", Arrow, "<a:gd name=\"adj1\" fmla=\"val 30000\"/><a:gd name=\"adj2\" fmla=\"val 70000\"/>")));
+        anchors.Append(OneCell(7, 43, 0, 0, 90, 60, Connector("curvedConnector5", "375623", Arrow, "<a:gd name=\"adj1\" fmla=\"val 20000\"/><a:gd name=\"adj2\" fmla=\"val 50000\"/><a:gd name=\"adj3\" fmla=\"val 80000\"/>")));
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/shapefill.png\"/></Relationships>");
@@ -499,7 +508,7 @@ internal static class ShowcaseXlsx
     }
 
     private static string ShapeFillsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
-        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides, soft shadow, picture fills:")) + Row(25, Str("A25", "Rectangular and circular path gradients:")) + Row(31, Str("A31", "Tiled and translucent picture fills, glow, soft edges:")) + Row(37, Str("A37", "A rotated group:")) + Row(46, Str("A46", "(the print range ends here)")),
+        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides, soft shadow, picture fills:")) + Row(25, Str("A25", "Rectangular and circular path gradients:")) + Row(31, Str("A31", "Tiled and translucent picture fills, glow, soft edges:")) + Row(37, Str("A37", "A rotated group:")) + Row(43, Str("A43", "Reflection, notched soft edges, curved connectors 4 and 5:")) + Row(53, Str("A53", "(the print range ends here)")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ charts

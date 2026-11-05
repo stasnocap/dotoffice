@@ -776,6 +776,7 @@ public sealed partial class SheetLayoutEngine
                 {
                     reach = Math.Max(reach, shape.LineWidth + 1);
                     if (shape.Glow is { } glow) reach = Math.Max(reach, glow.Radius + 1);
+                    if (shape.Reflection is { } reflection) reach = Math.Max(reach, reflection.Distance + Math.Abs(h) * reflection.EndPosition + 1);
                     if (shape.Shadow is { } shade) reach = Math.Max(reach, Math.Max(Math.Abs(shade.Dx), Math.Abs(shade.Dy)) + shade.Blur + 1);
                 }
                 foreach (var columnSegment in columnSegments)
