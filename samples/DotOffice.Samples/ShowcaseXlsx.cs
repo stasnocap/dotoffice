@@ -49,7 +49,7 @@ internal static class ShowcaseXlsx
             ("Conditional lookups", ConditionalLookupsSheet(), "visible"),
             ("Pivot", PivotSheet("Pivot table cached cells (no pivot style: nothing to warn about)"), "visible"),
             ("Pivot styled", PivotSheet("Pivot table with a pivot style and a pivot-area format on the corner (approximated, reported)"), "visible"),
-            ("Pivot banded", PivotSheet("Pivot table with a banded Medium style (approximated, reported)"), "visible"),
+            ("Pivot banded", PivotSheet("Pivot table with a banded Medium style and formats on the East data (pink) and the North label (green) (approximated, reported)"), "visible"),
             ("Pivot dark", PivotSheet("Pivot table with a banded Dark style (approximated, reported)"), "visible"),
             ("Pivot custom", PivotSheet("Pivot table with the workbook's own table style from styles.xml (header, two stripes, total row; reported)"), "visible"),
             ("Paper", PaperSheet(), "visible"),
@@ -85,7 +85,9 @@ internal static class ShowcaseXlsx
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot") + 1, "");
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16",
             "<formats count=\"1\"><format dxfId=\"5\"><pivotArea type=\"origin\" outline=\"0\" fieldPosition=\"0\"/></format></formats>");
-        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot banded") + 1, "PivotStyleMedium2", "", stripes: true);
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot banded") + 1, "PivotStyleMedium2",
+            "<formats count=\"2\"><format dxfId=\"0\"><pivotArea field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"2\"/></reference></references></pivotArea></format>" +
+            "<format dxfId=\"1\"><pivotArea dataOnly=\"0\" labelOnly=\"1\" field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"0\"/></reference></references></pivotArea></format></formats>", stripes: true);
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot dark") + 1, "PivotStyleDark3", "", stripes: true);
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot custom") + 1, "Showcase pivot", "", stripes: true);
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
@@ -1093,7 +1095,8 @@ internal static class ShowcaseXlsx
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable{sheetNumber}.xml\"/></Relationships>");
         Entry(zip, $"xl/pivotTables/pivotTable{sheetNumber}.xml",
-            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\"/>" + formats +
+            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"1\"/>" +
+            "<rowFields count=\"1\"><field x=\"0\"/></rowFields><rowItems count=\"5\"><i><x/></i><i><x v=\"1\"/></i><i><x v=\"2\"/></i><i><x v=\"3\"/></i><i t=\"grand\"><x/></i></rowItems>" + formats +
             (style.Length == 0 ? "" : $"<pivotTableStyleInfo name=\"{style}\" showRowHeaders=\"1\" showColHeaders=\"1\" showRowStripes=\"{(stripes ? 1 : 0)}\" showColStripes=\"0\"/>") + "</pivotTableDefinition>");
     }
 

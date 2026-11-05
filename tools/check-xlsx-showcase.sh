@@ -186,6 +186,8 @@ for name in "Pivot styled" "Pivot banded"; do
   else
     grep -aq "^0.2667 0.4471 0.7686 rg$" "$pivot_file" || fail "the Medium 2 header fill is missing"
     grep -aq "^0.8549 0.8902 0.9529 rg$" "$pivot_file" || fail "the Medium 2 row bands are missing"
+    grep -aq "^1 0.7804 0.8078 rg$" "$pivot_file" || fail "the pivot-area format on an item's data (pink) is missing"
+    grep -aq "^0.7765 0.9373 0.8078 rg$" "$pivot_file" || fail "the pivot-area format on an item's label (green) is missing"
   fi
 done
 # Dark 3 puts a dark shade of accent 2 (50 % black) on the header and grand total over a tinted body; the workbook's own style ("Showcase pivot")

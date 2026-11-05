@@ -27,6 +27,10 @@ internal static partial class PivotStyling
         public int HeaderRows, LabelColumns;
         public Dictionary<int, string> RowTypes = [];     // sheet row -> "grand" | "default" (a subtotal)
         public Dictionary<int, string> ColumnTypes = [];
+        public List<int> RowFields = [], ColumnFields = [];             // pivot field indexes by level (-2 is the data field)
+        public Dictionary<int, int[]> RowPaths = [], ColumnPaths = [];  // sheet row/column -> the item index at each level of the axis
+        public int DataFieldCount;
+        public bool Compact = true;
 
         public bool IsHeader(int row) => row - Range.FirstRow < HeaderRows;
         public bool IsLabel(int column) => column - Range.FirstColumn < LabelColumns;
@@ -66,6 +70,29 @@ internal static partial class PivotStyling
         if (Child(definition, "rowItems") is null && Flag(definition, "rowGrandTotals", true) && range.LastRow - range.FirstRow >= geometry.HeaderRows)
             geometry.RowTypes[range.LastRow] = "grand";
 
+        geometry.DataFieldCount = Child(definition, "dataFields")?.Elements().Count(e => e.Name.LocalName == "dataField") ?? 0;
+        geometry.Compact = Flag(definition, "compact", true);
+        geometry.RowFields = Fields("rowFields");
+        geometry.ColumnFields = Fields("colFields");
+        Paths("rowItems", geometry.RowPaths, range.FirstRow + geometry.HeaderRows, range.LastRow);
+        Paths("colItems", geometry.ColumnPaths, range.FirstColumn + geometry.LabelColumns, range.LastColumn);
+        List<int> Fields(string name) => Child(definition, name)?.Elements().Where(e => e.Name.LocalName == "field").Select(e => Int(e, "x", -1)).ToList() ?? [];
+        // The item list gives each row (column) the items it sits under: `r` leading entries repeat the previous row's, the rest are listed.
+        void Paths(string listName, Dictionary<int, int[]> into, int first, int last)
+        {
+            var items = Child(definition, listName)?.Elements().Where(e => e.Name.LocalName == "i").ToList();
+            if (items is null) return;
+            int[] previous = [];
+            for (int k = 0; k < items.Count && first + k <= last; k++)
+            {
+                if ((string?)items[k].Attribute("t") is "grand" or "data" or "blank") { previous = []; continue; }
+                var listed = items[k].Elements().Where(e => e.Name.LocalName == "x").Select(e => Int(e, "v", 0));
+                var path = previous.Take(Math.Min(Int(items[k], "r", 0), previous.Length)).Concat(listed).ToArray();
+                into[first + k] = path;
+                previous = path;
+            }
+        }
+
         var outcome = StyleOutcome.None;
         if (styleName is not null)
         {
@@ -103,7 +130,7 @@ internal static partial class PivotStyling
     /// </summary>
     private static Func<int, int, bool>? AreaTest(XElement area, Geometry g)
     {
-        if (area.Elements().Any(e => e.Name.LocalName == "references" && e.HasElements)) return null;
+        if (area.Elements().FirstOrDefault(e => e.Name.LocalName == "references" && e.HasElements) is { } references) return ItemTest(area, references, g);
         string type = (string?)area.Attribute("type") ?? "normal";
         bool dataOnly = (string?)area.Attribute("dataOnly") is not ("0" or "false"), labelOnly = (string?)area.Attribute("labelOnly") is "1" or "true";
         bool grandRow = (string?)area.Attribute("grandRow") is "1" or "true", grandColumn = (string?)area.Attribute("grandCol") is "1" or "true";
@@ -123,6 +150,68 @@ internal static partial class PivotStyling
                 return labelOnly ? (r, c) => !g.IsHeader(r) && g.IsLabel(c) : (r, c) => !g.IsHeader(r) && !g.IsLabel(c);
             default: return null;
         }
+    }
+
+    /// <summary>
+    /// A pivot area that picks items: each <c>reference</c> names a pivot field and the items of it (indexes into the field's item list,
+    /// the same numbers the table's item lists use). The rows or columns whose path holds those items are selected; their data cells, their
+    /// labels or both, by <c>dataOnly</c> and <c>labelOnly</c>. Only fields on the row or column axis are understood (a data-field reference
+    /// counts when there is a single data field); anything else gives null, which the caller reports.
+    /// </summary>
+    private static Func<int, int, bool>? ItemTest(XElement area, XElement references, Geometry g)
+    {
+        string type = (string?)area.Attribute("type") ?? "normal";
+        if (type is not ("normal" or "data")) return null;
+        bool labelOnly = (string?)area.Attribute("labelOnly") is "1" or "true", dataOnly = (string?)area.Attribute("dataOnly") is not ("0" or "false");
+        var rowPicks = new List<(int Level, HashSet<int> Items)>();
+        var columnPicks = new List<(int Level, HashSet<int> Items)>();
+        foreach (var reference in references.Elements().Where(e => e.Name.LocalName == "reference"))
+        {
+            // Excel writes the data field as the unsigned 4294967294.
+            if (!long.TryParse((string?)reference.Attribute("field"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long wide)) return null;
+            int field = wide == 4294967294 ? -2 : (int)wide;
+            if (field == -2) { if (g.DataFieldCount > 1) return null; continue; }
+            var items = reference.Elements().Where(e => e.Name.LocalName == "x").Select(e => int.TryParse((string?)e.Attribute("v"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0).ToHashSet();
+            if (items.Count == 0) return null;
+            int level = g.RowFields.IndexOf(field);
+            if (level >= 0) { rowPicks.Add((level, items)); continue; }
+            level = g.ColumnFields.IndexOf(field);
+            if (level < 0) return null;
+            columnPicks.Add((level, items));
+        }
+        if (rowPicks.Count == 0 && columnPicks.Count == 0) return null;
+        bool Matches(int[]? path, List<(int Level, HashSet<int> Items)> picks) =>
+            picks.Count == 0 || path is not null && picks.All(p => p.Level < path.Length && p.Items.Contains(path[p.Level]));
+        // The row's own level of the deepest pick decides where its label sits: column 0 when the table is compact, else the field's column.
+        int rowLevel = rowPicks.Count == 0 ? -1 : rowPicks.Max(p => p.Level), columnLevel = columnPicks.Count == 0 ? -1 : columnPicks.Max(p => p.Level);
+        bool Heading(int[]? path, int level, List<(int Level, HashSet<int> Items)> picks, Dictionary<int, int[]> all, int position)
+        {
+            if (level < 0) return true;
+            if (path is null) return false;
+            // The label of the item shows on the first row of its group (the row where the item at that level starts).
+            return path.Length == level + 1 || !all.TryGetValue(position - 1, out var before) || before.Length <= level || before[level] != path[level];
+        }
+        return (r, c) =>
+        {
+            bool header = g.IsHeader(r), label = g.IsLabel(c);
+            g.RowPaths.TryGetValue(r, out var rowPath);
+            g.ColumnPaths.TryGetValue(c, out var columnPath);
+            if (rowPicks.Count > 0 && (header || !Matches(rowPath, rowPicks))) return false;
+            if (columnPicks.Count > 0 && (label || !Matches(columnPath, columnPicks))) return false;
+            if (header && columnPicks.Count == 0 || label && rowPicks.Count == 0) return false;
+            bool isLabel = header || label;
+            if (isLabel)
+            {
+                if (dataOnly && !labelOnly) return false; // the default selects data cells only
+                if (label) // a row label: the field's column, on the group's first row
+                {
+                    if (!Heading(rowPath, rowLevel, rowPicks, g.RowPaths, r)) return false;
+                    return g.Compact ? c == g.Range.FirstColumn : c - g.Range.FirstColumn == Math.Min(rowLevel, g.LabelColumns - 1);
+                }
+                return Heading(columnPath, columnLevel, columnPicks, g.ColumnPaths, c) && r - g.Range.FirstRow == Math.Min(columnLevel + (g.HeaderRows > 1 ? 1 : 0), g.HeaderRows - 1);
+            }
+            return !labelOnly;
+        };
     }
 
     // ------------------------------------------------------------------ built-in styles

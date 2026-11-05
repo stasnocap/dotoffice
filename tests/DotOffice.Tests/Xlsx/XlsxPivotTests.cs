@@ -163,6 +163,47 @@ public class XlsxPivotTests
         Assert.Contains("a pivot-area format that selects particular items is not applied", message);
     }
 
+
+    private const string FourRegions = "<rowFields count=\"1\"><field x=\"0\"/></rowFields><rowItems count=\"5\"><i><x/></i><i><x v=\"1\"/></i><i><x v=\"2\"/></i><i><x v=\"3\"/></i><i t=\"grand\"><x/></i></rowItems>";
+
+    private static IEnumerable<string> Filled(Worksheet sheet) => sheet.Cells.Where(c => c.Value.Style.Fill == Color.TryParseHex("FFC7CE"))
+        .Select(c => $"{(char)('A' + c.Key.Column)}{c.Key.Row + 1}").OrderBy(x => x);
+
+    [Theory]
+    [InlineData("<pivotArea field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"2\"/></reference></references></pivotArea>", "B6")]                  // the data of one item
+    [InlineData("<pivotArea dataOnly=\"0\" labelOnly=\"1\" field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"1\"><x v=\"1\"/></reference></references></pivotArea>", "A5")] // its label
+    [InlineData("<pivotArea dataOnly=\"0\" field=\"0\" type=\"normal\"><references count=\"1\"><reference field=\"0\" count=\"2\"><x v=\"0\"/><x v=\"3\"/></reference></references></pivotArea>", "A4,A7,B4,B7")] // both, two items
+    [InlineData("<pivotArea field=\"0\" type=\"normal\"><references count=\"2\"><reference field=\"4294967294\" count=\"1\"><x v=\"0\"/></reference><reference field=\"0\" count=\"1\"><x v=\"3\"/></reference></references></pivotArea>", "B7")] // the unsigned data-field id (-2) with one data field adds no condition
+    public void Pivot_area_formats_that_pick_row_items_apply_their_dxf(string area, string expected)
+    {
+        var (sheet, warnings) = Read(Definition(extra: FourRegions + $"<dataFields count=\"1\"><dataField fld=\"1\"/></dataFields><formats count=\"1\"><format dxfId=\"0\">{area}</format></formats>"), Dxf("FFC7CE"));
+        Assert.Equal(expected.Split(','), Filled(sheet));
+        Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void A_data_field_reference_is_accepted_for_one_data_field_and_picks_items_of_the_outer_row_field_in_outline_layout()
+    {
+        // Two row fields in outline form: region (level 0) with its cities (level 1). Rows 4: North, 5: Oslo, 6: Bergen, 7: South, 8: Rome.
+        var rows = Row(3, Inline("A3", "Region") + Inline("B3", "City") + Inline("C3", "Sum")) +
+                   Row(4, Inline("A4", "North") + C("C4", "3")) + Row(5, Inline("B5", "Oslo") + C("C5", "1")) + Row(6, Inline("B6", "Bergen") + C("C6", "2")) +
+                   Row(7, Inline("A7", "South") + C("C7", "4")) + Row(8, Inline("B8", "Rome") + C("C8", "4"));
+        var builder = new XlsxBuilder { Styles = StylesWithDxfs(Dxf("FFC7CE")) }.AddSheet("S", rows);
+        builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable1.xml\"/></Relationships>");
+        builder.AddPart("xl/pivotTables/pivotTable1.xml", $"<pivotTableDefinition {PivotNs} name=\"P\" compact=\"0\" outline=\"1\"><location ref=\"A3:C8\" firstHeaderRow=\"1\" firstDataRow=\"1\" firstDataCol=\"2\"/>" +
+            "<rowFields count=\"2\"><field x=\"0\"/><field x=\"1\"/></rowFields>" +
+            "<rowItems count=\"5\"><i><x/></i><i r=\"1\"><x/></i><i r=\"1\"><x v=\"1\"/></i><i><x v=\"1\"/></i><i r=\"1\"><x v=\"2\"/></i></rowItems>" +
+            "<dataFields count=\"1\"><dataField fld=\"2\"/></dataFields><formats count=\"2\">" +
+            "<format dxfId=\"0\"><pivotArea field=\"0\" type=\"normal\"><references count=\"2\"><reference field=\"4294967294\" count=\"1\"><x v=\"0\"/></reference><reference field=\"0\" count=\"1\"><x v=\"0\"/></reference></references></pivotArea></format>" +
+            "<format dxfId=\"0\"><pivotArea dataOnly=\"0\" labelOnly=\"1\" field=\"1\" type=\"normal\"><references count=\"1\"><reference field=\"1\" count=\"1\"><x v=\"2\"/></reference></references></pivotArea></format>" +
+            "</formats></pivotTableDefinition>");
+        var warnings = new ConversionWarningList();
+        var sheet = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0];
+        Assert.Equal(["B8", "C4", "C5", "C6"], Filled(sheet));
+        Assert.Empty(warnings.Warnings);
+    }
+
     [Fact]
     public void A_table_whose_location_cannot_be_read_applies_nothing()
     {
