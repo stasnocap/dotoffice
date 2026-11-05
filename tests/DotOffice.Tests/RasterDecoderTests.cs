@@ -211,10 +211,47 @@ public class RasterDecoderTests
         byte[] strip = [0xFF, 0xD8, .. jpeg[frame..]];                   // SOI, frame, scan
         Assert.Equal(jpeg, RasterDecoders.TiffJpeg(TiffWithJpeg(strip, tables)));
         Assert.Equal(jpeg, RasterDecoders.TiffJpeg(TiffWithJpeg(jpeg, null)));       // a complete JPEG needs no tables
-        Assert.Null(RasterDecoders.TiffJpeg(TiffWithJpeg(strip, tables, strips: 2))); // several strips need a JPEG decoder
         Assert.Null(RasterDecoders.TiffJpeg(Tiff(1, 1, 2, 3, [1, 2, 3])));            // not a JPEG TIFF
         var image = PdfImage.FromTiff(TiffWithJpeg(strip, tables));
         Assert.True(image.Width > 1);                                                 // the JPEG's own size, not the tag's
+    }
+
+    [Fact]
+    public void A_tiff_with_several_jpeg_strips_is_joined_into_one_jpeg_with_restart_markers()
+    {
+        // Written by libtiff (tiffcp -c jpeg -r 16): 40x48, YCbCr 2x2, three strips of 16 rows, the tables shared in JPEGTables.
+        var tiff = TestAssets.Bytes("three-strips-jpeg.tif");
+        var jpeg = RasterDecoders.TiffJpeg(tiff)!;
+        Assert.NotNull(jpeg);
+        Assert.Equal((byte)0xFF, jpeg[0]);
+        Assert.Equal((byte)0xD8, jpeg[1]);
+        Assert.Equal([(byte)0xFF, (byte)0xD9], jpeg[^2..]);
+        // The restart interval is one strip: 3 MCUs across (40 / 16, rounded up) by one MCU row (16 / 16).
+        int dri = Enumerable.Range(2, jpeg.Length - 8).First(i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xDD);
+        Assert.Equal(3, jpeg[dri + 4] << 8 | jpeg[dri + 5]);
+        // The frame has the full height, and the strips are chained by RST0 and RST1.
+        int frame = Enumerable.Range(2, jpeg.Length - 8).First(i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xC0);
+        Assert.Equal((48, 40), (jpeg[frame + 5] << 8 | jpeg[frame + 6], jpeg[frame + 7] << 8 | jpeg[frame + 8]));
+        Assert.Contains(Enumerable.Range(0, jpeg.Length - 1), i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xD0);
+        Assert.Contains(Enumerable.Range(0, jpeg.Length - 1), i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xD1);
+        Assert.DoesNotContain(Enumerable.Range(0, jpeg.Length - 1), i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xD2);
+        Assert.Equal((40, 48), (PdfImage.FromTiff(tiff).Width, PdfImage.FromTiff(tiff).Height));
+    }
+
+    [Fact]
+    public void Jpeg_strips_that_cannot_be_chained_are_not_joined()
+    {
+        var tiff = TestAssets.Bytes("three-strips-jpeg.tif");
+        // A rows-per-strip that is not a whole number of MCU rows (tag 278, value 16 -> 12) cannot be joined.
+        var odd = (byte[])tiff.Clone();
+        int ifd = BitConverter.ToInt32(odd, 4);
+        int count = BitConverter.ToUInt16(odd, ifd);
+        for (int i = 0; i < count; i++)
+        {
+            int e = ifd + 2 + i * 12;
+            if (BitConverter.ToUInt16(odd, e) == 278) odd[e + 8] = 12;
+        }
+        Assert.Null(RasterDecoders.TiffJpeg(odd));
     }
 
     [Fact]

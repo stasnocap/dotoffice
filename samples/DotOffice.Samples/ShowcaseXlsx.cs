@@ -866,12 +866,13 @@ internal static class ShowcaseXlsx
             OneCell(4, 28, 4, 2, 90, 56, Pic("Animated-format GIF", embed: "rId3")) +                                            // GIF with a transparent corner
             OneCell(1, 33, 4, 2, 90, 56, Pic("RLE-compressed bitmap", embed: "rId4")) +                                           // BMP, RLE8
             OneCell(4, 33, 4, 2, 90, 56, Pic("LZW TIFF", embed: "rId5")) +                                                      // TIFF, LZW with the horizontal predictor
+            OneCell(4, 38, 4, 2, 90, 56, Pic("Three-strip JPEG TIFF", embed: "rId7")) +                                           // TIFF with three JPEG strips (written by libtiff), joined with restart markers
             OneCell(1, 38, 4, 2, 90, 56, Pic("JPEG TIFF", embed: "rId6")) +                                                       // TIFF holding one JPEG strip (compression 7) and JPEGTables
             TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
             "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Freeform\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:custGeom/></xdr:spPr></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
-            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/><Relationship Id=\"rId4\" Type=\"{RelType}image\" Target=\"../media/image4.bmp\"/><Relationship Id=\"rId5\" Type=\"{RelType}image\" Target=\"../media/image5.tif\"/><Relationship Id=\"rId6\" Type=\"{RelType}image\" Target=\"../media/image6.tif\"/></Relationships>");
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/><Relationship Id=\"rId4\" Type=\"{RelType}image\" Target=\"../media/image4.bmp\"/><Relationship Id=\"rId5\" Type=\"{RelType}image\" Target=\"../media/image5.tif\"/><Relationship Id=\"rId6\" Type=\"{RelType}image\" Target=\"../media/image6.tif\"/><Relationship Id=\"rId7\" Type=\"{RelType}image\" Target=\"../media/image7.tif\"/></Relationships>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/><Relationship Id=\"rId2\" Type=\"{RelType}vmlDrawing\" Target=\"../drawings/vmlDrawing1.vml\"/></Relationships>");
         // The pictures of the header and footer (&G) come from a legacy VML part.
@@ -889,6 +890,7 @@ internal static class ShowcaseXlsx
         using (var media = zip.CreateEntry("xl/media/image4.bmp").Open()) media.Write(RleBmp(72, 40));
         using (var media = zip.CreateEntry("xl/media/image5.tif").Open()) media.Write(LzwTiff(64, 40));
         using (var media = zip.CreateEntry("xl/media/image6.tif").Open()) media.Write(JpegTiff());
+        using (var media = zip.CreateEntry("xl/media/image7.tif").Open()) media.Write(StripedJpegTiff());
         content.Append("<Default Extension=\"tif\" ContentType=\"image/tiff\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"bmp\" ContentType=\"image/bmp\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/>");
     }
 
@@ -968,6 +970,9 @@ internal static class ShowcaseXlsx
         ms.Write(tables);
         return ms.ToArray();
     }
+
+    /// <summary>A 40x48 TIFF of three JPEG strips of 16 rows (YCbCr 2x2, shared JPEGTables), as libtiff writes it (tiffcp -c jpeg -r 16).</summary>
+    private static byte[] StripedJpegTiff() => System.Convert.FromBase64String("SUkqAE4BAAD/2P/AABEIABAAKAMBIgACEQEDEQH/2gAMAwEAAhEDEQA/APEoLXpxWjBa9OKswWvTitGC16cVUWXhMUVoLXpxWjBa9OKswWvTitGC16cVvFn0+ExRWgtenFFbcFr04orZM+ipYr3T/9n/2P/AABEIABAAKAMBIgACEQEDEQH/2gAMAwEAAhEDEQA/AOGgtenFaUFr04qzBa9OK0YLXpxRFng4TElaC16cVowWvTirMFr7VowWvTit4s+nwmJK0Fr04oragtenFFbJn0NLE+6f/9n/2P/AABEIABAAKAMBIgACEQEDEQH/2gAMAwEAAhEDEQA/AI4LXpxWjBa9OKswWvTitGC16cVMWfn+ExRWgtenFaMFr04qzBa9OK0YLXpxW8WfUYTElaC16cUVtQ2wAyeAO5oqpVqdPSckvVn0VHEtxP/ZAA4AAAEDAAEAAAAoAAAAAQEDAAEAAAAwAAAAAgEDAAMAAAD8AQAAAwEDAAEAAAAHAAAABgEDAAEAAAAGAAAAEQEEAAMAAAAIAgAAEgEDAAEAAAABAAAAFQEDAAEAAAADAAAAFgEDAAEAAAAQAAAAFwEDAAMAAAACAgAAHAEDAAEAAAABAAAAWwEHAD4CAABEAgAAEgIDAAIAAAACAAIAFAIFAAYAAAAUAgAAAAAAAAgACAAIAGkAaQBzAAgAAABxAAAA2gAAAAAAAAABAAAA/wAAAAEAAACAAAAAAQAAAP8AAAABAAAAgAAAAAEAAAD/AAAAAQAAAP/Y/9sAQwAIBgYHBgUIBwcHCQkICgwUDQwLCwwZEhMPFB0aHx4dGhwcICQuJyAiLCMcHCg3KSwwMTQ0NB8nOT04MjwuMzQy/9sAQwEJCQkMCwwYDQ0YMiEcITIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9k=");
 
     /// <summary>An RGB TIFF compressed with LZW (MSB-first codes, early change) and the horizontal predictor.</summary>
     private static byte[] LzwTiff(int width, int height)

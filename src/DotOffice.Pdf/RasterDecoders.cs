@@ -348,26 +348,117 @@ internal static class RasterDecoders
     }
 
     /// <summary>
-    /// A TIFF whose single strip or tile is a JPEG stream (compression 7): the JPEG as a complete file, with the shared tables of
-    /// <c>JPEGTables</c> put in front of the strip's own data. Null for any other TIFF, and for a JPEG split over several strips (that
-    /// would need a JPEG decoder to stitch).
+    /// A TIFF whose strips are JPEG streams (compression 7): the JPEG as a complete file, with the shared tables of <c>JPEGTables</c> put in
+    /// front of the strip's own data. A JPEG split over several strips is joined without decoding: each strip is coded on its own (its DC
+    /// predictors start at zero), which is what a restart interval does, so the strips' scan data are chained with restart markers and the
+    /// frame is given the whole height. That needs strips of whole MCU rows (unless it is the last), each without restart markers of its own;
+    /// otherwise, and for tiles, and for any other TIFF, the result is null.
     /// </summary>
     public static byte[]? TiffJpeg(byte[] d)
     {
         var tags = ReadTiffTags(d);
         if (!tags.TryGetValue(259, out var c) || c.Length == 0 || c[0] != 7) return null;
         uint[]? offsets = tags.GetValueOrDefault(273) ?? tags.GetValueOrDefault(324), counts = tags.GetValueOrDefault(279) ?? tags.GetValueOrDefault(325);
-        if (offsets is not { Length: 1 } || counts is not { Length: 1 } || (long)offsets[0] + counts[0] > d.Length || counts[0] < 4) return null;
-        var data = d.AsSpan((int)offsets[0], (int)counts[0]);
-        if (data[0] != 0xFF || data[1] != 0xD8) return null;
-        if (!tags.TryGetValue(347, out var tables) || tables.Length < 4) return data.ToArray();
-        // JPEGTables is itself a stream (SOI, tables, EOI); the strip is a stream without them (SOI, frame, scan, EOI).
-        var head = tables.Select(v => (byte)v).ToArray();
-        int headLength = head.Length >= 2 && head[^2] == 0xFF && head[^1] == 0xD9 ? head.Length - 2 : head.Length;
-        var jpeg = new byte[headLength + data.Length - 2];
-        head.AsSpan(0, headLength).CopyTo(jpeg);
-        data[2..].CopyTo(jpeg.AsSpan(headLength));
-        return jpeg;
+        if (offsets is null || counts is null || offsets.Length == 0 || offsets.Length != counts.Length) return null;
+        if (offsets.Length > 1 && !tags.ContainsKey(273)) return null; // tiles lie in two dimensions
+        for (int i = 0; i < offsets.Length; i++)
+            if ((long)offsets[i] + counts[i] > d.Length || counts[i] < 4 || d[offsets[i]] != 0xFF || d[offsets[i] + 1] != 0xD8) return null;
+        // JPEGTables is itself a stream (SOI, tables, EOI); a strip is a stream without them (SOI, frame, scan, EOI).
+        byte[] head = [];
+        if (tags.TryGetValue(347, out var tables) && tables.Length >= 4)
+        {
+            head = tables.Select(v => (byte)v).ToArray();
+            if (head.Length >= 2 && head[^2] == 0xFF && head[^1] == 0xD9) head = head[..^2];
+        }
+        byte[] Whole(int strip)
+        {
+            var data = d.AsSpan((int)offsets[strip], (int)counts[strip]);
+            if (head.Length == 0) return data.ToArray();
+            var joined = new byte[head.Length + data.Length - 2];
+            head.CopyTo(joined, 0);
+            data[2..].CopyTo(joined.AsSpan(head.Length));
+            return joined;
+        }
+        var first = Whole(0);
+        if (offsets.Length == 1) return first;
+
+        uint width = tags.GetValueOrDefault(256)?.FirstOrDefault() ?? 0, height = tags.GetValueOrDefault(257)?.FirstOrDefault() ?? 0;
+        uint rows = tags.TryGetValue(278, out var rps) && rps.Length > 0 ? rps[0] : height;
+        if (width == 0 || height == 0 || rows == 0 || height > 65535 || width > 65535) return null;
+        if (!JpegScan(first, out int frameAt, out int sosAt, out int scanAt, out int maxH, out int maxV)) return null;
+        if (rows % (8 * maxV) != 0 || (long)rows * (offsets.Length - 1) >= height || (long)rows * offsets.Length < height) return null;
+        long interval = (long)((width + 8 * maxH - 1) / (8 * maxH)) * (rows / (8 * maxV));
+        if (interval is < 1 or > 65535) return null;
+
+        using var output = new MemoryStream();
+        // The frame's height covers every strip, and the restart interval is one strip; the scan data follows the scan header.
+        output.Write(first, 0, sosAt);
+        output.Write([0xFF, 0xDD, 0x00, 0x04, (byte)(interval >> 8), (byte)interval]);
+        output.Write(first, sosAt, scanAt - sosAt);
+        output.Position = frameAt + 5;
+        output.WriteByte((byte)(height >> 8));
+        output.WriteByte((byte)height);
+        output.Position = output.Length;
+        for (int i = 0; i < offsets.Length; i++)
+        {
+            var strip = i == 0 ? first : Whole(i);
+            int start = scanAt;
+            if (i > 0 && !JpegScan(strip, out _, out _, out start, out _, out _)) return null;
+            int end = start;
+            while (end < strip.Length)
+            {
+                if (strip[end] != 0xFF) { end++; continue; }
+                if (end + 1 >= strip.Length) break;
+                byte next = strip[end + 1];
+                if (next == 0) { end += 2; continue; }
+                if (next is >= 0xD0 and <= 0xD7) return null; // the strip has restart markers of its own
+                break; // EOI (or anything else that ends the scan)
+            }
+            output.Write(strip, start, end - start);
+            output.WriteByte(0xFF);
+            output.WriteByte(i < offsets.Length - 1 ? (byte)(0xD0 + i % 8) : (byte)0xD9);
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Walks the segments of a JPEG stream up to its first scan. Gives the position of the scan header (its marker), the index just after it
+    /// (where the entropy-coded data starts) and, from the sequential frame, its position and the largest sampling factors; false when there
+    /// is no such frame, a restart interval is already set, or the stream is malformed.
+    /// </summary>
+    private static bool JpegScan(byte[] j, out int frameAt, out int scanAt, out int scanDataAt, out int maxH, out int maxV)
+    {
+        (frameAt, scanAt, scanDataAt, maxH, maxV) = (-1, -1, -1, 1, 1);
+        int p = 2;
+        while (p + 4 <= j.Length)
+        {
+            if (j[p] != 0xFF) return false;
+            byte marker = j[p + 1];
+            if (marker == 0xFF) { p++; continue; }
+            int length = j[p + 2] << 8 | j[p + 3];
+            if (length < 2 || p + 2 + length > j.Length) return false;
+            if (marker == 0xDD) return false;
+            if (marker is 0xC0 or 0xC1)
+            {
+                frameAt = p;
+                int components = j[p + 9];
+                if (components is < 1 or > 4 || length < 8 + 3 * components) return false;
+                for (int k = 0; k < components; k++)
+                {
+                    int sampling = j[p + 11 + 3 * k];
+                    (maxH, maxV) = (Math.Max(maxH, sampling >> 4), Math.Max(maxV, sampling & 15));
+                }
+            }
+            else if (marker is 0xC2 or 0xC3 or (>= 0xC5 and <= 0xCF and not 0xC8 and not 0xCC)) return false; // progressive, lossless, arithmetic
+            if (marker == 0xDA)
+            {
+                if (frameAt < 0) return false;
+                (scanAt, scanDataAt) = (p, p + 2 + length);
+                return true;
+            }
+            p += 2 + length;
+        }
+        return false;
     }
 
     /// <summary>Decodes a baseline TIFF: 1/2/4/8-bit gray or palette and 8-bit RGB(A), stored, PackBits or LZW strips.</summary>
