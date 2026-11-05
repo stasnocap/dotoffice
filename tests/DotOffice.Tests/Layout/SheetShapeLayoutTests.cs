@@ -458,6 +458,36 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void The_polygon_presets_fill_their_frame_and_follow_their_adjust_values()
+    {
+        // The default frame is 100 x 40 points from (left + 50, top + 20).
+        var (left, top) = Origin;
+        List<(double X, double Y)> Points(ShapeGeometry geometry, double? a1 = null, double? a2 = null) =>
+            Page(Shape(geometry, Red) with { Adjust1 = a1, Adjust2 = a2 }).Items.OfType<PolygonItem>().Single().Points.Select(p => (Math.Round(p.X - left - 50, 4), Math.Round(p.Y - top - 20, 4))).ToList();
+        var pentagon = Points(ShapeGeometry.Pentagon);
+        Assert.Equal(5, pentagon.Count);
+        Assert.Equal((0.0, 100.0), (pentagon.Min(p => p.X), pentagon.Max(p => p.X)));
+        Assert.Equal((0.0, 40.0), (pentagon.Min(p => p.Y), pentagon.Max(p => p.Y)));
+        var octagon = Points(ShapeGeometry.Octagon);                                // the corner cut is 0.29289 of the shorter side (40)
+        Assert.Contains((11.7156, 0.0), octagon);
+        Assert.Contains((0.0, 11.7156), octagon);
+        Assert.Contains((20.0, 0.0), Points(ShapeGeometry.Octagon, 0.5));          // limited to half the shorter side
+        Assert.Equal(12, Points(ShapeGeometry.Plus).Count);
+        Assert.Contains((10.0, 10.0), Points(ShapeGeometry.Plus));                  // an arm a quarter of the shorter side wide
+        Assert.Contains((20.0, 20.0), Points(ShapeGeometry.Chevron, 0.5));          // the notch: half the shorter side from the left, in the middle
+        Assert.Contains((100.0, 20.0), Points(ShapeGeometry.Chevron, 0.5));         // the point
+        Assert.Contains((80.0, 0.0), Points(ShapeGeometry.HomePlate, 0.5));
+        var star = Points(ShapeGeometry.Star5);
+        Assert.Equal(10, star.Count);
+        Assert.Equal((0.0, 100.0), (star.Min(p => p.X), star.Max(p => p.X)));
+        // A block arrow's shaft and head follow adj1 and adj2: a shaft 30 % of the height, a head 80 % of the shorter side (32) long.
+        var arrow = Points(ShapeGeometry.RightArrow, 0.3, 0.8);
+        Assert.Contains((68.0, 14.0), arrow);
+        Assert.Contains((0.0, 26.0), arrow);
+        Assert.Contains((100.0, 20.0), arrow);
+    }
+
+    [Fact]
     public void A_rotated_group_swings_its_children_about_the_groups_center()
     {
         // The group frame is the whole 100 x 40 shape frame; the child is its left half (center 25 left of the group's center).

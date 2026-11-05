@@ -224,7 +224,7 @@ path_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape paths" ] && path_page=$p; done
 [ "$path_page" != 0 ] || fail "no page for the shape paths sheet"
 path_text=$(page_text "$path_page")
-for text in "Linear" "Radial" "Rounded" "Custom"; do
+for text in "Linear" "Radial" "Rounded" "Custom" "Pentagon" "Octagon" "Chevron" "Slim arrow"; do
   [[ $path_text == *"$text"* ]] || fail "missing shape text: $text"
 done
 qpdf --qdf --object-streams=disable "$pdf" paths-qdf.pdf

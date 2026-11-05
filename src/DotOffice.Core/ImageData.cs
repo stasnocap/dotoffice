@@ -10,7 +10,7 @@ public sealed class ImageData(byte[] data, string? name = null)
     public ImageFormat Format { get; } = Detect(data);
 
     /// <summary>
-    /// The size of a PNG, JPEG, GIF or BMP picture in pixels, and the resolution it declares (PNG's pHYs; 96 dots per inch otherwise).
+    /// The size of a PNG, JPEG, GIF, BMP or TIFF picture in pixels, and the resolution it declares (PNG's pHYs, a TIFF's XResolution; 96 dots per inch otherwise).
     /// Null for other formats and for data that cannot be read.
     /// </summary>
     public (int Width, int Height, double Dpi)? PixelSize => _size ??= ReadSize();
@@ -49,6 +49,8 @@ public sealed class ImageData(byte[] data, string? name = null)
                     int w = BitConverter.ToInt32(d, 18), h = Math.Abs(BitConverter.ToInt32(d, 22));
                     return w > 0 && h > 0 ? (w, h, 96) : null;
                 }
+                case ImageFormat.Tiff when d.Length >= 8:
+                    return ReadTiffSize(d);
                 case ImageFormat.Jpeg:
                     for (int at = 2; at + 9 < d.Length;)
                     {
@@ -64,6 +66,39 @@ public sealed class ImageData(byte[] data, string? name = null)
         }
         catch (IndexOutOfRangeException) { }
         return null;
+    }
+
+    /// <summary>The size of a TIFF from its first directory: width, length and the horizontal resolution (inches or centimeters; 96 when missing).</summary>
+    private static (int, int, double)? ReadTiffSize(byte[] d)
+    {
+        bool le = d[0] == 'I';
+        ushort U16(long p) => le ? (ushort)(d[p] | d[p + 1] << 8) : (ushort)(d[p] << 8 | d[p + 1]);
+        uint U32(long p) => le ? (uint)(d[p] | d[p + 1] << 8 | d[p + 2] << 16 | d[p + 3] << 24) : (uint)(d[p] << 24 | d[p + 1] << 16 | d[p + 2] << 8 | d[p + 3]);
+        long ifd = U32(4);
+        int count = U16(ifd);
+        uint width = 0, height = 0;
+        double dpi = 96, resolution = 0;
+        int unit = 2;
+        for (int i = 0; i < count; i++)
+        {
+            long e = ifd + 2 + i * 12L;
+            int tag = U16(e), type = U16(e + 2);
+            switch (tag)
+            {
+                case 256: width = type == 3 ? U16(e + 8) : U32(e + 8); break;
+                case 257: height = type == 3 ? U16(e + 8) : U32(e + 8); break;
+                case 296: unit = U16(e + 8); break;
+                case 282 when type == 5:
+                {
+                    long at = U32(e + 8);
+                    double denominator = U32(at + 4);
+                    if (denominator > 0) resolution = U32(at) / denominator;
+                    break;
+                }
+            }
+        }
+        if (resolution > 0) dpi = unit == 3 ? resolution * 2.54 : unit == 2 ? resolution : 96;
+        return width > 0 && height > 0 ? ((int)width, (int)height, Math.Clamp(dpi, 24, 1200)) : null;
     }
 
     public static ImageFormat Detect(ReadOnlySpan<byte> data)

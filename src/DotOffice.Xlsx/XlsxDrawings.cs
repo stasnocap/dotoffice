@@ -215,14 +215,20 @@ internal static class XlsxDrawings
     private static ShapeGeometry? GeometryOf(string? preset) => preset switch
     {
         null or "rect" or "flowChartProcess" or "snip1Rect" or "snip2SameRect" => ShapeGeometry.Rectangle,
-        "roundRect" => ShapeGeometry.RoundRectangle,
+        "roundRect" or "flowChartAlternateProcess" or "flowChartTerminator" => ShapeGeometry.RoundRectangle,
         "ellipse" or "flowChartConnector" => ShapeGeometry.Ellipse,
         "triangle" => ShapeGeometry.Triangle,
         "rtTriangle" => ShapeGeometry.RightTriangle,
         "diamond" or "flowChartDecision" => ShapeGeometry.Diamond,
-        "parallelogram" => ShapeGeometry.Parallelogram,
+        "parallelogram" or "flowChartInputOutput" => ShapeGeometry.Parallelogram,
         "trapezoid" => ShapeGeometry.Trapezoid,
-        "hexagon" => ShapeGeometry.Hexagon,
+        "hexagon" or "flowChartPreparation" => ShapeGeometry.Hexagon,
+        "pentagon" => ShapeGeometry.Pentagon,
+        "octagon" => ShapeGeometry.Octagon,
+        "plus" => ShapeGeometry.Plus,
+        "chevron" => ShapeGeometry.Chevron,
+        "homePlate" => ShapeGeometry.HomePlate,
+        "star5" => ShapeGeometry.Star5,
         "rightArrow" => ShapeGeometry.RightArrow,
         "leftArrow" => ShapeGeometry.LeftArrow,
         "upArrow" => ShapeGeometry.UpArrow,
@@ -230,6 +236,14 @@ internal static class XlsxDrawings
         "line" or "straightConnector1" => ShapeGeometry.Line,
         _ => null,
     };
+
+    /// <summary>A preset's adjust value (<c>val</c> over 100000) from its <c>avLst</c>, limited to a range; the fallback when it has none.</summary>
+    private static double AdjustOf(XElement? prstGeom, string name, double fallback, double min = double.NegativeInfinity, double max = double.PositiveInfinity)
+    {
+        var gd = prstGeom?.Elements().FirstOrDefault(e => e.Name.LocalName == "avLst")?.Elements().FirstOrDefault(e => (string?)e.Attribute("name") == name);
+        return gd?.Attribute("fmla")?.Value is { } f && f.StartsWith("val ", StringComparison.Ordinal) && double.TryParse(f.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
+            ? Math.Clamp(v / 100_000.0, min, max) : fallback;
+    }
 
     private static void ReadShape(State state, AnchorFrame anchor, FrameFraction frame, XElement shape)
     {
@@ -339,6 +353,9 @@ internal static class XlsxDrawings
             FlipH = Flag(xfrm, "flipH"), FlipV = Flag(xfrm, "flipV"),
             ZOrder = state.ZOrder++,
             Geometry = geometry.Value,
+            CornerRadius = preset == "flowChartTerminator" ? 0.5 : preset == "flowChartAlternateProcess" ? 1.0 / 6 : AdjustOf(Child(spPr, "prstGeom"), "adj", 1.0 / 6, 0, 0.5),
+            Adjust1 = geometry.Value is ShapeGeometry.RoundRectangle or ShapeGeometry.Rectangle ? null : AdjustOf(Child(spPr, "prstGeom"), "adj1", double.NaN) is var a1 && !double.IsNaN(a1) ? a1 : AdjustOf(Child(spPr, "prstGeom"), "adj", double.NaN) is var a0 && !double.IsNaN(a0) ? a0 : null,
+            Adjust2 = geometry.Value is ShapeGeometry.RoundRectangle or ShapeGeometry.Rectangle ? null : AdjustOf(Child(spPr, "prstGeom"), "adj2", double.NaN) is var a2 && !double.IsNaN(a2) ? a2 : null,
             Fill = fill,
             FillGradient = gradient,
             FillPattern = pattern,

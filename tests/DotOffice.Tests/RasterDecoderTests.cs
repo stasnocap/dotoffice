@@ -255,6 +255,17 @@ public class RasterDecoderTests
     }
 
     [Fact]
+    public void A_tiffs_pixel_size_and_resolution_are_read_from_its_first_directory()
+    {
+        Assert.Equal((4, 2, 200.0), new DotOffice.Core.ImageData(TestAssets.Bytes("dpi-200.tif"), "a").PixelSize);        // pixels per inch
+        var perCentimeter = new DotOffice.Core.ImageData(TestAssets.Bytes("dpcm-100.tif"), "b").PixelSize!.Value;        // 100 pixels per centimeter
+        Assert.Equal((4, 2), (perCentimeter.Width, perCentimeter.Height));
+        Assert.Equal(254, perCentimeter.Dpi, 6);
+        Assert.Equal((40, 48, 96.0), new DotOffice.Core.ImageData(TestAssets.Bytes("three-strips-jpeg.tif"), "c").PixelSize);  // no resolution: 96
+        Assert.Null(new DotOffice.Core.ImageData([(byte)'I', (byte)'I', 42, 0, 8, 0, 0, 0], "d").PixelSize);                 // a directory that is cut off
+    }
+
+    [Fact]
     public void Tiff_rgb_gray_and_palette()
     {
         var rgb = RasterDecoders.DecodeTiff(Tiff(2, 1, 2, 3, [1, 2, 3, 4, 5, 6]));

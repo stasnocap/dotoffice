@@ -111,11 +111,11 @@ public class XlsxShapeTests
     [Fact]
     public void Unknown_geometry_is_drawn_as_a_rectangle_with_one_approximation_warning_and_custom_geometry_is_not_drawn()
     {
-        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp("<a:prstGeom prst=\"star5\"/>" + SolidRed)) + OneCellAnchor(2, 2, 10, 10, Sp("<a:prstGeom prst=\"wave\"/>" + SolidRed)) +
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp("<a:prstGeom prst=\"cloud\"/>" + SolidRed)) + OneCellAnchor(2, 2, 10, 10, Sp("<a:prstGeom prst=\"wave\"/>" + SolidRed)) +
                                      OneCellAnchor(4, 4, 10, 10, CustomShape));
         Assert.Equal([ShapeGeometry.Rectangle, ShapeGeometry.Rectangle], sheet.Shapes.Select(s => s.Geometry));
         Assert.Equal(["xlsx.drawing", "xlsx.drawing-approximated"], warnings.Warnings.Select(w => w.Code).OrderBy(c => c));
-        Assert.Contains("star5", warnings.Warnings.Single(w => w.Code == "xlsx.drawing-approximated").Message);
+        Assert.Contains("cloud", warnings.Warnings.Single(w => w.Code == "xlsx.drawing-approximated").Message);
     }
 
     [Fact]
@@ -371,6 +371,39 @@ public class XlsxShapeTests
         var (tiny, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile sx=\"10000\" sy=\"10000\"/></a:blipFill>")));
         Assert.Null(Assert.Single(tiny.Shapes).FillTile);
         Assert.Contains("tiled picture fills of this picture are stretched", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+    }
+
+    [Theory]
+    [InlineData("pentagon", ShapeGeometry.Pentagon)]
+    [InlineData("octagon", ShapeGeometry.Octagon)]
+    [InlineData("plus", ShapeGeometry.Plus)]
+    [InlineData("chevron", ShapeGeometry.Chevron)]
+    [InlineData("homePlate", ShapeGeometry.HomePlate)]
+    [InlineData("star5", ShapeGeometry.Star5)]
+    [InlineData("flowChartPreparation", ShapeGeometry.Hexagon)]
+    [InlineData("flowChartInputOutput", ShapeGeometry.Parallelogram)]
+    [InlineData("flowChartAlternateProcess", ShapeGeometry.RoundRectangle)]
+    [InlineData("flowChartTerminator", ShapeGeometry.RoundRectangle)]
+    public void More_presets_have_their_own_geometry(string preset, ShapeGeometry expected)
+    {
+        var (sheet, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp($"<a:prstGeom prst=\"{preset}\"/>" + SolidRed)));
+        Assert.Equal(expected, Assert.Single(sheet.Shapes).Geometry);
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code == "xlsx.drawing");
+    }
+
+    [Fact]
+    public void Adjust_values_of_the_presets_are_read_as_fractions()
+    {
+        string Geometry(string preset, string adjust) => $"<a:prstGeom prst=\"{preset}\"><a:avLst>{adjust}</a:avLst></a:prstGeom>" + SolidRed;
+        Assert.Equal(0.5, ReadOne(Sp(Geometry("flowChartTerminator", ""))).CornerRadius);
+        Assert.Equal(0.3, ReadOne(Sp(Geometry("roundRect", "<a:gd name=\"adj\" fmla=\"val 30000\"/>"))).CornerRadius);
+        Assert.Equal(0.5, ReadOne(Sp(Geometry("roundRect", "<a:gd name=\"adj\" fmla=\"val 90000\"/>"))).CornerRadius); // limited to a half
+        Assert.Equal(1.0 / 6, ReadOne(Sp(Geometry("roundRect", ""))).CornerRadius);
+        var arrow = ReadOne(Sp(Geometry("rightArrow", "<a:gd name=\"adj1\" fmla=\"val 30000\"/><a:gd name=\"adj2\" fmla=\"val 80000\"/>")));
+        Assert.Equal((0.3, 0.8), (arrow.Adjust1!.Value, arrow.Adjust2!.Value));
+        var chevron = ReadOne(Sp(Geometry("chevron", "<a:gd name=\"adj\" fmla=\"val 20000\"/>")));
+        Assert.Equal((0.2, null), (chevron.Adjust1, chevron.Adjust2));
+        Assert.Null(ReadOne(Sp(Geometry("octagon", ""))).Adjust1);
     }
 
     [Fact]

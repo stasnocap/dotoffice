@@ -65,6 +65,8 @@ public enum ShapeGeometry
 {
     Rectangle, RoundRectangle, Ellipse, Triangle, RightTriangle, Diamond, Parallelogram, Trapezoid, Hexagon,
     RightArrow, LeftArrow, UpArrow, DownArrow,
+    /// <summary>A regular pentagon, an octagon, a plus sign, a chevron, a pentagon arrow (<c>homePlate</c>) and a five-pointed star.</summary>
+    Pentagon, Octagon, Plus, Chevron, HomePlate, Star5,
     /// <summary>A straight line from the top-left to the bottom-right of the frame (flips choose the other diagonal).</summary>
     Line,
     /// <summary>Custom geometry: see <see cref="SheetShape.Paths"/>.</summary>
@@ -126,6 +128,15 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>Corner radius of rounded rectangles as a fraction of the shorter side (0.1667 by default in Excel).</summary>
     public double CornerRadius { get; init; } = 1.0 / 6;
+
+    /// <summary>
+    /// The shape's first and second adjust values as fractions (the preset's <c>adj</c> or <c>adj1</c> over 100000, and <c>adj2</c>); null
+    /// keeps the preset's default. What they mean depends on the geometry: the slant of a parallelogram or trapezoid, the depth of a chevron's
+    /// or pentagon arrow's point, the cut corner of an octagon, the arm width of a plus, and the shaft width and head length of a block arrow.
+    /// </summary>
+    public double? Adjust1 { get; init; }
+
+    public double? Adjust2 { get; init; }
 
     /// <summary>The fill; null means none.</summary>
     public Color? Fill { get; init; }

@@ -425,14 +425,22 @@ internal static class ShowcaseXlsx
             OneCell(1, 19, 0, 0, 90, 80, Custom("Star", star, Fill("FFC000"), Line("7F6000", 1.5))) +
             OneCell(3, 19, 0, 0, 90, 80, Custom("Heart", heart, Gradient("FF7C80", "C00000", "<a:lin ang=\"5400000\"/>"), Line("7F0000", 1))) +
             OneCell(5, 19, 0, 0, 110, 60, Custom("Wave", wave, "", Line("2F5597", 2.5).Replace("</a:ln>", End("", "triangle") + "</a:ln>"))) +
-            OneCell(7, 19, 0, 0, 100, 70, Custom("Star with text", star, Fill("DDEBF7"), Line("2F5597", 1.5), Text("Custom", "1F3864", bold: true)));
+            OneCell(7, 19, 0, 0, 100, 70, Custom("Star with text", star, Fill("DDEBF7"), Line("2F5597", 1.5), Text("Custom", "1F3864", bold: true))) +
+            OneCell(1, 26, 0, 0, 90, 60, Shape("pentagon", "Pentagon", "2F5597", Line("1F3864"), Text("Pentagon", "FFFFFF", 900, bold: true))) +
+            OneCell(3, 26, 0, 0, 90, 60, Shape("octagon", "Octagon", "C00000", Line("7F0000"), Text("Octagon", "FFFFFF", 900, bold: true))) +
+            OneCell(5, 26, 0, 0, 90, 60, Shape("plus", "Plus", "70AD47", Line("375623"), Text("Plus", "FFFFFF", 900, bold: true))) +
+            OneCell(7, 26, 0, 0, 110, 60, Shape("chevron", "Chevron", "ED7D31", Line("843C0C"), Text("Chevron", "FFFFFF", 900, bold: true))) +
+            OneCell(1, 32, 0, 0, 110, 60, Shape("homePlate", "Pentagon arrow", "7030A0", Line("3B1A55"), Text("Pentagon arrow", "FFFFFF", 900, bold: true))) +
+            OneCell(3, 32, 0, 0, 90, 80, Shape("star5", "Star", "FFC000", Line("7F6000"), Text("Star", "000000", 900, bold: true))) +
+            OneCell(5, 32, 0, 0, 100, 60, Shape("roundRect", "Round corners 40%", "5B9BD5", Line("1F4E79"), Text("Round 40%", "FFFFFF", 900, bold: true)).Replace("<a:avLst/>", "<a:avLst><a:gd name=\"adj\" fmla=\"val 40000\"/></a:avLst>")) +
+            OneCell(7, 32, 0, 0, 120, 60, Shape("rightArrow", "Slim arrow", "548235", Line("375623"), Text("Slim arrow", "FFFFFF", 900, bold: true)).Replace("<a:avLst/>", "<a:avLst><a:gd name=\"adj1\" fmla=\"val 30000\"/><a:gd name=\"adj2\" fmla=\"val 80000\"/></a:avLst>"));
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
     }
 
     private static string ShapePathsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
-        Row(1, Str("A1", "Shape paths: gradients, arrowheads, bent connectors, custom geometry", Bold)) + Row(3, Str("A3", "Gradient fills:")) + Row(9, Str("A9", "Arrowheads:")) + Row(13, Str("A13", "Connectors:")) + Row(19, Str("A19", "Custom geometry:")),
+        Row(1, Str("A1", "Shape paths: gradients, arrowheads, bent connectors, custom geometry", Bold)) + Row(3, Str("A3", "Gradient fills:")) + Row(9, Str("A9", "Arrowheads:")) + Row(13, Str("A13", "Connectors:")) + Row(19, Str("A19", "Custom geometry:")) + Row(26, Str("A26", "More presets and adjust values:")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     private static string Pattern(string preset, string foreground, string background) =>

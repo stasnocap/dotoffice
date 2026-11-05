@@ -206,12 +206,12 @@ public sealed partial class SheetLayoutEngine
             case ShapeGeometry.Diamond: return [(w / 2, 0), (w, h / 2), (w / 2, h), (0, h / 2)];
             case ShapeGeometry.Parallelogram:
             {
-                double o = Math.Min(m * 0.25, w / 2);
+                double o = Math.Clamp(m * (shape.Adjust1 ?? 0.25), 0, w / 2);
                 return [(o, 0), (w, 0), (w - o, h), (0, h)];
             }
             case ShapeGeometry.Trapezoid:
             {
-                double o = Math.Min(m * 0.25, w / 2);
+                double o = Math.Clamp(m * (shape.Adjust1 ?? 0.25), 0, w / 2);
                 return [(o, 0), (w - o, 0), (w, h), (0, h)];
             }
             case ShapeGeometry.Hexagon:
@@ -219,21 +219,55 @@ public sealed partial class SheetLayoutEngine
                 double o = Math.Min(m * 0.25, w / 2);
                 return [(o, 0), (w - o, 0), (w, h / 2), (w - o, h), (o, h), (0, h / 2)];
             }
+            case ShapeGeometry.Pentagon:
+                return [(w / 2, 0), (w, h * 0.382), (w * 0.809, h), (w * 0.191, h), (0, h * 0.382)];
+            case ShapeGeometry.Octagon:
+            {
+                double a = Math.Clamp(m * (shape.Adjust1 ?? 0.29289), 0, m / 2);
+                return [(a, 0), (w - a, 0), (w, a), (w, h - a), (w - a, h), (a, h), (0, h - a), (0, a)];
+            }
+            case ShapeGeometry.Plus:
+            {
+                double a = Math.Clamp(m * (shape.Adjust1 ?? 0.25), 0, m / 2);
+                return [(a, 0), (w - a, 0), (w - a, a), (w, a), (w, h - a), (w - a, h - a), (w - a, h), (a, h), (a, h - a), (0, h - a), (0, a), (a, a)];
+            }
+            case ShapeGeometry.Chevron:
+            {
+                double a = Math.Clamp(m * (shape.Adjust1 ?? 0.5), 0, w);
+                return [(0, 0), (w - a, 0), (w, h / 2), (w - a, h), (0, h), (a, h / 2)];
+            }
+            case ShapeGeometry.HomePlate:
+            {
+                double a = Math.Clamp(m * (shape.Adjust1 ?? 0.5), 0, w);
+                return [(0, 0), (w - a, 0), (w, h / 2), (w - a, h), (0, h)];
+            }
+            case ShapeGeometry.Star5:
+            {
+                // Five points on the unit circle with the notches between them at 0.382 of its radius (the regular star), stretched to the frame.
+                var points = new List<(double X, double Y)>();
+                double halfWidth = Math.Cos(18 * Math.PI / 180), depth = 1 + Math.Cos(36 * Math.PI / 180); // the points' spread across and down
+                for (int k = 0; k < 10; k++)
+                {
+                    double angle = (-90 + 36 * k) * Math.PI / 180, radius = k % 2 == 0 ? 1 : 0.382;
+                    points.Add(((radius * Math.Cos(angle) + halfWidth) / (2 * halfWidth) * w, (radius * Math.Sin(angle) + 1) / depth * h));
+                }
+                return points;
+            }
             case ShapeGeometry.RightArrow or ShapeGeometry.LeftArrow:
             {
-                double head = Math.Min(m * 0.5, w);
+                double head = Math.Min(m * (shape.Adjust2 ?? 0.5), w), half = Math.Clamp(shape.Adjust1 ?? 0.5, 0, 1) / 2;
                 var points = new List<(double X, double Y)>
                 {
-                    (0, h * 0.25), (w - head, h * 0.25), (w - head, 0), (w, h / 2), (w - head, h), (w - head, h * 0.75), (0, h * 0.75),
+                    (0, h * (0.5 - half)), (w - head, h * (0.5 - half)), (w - head, 0), (w, h / 2), (w - head, h), (w - head, h * (0.5 + half)), (0, h * (0.5 + half)),
                 };
                 return shape.Geometry == ShapeGeometry.RightArrow ? points : points.Select(p => (w - p.X, p.Y)).ToList();
             }
             case ShapeGeometry.UpArrow or ShapeGeometry.DownArrow:
             {
-                double head = Math.Min(m * 0.5, h);
+                double head = Math.Min(m * (shape.Adjust2 ?? 0.5), h), half = Math.Clamp(shape.Adjust1 ?? 0.5, 0, 1) / 2;
                 var points = new List<(double X, double Y)>
                 {
-                    (w * 0.25, h), (w * 0.25, head), (0, head), (w / 2, 0), (w, head), (w * 0.75, head), (w * 0.75, h),
+                    (w * (0.5 - half), h), (w * (0.5 - half), head), (0, head), (w / 2, 0), (w, head), (w * (0.5 + half), head), (w * (0.5 + half), h),
                 };
                 return shape.Geometry == ShapeGeometry.UpArrow ? points : points.Select(p => (p.X, h - p.Y)).ToList();
             }
