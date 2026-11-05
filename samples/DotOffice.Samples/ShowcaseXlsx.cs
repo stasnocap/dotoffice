@@ -38,6 +38,7 @@ internal static class ShowcaseXlsx
             ("Pictures", PicturesSheet(), "visible"),
             ("Shapes", ShapesSheet(), "visible"),
             ("Charts", ChartsSheet(), "visible"),
+            ("More charts", MoreChartsSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
@@ -67,6 +68,7 @@ internal static class ShowcaseXlsx
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
+        WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
@@ -389,7 +391,7 @@ internal static class ShowcaseXlsx
         const string NoMarker = "<c:marker><c:symbol val=\"none\"/></c:marker>";
         var line = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true, NoMarker) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
         var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
-        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/></c:scatterChart>";
+        var stock = "<c:stockChart/>";
         string[] charts =
         [
             ChartSpace("Clustered columns", Bars("col", "clustered", 3, true, axes: Axes("Quarter", "Units")), "b"),
@@ -398,15 +400,20 @@ internal static class ShowcaseXlsx
             ChartSpace("Lines", line, "b"),
             ChartSpace("Pie shares", pie),
             ChartSpace("100 % stacked", Bars("col", "percentStacked", 3, true)),
-            ChartSpace("Scatter", scatter),
+            ChartSpace("Stock", stock),
         ];
         (int C0, int R0, int C1, int R1)[] places = [(0, 11, 3, 24), (3, 11, 6, 24), (0, 25, 3, 38), (3, 25, 6, 38), (0, 39, 3, 52), (3, 39, 6, 52), (0, 53, 3, 60)];
+        WriteChartParts(zip, sheetNumber, charts, places, "chart");
+    }
+
+    private static void WriteChartParts(ZipArchive zip, int sheetNumber, string[] charts, (int C0, int R0, int C1, int R1)[] places, string prefix)
+    {
         var anchors = new StringBuilder();
         var rels = new StringBuilder();
         for (int i = 0; i < charts.Length; i++)
         {
-            Entry(zip, $"xl/charts/chart{i + 1}.xml", charts[i]);
-            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}chart\" Target=\"../charts/chart{i + 1}.xml\"/>");
+            Entry(zip, $"xl/charts/{prefix}{sheetNumber}_{i + 1}.xml", charts[i]);
+            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}chart\" Target=\"../charts/{prefix}{sheetNumber}_{i + 1}.xml\"/>");
             var (c0, r0, c1, r1) = places[i];
             anchors.Append(TwoCell(c0, r0, c1, r1,
                 "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"" + (i + 2) + "\" name=\"Chart " + (i + 1) + "\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>" +
@@ -425,10 +432,49 @@ internal static class ShowcaseXlsx
         rows.Append(Row(3, Str("A3", "Quarter", Header) + Str("B3", SeriesNames[0], Header) + Str("C3", SeriesNames[1], Header) + Str("D3", SeriesNames[2], Header)));
         for (int k = 0; k < 6; k++)
             rows.Append(Row(4 + k, Str($"A{4 + k}", Quarters[k]) + Num($"B{4 + k}", ChartData[0][k]) + Num($"C{4 + k}", ChartData[1][k]) + Num($"D{4 + k}", ChartData[2][k])));
-        rows.Append(Row(11, Str("A11", "The scatter chart at the bottom is not supported and is reported.")));
+        rows.Append(Row(11, Str("A11", "The stock chart at the bottom is not supported and is reported.")));
         return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>", rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
     }
+
+    private static string XySeries(int i, string xs, string ys, string extra = "", string sizes = "")
+    {
+        string Cache(double[] v) => "<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"" + v.Length + "\"/>" + string.Concat(v.Select((d, k) => $"<c:pt idx=\"{k}\"><c:v>{d}</c:v></c:pt>")) + "</c:numCache>";
+        double[] x = ChartData[0], y = ChartData[1], z = ChartData[2];
+        return $"<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/><c:tx><c:v>{SeriesNames[i]}</c:v></c:tx>{extra}<c:xVal><c:numRef><c:f>{xs}</c:f>{Cache(x)}</c:numRef></c:xVal>" +
+               $"<c:yVal><c:numRef><c:f>{ys}</c:f>{Cache(y)}</c:numRef></c:yVal>{(sizes.Length == 0 ? "" : $"<c:bubbleSize><c:numRef><c:f>{sizes}</c:f>{Cache(z)}</c:numRef></c:bubbleSize>")}</c:ser>";
+    }
+
+    private const string XyAxes =
+        "<c:valAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorGridlines/><c:crossAx val=\"2\"/></c:valAx>" +
+        "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/><c:crossAx val=\"1\"/></c:valAx>";
+
+    private static void WriteMoreCharts(ZipArchive zip, int sheetNumber)
+    {
+        const string MarkersOnly = "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>";
+        const string Percent = "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls>";
+        var area = "<c:areaChart><c:grouping val=\"stacked\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true) + ChartSeries(2, true) + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:areaChart>" +
+                   Axes().Replace("<c:crossAx val=\"1\"/></c:valAx>", "<c:crossAx val=\"1\"/><c:crossBetween val=\"midCat\"/></c:valAx>");
+        var doughnut = "<c:doughnutChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", Percent + "</c:ser>") + "<c:firstSliceAng val=\"0\"/><c:holeSize val=\"55\"/></c:doughnutChart>";
+        var rings = "<c:doughnutChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true) + ChartSeries(1, true) + "<c:firstSliceAng val=\"0\"/><c:holeSize val=\"40\"/></c:doughnutChart>";
+        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" + XySeries(0, "Charts!$B$4:$B$9", "Charts!$C$4:$C$9") + XySeries(1, "Charts!$B$4:$B$9", "Charts!$D$4:$D$9", MarkersOnly) +
+                      "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" + XyAxes;
+        var bubble = "<c:bubbleChart><c:varyColors val=\"0\"/>" + XySeries(0, "Charts!$B$4:$B$9", "Charts!$C$4:$C$9", "", "Charts!$D$4:$D$9") + "<c:bubbleScale val=\"100\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:bubbleChart>" + XyAxes;
+        string RadarAxes() => Axes();
+        var radar = "<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true) + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>" + RadarAxes();
+        var filled = "<c:radarChart><c:radarStyle val=\"filled\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>" + RadarAxes();
+        string[] charts =
+        [
+            ChartSpace("Stacked areas", area, "b"), ChartSpace("Doughnut shares", doughnut), ChartSpace("Rings", rings, "b"),
+            ChartSpace("Scatter", scatter, "b"), ChartSpace("Bubbles", bubble, ""), ChartSpace("Radar", radar, "b"), ChartSpace("Filled radar", filled, ""),
+        ];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43), (0, 44, 3, 57)];
+        WriteChartParts(zip, sheetNumber, charts, places, "more");
+    }
+
+    private static string MoreChartsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "More charts: area, doughnut, scatter, bubble and radar (data on the Charts sheet)", Bold)),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ comments
 

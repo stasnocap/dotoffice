@@ -1,0 +1,164 @@
+using DotOffice.Core;
+
+namespace DotOffice.Layout;
+
+public sealed partial class SheetLayoutEngine
+{
+    // ------------------------------------------------------------------ scatter and bubble
+
+    /// <summary>Draws a scatter or bubble chart: two value axes, then the joined points or the bubbles of each series.</summary>
+    private void EmitScatter(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
+    {
+        double fontSize = chart.FontSize;
+        if (chart.CategoryAxisTitle is { Length: > 0 } xTitle)
+        {
+            PlaceText(xTitle, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
+            bottom -= fontSize + 8;
+        }
+        if (chart.ValueAxisTitle is { Length: > 0 } yTitle)
+        {
+            PlaceText(yTitle, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
+            left += fontSize + 8;
+        }
+        double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
+        double lastWidth = chart.ShowCategoryAxis ? chart.XTicks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
+        double labelHeight = fontSize * 1.25;
+        double plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0) + 2, plotRight = right - Math.Max(4, lastWidth / 2);
+        double plotTop = top + labelHeight / 2, plotBottom = bottom - (chart.ShowCategoryAxis ? labelHeight + 5 : 0);
+        if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
+        double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
+        double xRange = chart.XMax - chart.XMin, yRange = chart.ValueMax - chart.ValueMin;
+        if (xRange <= 0) xRange = 1;
+        if (yRange <= 0) yRange = 1;
+        double X(double v) => plotLeft + plotWidth * (Math.Clamp(v, chart.XMin, chart.XMax) - chart.XMin) / xRange;
+        double Y(double v) => plotBottom - plotHeight * (Math.Clamp(v, chart.ValueMin, chart.ValueMax) - chart.ValueMin) / yRange;
+
+        foreach (var tick in chart.Ticks)
+        {
+            double ty = Y(tick.Value);
+            if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
+            if (chart.ShowValueAxis) PlaceText(tick.Label, font, plotLeft - 5, ty, Anchor.End, true, 0, items);
+        }
+        foreach (var tick in chart.XTicks)
+        {
+            double tx = X(tick.Value);
+            if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
+            if (chart.ShowCategoryAxis) PlaceText(tick.Label, font, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
+        }
+        if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), 0.75, ChartGrid));
+        if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, 0.75, ChartGrid));
+
+        var labels = new List<(string Text, double X, double Y, Color? Fill)>();
+        if (chart.Kind == ChartKind.Bubble)
+        {
+            // Bubble area follows the size; the largest bubble is a quarter of the plot's shorter side. Larger bubbles go underneath.
+            double maxSize = chart.Series.SelectMany(s => s.Sizes ?? []).Where(v => v is > 0).Select(v => v!.Value).DefaultIfEmpty(0).Max();
+            double maxDiameter = Math.Min(plotWidth, plotHeight) * 0.25 * chart.BubbleScale / 100;
+            var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label)>();
+            foreach (var s in chart.Series)
+                for (int i = 0; i < s.Values.Count; i++)
+                    if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x && s.Sizes is { } sizes && i < sizes.Count && sizes[i] is > 0 and var size)
+                        bubbles.Add((size, X(x), Y(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null));
+            foreach (var b in bubbles.OrderByDescending(b => b.Size))
+            {
+                double d = maxSize > 0 ? maxDiameter * Math.Sqrt(b.Size / maxSize) : 0;
+                if (d < 1) continue;
+                items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
+                items.Add(new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
+                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color));
+            }
+        }
+        else
+        {
+            foreach (var s in chart.Series)
+            {
+                var points = new (double X, double Y)?[s.Values.Count];
+                for (int i = 0; i < s.Values.Count; i++)
+                    if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x)
+                    {
+                        points[i] = (X(x), Y(y));
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], X(x), Y(y) - 8, null));
+                    }
+                if (s.Line)
+                    for (int i = 0; i + 1 < points.Length; i++)
+                        if (points[i] is { } a && points[i + 1] is { } b) items.Add(new LineItem(a.X, a.Y, b.X, b.Y, 2.25, s.Color));
+                if (s.Marker || !s.Line)
+                    foreach (var p in points)
+                        if (p is { } q)
+                        {
+                            items.Add(new EllipseItem(q.X - 3.2, q.Y - 3.2, 6.4, 6.4, Color.White));
+                            items.Add(new EllipseItem(q.X - 2.5, q.Y - 2.5, 5, 5, s.Color));
+                        }
+            }
+        }
+        foreach (var (text, lx, ly, fill) in labels)
+            PlaceText(text, font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, lx, ly, Anchor.Middle, true, 0, items);
+    }
+
+    // ------------------------------------------------------------------ radar
+
+    /// <summary>Draws a radar chart: a web of value rings, one spoke per category, and a closed polygon per series.</summary>
+    private void EmitRadar(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
+    {
+        int n = Math.Max(chart.Categories.Count, 3);
+        double labelHeight = chart.FontSize * 1.25;
+        double labelWidth = chart.Categories.Select(c => MeasureChartText(c, font)).DefaultIfEmpty(0).Max();
+        double radius = Math.Min((right - left) / 2 - labelWidth - 6, (bottom - top) / 2 - labelHeight - 4);
+        if (radius < 15) return;
+        double cx = (left + right) / 2, cy = (top + bottom) / 2;
+        double range = chart.ValueMax - chart.ValueMin;
+        if (range <= 0) range = 1;
+        (double X, double Y) Point(int k, double r)
+        {
+            double a = (-90 + 360.0 * k / n) * Math.PI / 180;
+            return (cx + r * Math.Cos(a), cy + r * Math.Sin(a));
+        }
+        double Radius(double v) => radius * (Math.Clamp(v, chart.ValueMin, chart.ValueMax) - chart.ValueMin) / range;
+
+        double lastLabel = -1e9;
+        foreach (var tick in chart.Ticks)
+        {
+            double r = Radius(tick.Value);
+            if (r <= 0) continue;
+            if (chart.MajorGridlines)
+                for (int k = 0; k < n; k++)
+                {
+                    var a = Point(k, r);
+                    var b = Point((k + 1) % n, r);
+                    items.Add(new LineItem(a.X, a.Y, b.X, b.Y, 0.75, ChartGrid));
+                }
+            if (chart.ShowValueAxis && r - lastLabel >= labelHeight)
+            {
+                PlaceText(tick.Label, font, cx - 4, cy - r, Anchor.End, true, 0, items);
+                lastLabel = r;
+            }
+        }
+        for (int k = 0; k < n; k++)
+        {
+            var end = Point(k, radius);
+            items.Add(new LineItem(cx, cy, end.X, end.Y, 0.75, ChartGrid));
+            if (!chart.ShowCategoryAxis || k >= chart.Categories.Count) continue;
+            var at = Point(k, radius + 6);
+            double cos = (at.X - cx) / (radius + 6), sin = (at.Y - cy) / (radius + 6);
+            var anchor = cos > 0.3 ? Anchor.Start : cos < -0.3 ? Anchor.End : Anchor.Middle;
+            PlaceText(chart.Categories[k], font, at.X, at.Y + sin * labelHeight / 2, anchor, true, 0, items);
+        }
+
+        foreach (var s in chart.Series)
+        {
+            var polygon = new List<(double X, double Y)>();
+            for (int k = 0; k < n; k++)
+                polygon.Add(Point(k, k < s.Values.Count && s.Values[k] is { } v ? Radius(v) : 0));
+            if (chart.Filled) items.Add(new PolygonItem(polygon, s.Color.Blend(Color.White, 0.35)));
+            if (s.Line || chart.Filled)
+                for (int k = 0; k < n; k++)
+                    items.Add(new LineItem(polygon[k].X, polygon[k].Y, polygon[(k + 1) % n].X, polygon[(k + 1) % n].Y, 2.25, s.Color));
+            if (s.Marker)
+                foreach (var p in polygon)
+                {
+                    items.Add(new EllipseItem(p.X - 3.2, p.Y - 3.2, 6.4, 6.4, Color.White));
+                    items.Add(new EllipseItem(p.X - 2.5, p.Y - 2.5, 5, 5, s.Color));
+                }
+        }
+    }
+}

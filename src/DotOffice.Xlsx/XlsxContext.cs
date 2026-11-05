@@ -293,7 +293,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                 }
                 if (skipped.Shapes > 0) parts.Add(skipped.Shapes == 1 ? "a shape with custom geometry" : $"{skipped.Shapes} shapes with custom geometry");
                 if (skipped.Other > 0) parts.Add("other drawing objects");
-                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures, shapes and column, bar, line and pie charts are).");
+                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures, shapes and column, bar, line, area, pie, doughnut, scatter, bubble and radar charts are).");
             }
             if (skipped.Notes.Count > 0)
                 WarnOnce(sheet, "xlsx.drawing-approximated", $"has drawing objects that are only approximated: {string.Join("; ", skipped.Notes)}.");

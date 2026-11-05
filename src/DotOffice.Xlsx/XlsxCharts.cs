@@ -6,13 +6,13 @@ using static DotOffice.Xlsx.DrawingMl;
 namespace DotOffice.Xlsx;
 
 /// <summary>
-/// Reads a chart part (<c>c:chartSpace</c>) into a <see cref="SheetChart"/>: column, bar, line and pie charts. The data comes from the
+/// Reads a chart part (<c>c:chartSpace</c>) into a <see cref="SheetChart"/>: column, bar, line, area, pie, doughnut, scatter, bubble and radar charts. The data comes from the
 /// chart's cached values when it has them and from the cells it refers to otherwise; the axis scale and the labels are computed here, so
 /// that the layout only has to draw.
 /// </summary>
 internal static class XlsxCharts
 {
-    private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart"];
+    private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart", "scatterChart", "bubbleChart", "radarChart"];
 
     /// <summary>What a chart type is called in warnings.</summary>
     private static string Describe(string element) => element switch
@@ -37,7 +37,7 @@ internal static class XlsxCharts
         if (!Supported.Contains(first.Name.LocalName)) return (Describe(first.Name.LocalName), null);
         if (groups.Count > 1)
             notes.Add($"a combination chart draws only its first chart type ({Describe(first.Name.LocalName)}) and not the {string.Join(" and ", groups.Skip(1).Select(g => Describe(g.Name.LocalName)))} part");
-        if (plot.Elements().Count(e => e.Name.LocalName == "valAx") > 1) notes.Add("secondary axes are ignored");
+        if (first.Name.LocalName is not ("scatterChart" or "bubbleChart") && plot.Elements().Count(e => e.Name.LocalName == "valAx") > 1) notes.Add("secondary axes are ignored");
         return (null, sheets => Build(context, owner, sheets, space, plot, first, template));
     }
 
@@ -53,8 +53,14 @@ internal static class XlsxCharts
             "percentStacked" => ChartGrouping.PercentStacked,
             _ => ChartGrouping.Clustered,
         };
-        var kind = type switch { "pieChart" => ChartKind.Pie, "lineChart" => ChartKind.Line, _ => barDirection == "bar" ? ChartKind.Bar : ChartKind.Column };
-        if (kind == ChartKind.Pie) grouping = ChartGrouping.Clustered;
+        var kind = type switch
+        {
+            "pieChart" => ChartKind.Pie, "doughnutChart" => ChartKind.Doughnut, "lineChart" => ChartKind.Line, "areaChart" => ChartKind.Area,
+            "scatterChart" => ChartKind.Scatter, "bubbleChart" => ChartKind.Bubble, "radarChart" => ChartKind.Radar,
+            _ => barDirection == "bar" ? ChartKind.Bar : ChartKind.Column,
+        };
+        bool slices = kind is ChartKind.Pie or ChartKind.Doughnut, xy = kind is ChartKind.Scatter or ChartKind.Bubble;
+        if (slices || kind is ChartKind.Radar || xy) grouping = ChartGrouping.Clustered;
 
         // ---- data
         IEnumerable<Cell?> CellsOf(string formula)
@@ -118,27 +124,41 @@ internal static class XlsxCharts
             if (categories.Count > 0) break;
         }
 
+        bool filled = kind == ChartKind.Radar && (string?)Child(group, "radarStyle")?.Attribute("val") == "filled";
+        string? radarStyle = (string?)Child(group, "radarStyle")?.Attribute("val");
         var groupLabels = Child(group, "dLbls");
         var series = new List<ChartSeries>();
         string? sourceFormat = null;
         for (int i = 0; i < sers.Count; i++)
         {
             var ser = sers[i];
-            var (values, format) = Numbers(Child(ser, "val"));
+            var (values, format) = Numbers(Child(ser, "val") ?? Child(ser, "yVal"));
+            List<double?>? xValues = null, sizes = null;
+            if (xy)
+            {
+                var xv = Numbers(Child(ser, "xVal")).Values;
+                xValues = xv.Count > 0 ? xv : Enumerable.Range(1, values.Count).Select(k => (double?)k).ToList();
+                if (kind == ChartKind.Bubble) sizes = Numbers(Child(ser, "bubbleSize")).Values;
+            }
             sourceFormat ??= format;
             string name = Child(Child(ser, "tx"), "v")?.Value is { } literal ? literal : Strings(Child(ser, "tx")).FirstOrDefault() is { Length: > 0 } cached ? cached : $"Series{i + 1}";
             var spPr = Child(ser, "spPr");
-            Color color = (kind == ChartKind.Line ? SolidFill(Child(spPr, "ln"), theme) : SolidFill(spPr, theme)) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, i);
+            bool lineLike = kind is ChartKind.Line or ChartKind.Scatter || (kind == ChartKind.Radar && !filled);
+            var lineProperties = Child(spPr, "ln");
+            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? SolidFill(Child(Child(ser, "marker"), "spPr"), theme) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, i);
+            bool line = !(lineLike && lineProperties is not null && Child(lineProperties, "noFill") is not null);
 
             bool marker = true;
-            if (kind == ChartKind.Line)
+            if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
             {
                 var symbol = (string?)Path(ser, "marker", "symbol")?.Attribute("val");
-                marker = symbol is not null ? symbol != "none" : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
+                marker = symbol is not null ? symbol != "none"
+                    : kind == ChartKind.Radar ? radarStyle == "marker"
+                    : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
             }
 
             List<Color>? pointColors = null;
-            if (kind == ChartKind.Pie)
+            if (slices)
             {
                 int count = Math.Max(values.Count, categories.Count);
                 pointColors = Enumerable.Range(0, count).Select(k => PaletteColor(theme, k)).ToList();
@@ -151,7 +171,7 @@ internal static class XlsxCharts
             IReadOnlyList<string>? labels = null;
             if (dLbls is not null && (Flag(Child(dLbls, "showVal"), "val") || Flag(Child(dLbls, "showPercent"), "val")))
             {
-                bool showValue = Flag(Child(dLbls, "showVal"), "val"), showPercent = Flag(Child(dLbls, "showPercent"), "val") && kind == ChartKind.Pie;
+                bool showValue = Flag(Child(dLbls, "showVal"), "val"), showPercent = Flag(Child(dLbls, "showPercent"), "val") && slices;
                 var numFmt = Child(dLbls, "numFmt");
                 string? code = numFmt is not null && !Flag(numFmt, "sourceLinked") ? (string?)numFmt.Attribute("formatCode") : format;
                 double total = values.Sum(v => v is { } x && x > 0 ? x : 0);
@@ -164,20 +184,42 @@ internal static class XlsxCharts
                     return string.Join("; ", parts);
                 }).ToList();
             }
-            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels));
+            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line));
         }
         int points = Math.Max(categories.Count, series.Count == 0 ? 0 : series.Max(s => s.Values.Count));
         while (categories.Count < points) categories.Add((categories.Count + 1).ToString(CultureInfo.InvariantCulture));
 
         // ---- axes and scale
-        var valueAxis = plot.Elements().FirstOrDefault(e => e.Name.LocalName == "valAx");
+        var valueAxes = plot.Elements().Where(e => e.Name.LocalName == "valAx").ToList();
+        var valueAxis = valueAxes.FirstOrDefault();
         var categoryAxis = plot.Elements().FirstOrDefault(e => e.Name.LocalName is "catAx" or "dateAx");
+        if (xy)
+        {
+            // A scatter or bubble chart has two value axes: the horizontal one (axPos b/t, else the first) and the vertical one.
+            categoryAxis = valueAxes.FirstOrDefault(a => (string?)Child(a, "axPos")?.Attribute("val") is "b" or "t") ?? valueAxes.FirstOrDefault();
+            valueAxis = valueAxes.FirstOrDefault(a => a != categoryAxis);
+        }
         var scaling = Child(valueAxis, "scaling");
         double? fixedMin = Child(scaling, "min") is { } mn ? Number(mn, "val") : null, fixedMax = Child(scaling, "max") is { } mx ? Number(mx, "val") : null;
         double? fixedMajor = Child(valueAxis, "majorUnit") is { } mu && Number(mu, "val") > 0 ? Number(mu, "val") : null;
         var ticks = new List<ChartTick>();
         double min = 0, max = 1;
-        if (kind != ChartKind.Pie)
+        var xTicks = new List<ChartTick>();
+        double xMin = 0, xMax = 1;
+        if (xy)
+        {
+            var xScaling = Child(categoryAxis, "scaling");
+            double xlo = double.MaxValue, xhi = double.MinValue;
+            foreach (var v in series.SelectMany(sr => sr.XValues ?? []))
+                if (v is { } x) (xlo, xhi) = (Math.Min(xlo, x), Math.Max(xhi, x));
+            if (xlo > xhi) (xlo, xhi) = (0, 1);
+            string? xCode = Child(categoryAxis, "numFmt") is { } xf && !Flag(xf, "sourceLinked") ? (string?)xf.Attribute("formatCode") : null;
+            var xScale = AutoScale(xlo, xhi, Child(xScaling, "min") is { } xmn ? Number(xmn, "val") : null, Child(xScaling, "max") is { } xmx ? Number(xmx, "val") : null,
+                Child(categoryAxis, "majorUnit") is { } xmu && Number(xmu, "val") > 0 ? Number(xmu, "val") : null);
+            (xMin, xMax) = (xScale.Min, xScale.Max);
+            xTicks = Ticks(xScale.Min, xScale.Max, xScale.Step, v => Format(v, xCode));
+        }
+        if (!slices)
         {
             double lo = double.MaxValue, hi = double.MinValue;
             if (grouping == ChartGrouping.Clustered)
@@ -227,7 +269,7 @@ internal static class XlsxCharts
             if (title is null && rich is null && series.Count == 1) title = series[0].Name; // an automatic title is the name of the only series
             if (Descendant(rich, "rPr", "defRPr")?.Attribute("sz") is { } sz && double.TryParse(sz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var size) && size > 0) titleSize = size / 100;
         }
-        else if (!Flag(Child(chart, "autoTitleDeleted"), "val") && series.Count == 1 && kind == ChartKind.Pie) title = series[0].Name;
+        else if (!Flag(Child(chart, "autoTitleDeleted"), "val") && series.Count == 1 && slices) title = series[0].Name;
 
         var legendElement = Child(chart, "legend");
         var legend = legendElement is null ? LegendPosition.None : (string?)Child(legendElement, "legendPos")?.Attribute("val") switch
@@ -256,8 +298,14 @@ internal static class XlsxCharts
             MajorGridlines = Child(valueAxis, "majorGridlines") is not null,
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
-            ShowPercent = series.Any(s => s.Labels is not null) && kind == ChartKind.Pie,
+            ShowPercent = series.Any(s => s.Labels is not null) && slices,
             Background = background, Border = border, FontSize = fontSize,
+            XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null,
+            CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
+            HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,
+            FirstSliceAngle = Child(group, "firstSliceAng") is { } angle ? Number(angle, "val") : 0,
+            BubbleScale = Child(group, "bubbleScale") is { } bubble ? Math.Clamp(Number(bubble, "val", 100), 0, 300) : 100,
+            Filled = filled,
         };
     }
 

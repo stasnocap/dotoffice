@@ -101,11 +101,11 @@ public class XlsxChartTests
     [Fact]
     public void Unsupported_chart_types_are_named_in_the_warning_and_not_drawn()
     {
-        var (sheet, warnings) = Read(Space("<c:scatterChart><c:scatterStyle val=\"lineMarker\"/></c:scatterChart>"));
+        var (sheet, warnings) = Read(Space("<c:stockChart/>"));
         Assert.Empty(sheet.Charts);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.drawing", warning.Code);
-        Assert.Contains("scatter", warning.Message);
+        Assert.Contains("stock", warning.Message);
     }
 
     [Fact]
@@ -115,5 +115,69 @@ public class XlsxChartTests
         var (sheet, warnings) = Read(Space(plot));
         Assert.Single(sheet.Charts);
         Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated" && w.Message.Contains("combination"));
+    }
+
+    private static string XyAxes(string extraY = "") =>
+        "<c:valAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorGridlines/></c:valAx>" +
+        $"<c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/>{extraY}</c:valAx>";
+
+    private static string XySer(string extra, string x, string y, string size = "") =>
+        $"<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/>{extra}<c:xVal><c:numRef><c:f>{x}</c:f></c:numRef></c:xVal><c:yVal><c:numRef><c:f>{y}</c:f></c:numRef></c:yVal>" +
+        $"{(size.Length == 0 ? "" : $"<c:bubbleSize><c:numRef><c:f>{size}</c:f></c:numRef></c:bubbleSize>")}</c:ser>";
+
+    [Fact]
+    public void Reads_a_scatter_chart_with_its_own_x_scale_and_marker_only_series()
+    {
+        var markersOnly = "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val=\"circle\"/><c:spPr><a:solidFill><a:srgbClr val=\"00AA00\"/></a:solidFill></c:spPr></c:marker>";
+        var plot = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer(markersOnly, "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" + XyAxes();
+        var (sheet, warnings) = Read(Space(plot));
+        Assert.Empty(warnings.Warnings);
+        var chart = Assert.Single(sheet.Charts);
+        var series = Assert.Single(chart.Series);
+        Assert.Equal(ChartKind.Scatter, chart.Kind);
+        Assert.Equal(new double?[] { 10, 25, 40 }, series.XValues!.ToArray());
+        Assert.False(series.Line);
+        Assert.True(series.Marker);
+        Assert.Equal(new Color(0, 0xAA, 0), series.Color);
+        Assert.Equal((0.0, 45.0), (chart.XMin, chart.XMax));
+        Assert.True(chart.XGridlines);
+        Assert.Equal(chart.Ticks.Count, chart.XTicks.Count);
+    }
+
+    [Fact]
+    public void Reads_a_bubble_chart_with_sizes()
+    {
+        var plot = "<c:bubbleChart>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4", "S!$B$2:$B$4") + "<c:bubbleScale val=\"50\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:bubbleChart>" + XyAxes();
+        var chart = Read(Space(plot)).Sheet.Charts.Single();
+        Assert.Equal(ChartKind.Bubble, chart.Kind);
+        Assert.Equal(new double?[] { 10, 25, 40 }, chart.Series[0].Sizes!.ToArray());
+        Assert.Equal(50, chart.BubbleScale);
+    }
+
+    [Fact]
+    public void Reads_area_charts_with_stacking_and_the_edge_crossing()
+    {
+        var plot = "<c:areaChart><c:grouping val=\"stacked\"/>" + Ser(0, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:areaChart>" +
+                   "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:crossBetween val=\"midCat\"/></c:valAx>";
+        var chart = Read(Space(plot)).Sheet.Charts.Single();
+        Assert.Equal((ChartKind.Area, ChartGrouping.Stacked, false), (chart.Kind, chart.Grouping, chart.CategoriesBetween));
+        Assert.True(chart.ValueMax >= 80);
+        Assert.True(Read(Space(plot.Replace("midCat", "between"))).Sheet.Charts.Single().CategoriesBetween);
+    }
+
+    [Fact]
+    public void Reads_doughnut_and_radar_charts()
+    {
+        var doughnut = "<c:doughnutChart><c:varyColors val=\"1\"/>" + Ser(0, "S!$B$1", "S!$A$2:$A$4", "S!$B$2:$B$4").Replace("</c:ser>", "<c:dLbls><c:showVal val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") +
+                       "<c:firstSliceAng val=\"90\"/><c:holeSize val=\"60\"/></c:doughnutChart>";
+        var ring = Read(Space(doughnut)).Sheet.Charts.Single();
+        Assert.Equal((ChartKind.Doughnut, 0.6, 90.0), (ring.Kind, ring.HoleSize, ring.FirstSliceAngle));
+        Assert.Equal("13%", ring.Series[0].Labels![0]);
+        Assert.Equal(3, ring.Series[0].PointColors!.Count);
+        var radar = "<c:radarChart><c:radarStyle val=\"filled\"/>" + Ser(0, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>" +
+                    "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:majorGridlines/></c:valAx>";
+        var web = Read(Space(radar)).Sheet.Charts.Single();
+        Assert.Equal((ChartKind.Radar, true), (web.Kind, web.Filled));
+        Assert.Equal(["Q1", "Q2", "Q3"], web.Categories);
     }
 }
