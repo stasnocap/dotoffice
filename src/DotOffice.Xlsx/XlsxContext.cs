@@ -85,8 +85,21 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                 message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
             workbook.Sheets.Add(sheet);
         }
+        // Charts may refer to cells of any sheet, so they are built once every sheet has been read.
+        foreach (var (sheet, build) in _chartJobs)
+        {
+            try { sheet.Charts.Add(build(workbook.Sheets)); }
+            catch (Exception e) when (e is FormatException or InvalidOperationException or ArgumentException or XmlException or OverflowException)
+            {
+                Options.Warnings.Warn("xlsx.chart", $"Sheet '{sheet.Name}' has a chart that could not be read ({e.Message}); it is not rendered.");
+            }
+        }
         return workbook;
     }
+
+    private readonly List<(Worksheet Sheet, Func<IReadOnlyList<Worksheet>, SheetChart> Build)> _chartJobs = [];
+
+    internal void DeferChart(Worksheet sheet, Func<IReadOnlyList<Worksheet>, SheetChart> build) => _chartJobs.Add((sheet, build));
 
     // ------------------------------------------------------------------ workbook.xml
 
@@ -272,10 +285,15 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             if (skipped.Any)
             {
                 var parts = new List<string>();
-                if (skipped.Charts > 0) parts.Add(skipped.Charts == 1 ? "a chart" : $"{skipped.Charts} charts");
+                if (skipped.Charts > 0)
+                {
+                    var kinds = skipped.ChartKinds?.Distinct().ToList() ?? [];
+                    parts.Add(kinds.Count > 0 ? $"{(skipped.Charts == 1 ? "a" : skipped.Charts.ToString(CultureInfo.InvariantCulture))} {string.Join("/", kinds)} chart{(skipped.Charts == 1 ? "" : "s")}"
+                        : skipped.Charts == 1 ? "a chart" : $"{skipped.Charts} charts");
+                }
                 if (skipped.Shapes > 0) parts.Add(skipped.Shapes == 1 ? "a shape with custom geometry" : $"{skipped.Shapes} shapes with custom geometry");
                 if (skipped.Other > 0) parts.Add("other drawing objects");
-                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures and shapes are).");
+                WarnOnce(sheet, "xlsx.drawing", $"contains {string.Join(" and ", parts)}, which {(parts.Count == 1 && skipped.Charts + skipped.Shapes <= 1 ? "is" : "are")} not rendered (pictures, shapes and column, bar, line and pie charts are).");
             }
             if (skipped.Notes.Count > 0)
                 WarnOnce(sheet, "xlsx.drawing-approximated", $"has drawing objects that are only approximated: {string.Join("; ", skipped.Notes)}.");

@@ -546,7 +546,7 @@ public sealed partial class SheetLayoutEngine
                 c1 = Math.Max(c1, column);
             }
             // Excel prints pictures even outside the cells, so they belong to the used range.
-            foreach (var image in _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes))
+            foreach (var image in Objects())
             {
                 var (ix, iy, iw, ih) = ImageRectFromA1(image);
                 if (IsEmpty(image, iw, ih)) continue;
@@ -662,6 +662,8 @@ public sealed partial class SheetLayoutEngine
             return 1_048_575;
         }
 
+        private IEnumerable<SheetObject> Objects() => _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes).Concat(_sheet.Charts);
+
         /// <summary>Pictures have no area when either side is empty; a line may be as thin as nothing in one direction.</summary>
         private static bool IsEmpty(SheetObject obj, double width, double height) =>
             obj is SheetShape { Geometry: ShapeGeometry.Line } ? width <= 0.01 && height <= 0.01 : width <= 0.01 || height <= 0.01;
@@ -710,12 +712,12 @@ public sealed partial class SheetLayoutEngine
         /// </summary>
         private void EmitImages(List<int> columns, List<int> rows, Dictionary<int, double> columnX, Dictionary<int, double> rowY, List<LayoutItem> items)
         {
-            if (_sheet.Images.Count == 0 && _sheet.Shapes.Count == 0) return;
+            if (_sheet.Images.Count == 0 && _sheet.Shapes.Count == 0 && _sheet.Charts.Count == 0) return;
             double originX = ColumnStart(_range.FirstColumn), originY = RowStart(_range.FirstRow);
             var columnSegments = Segments(columns, c => ColumnStart(c) - originX, ColumnWidthOf, columnX);
             var rowSegments = Segments(rows, r => RowStart(r) - originY, RowHeightOf, rowY);
 
-            foreach (var image in _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes).OrderBy(o => o.ZOrder))
+            foreach (var image in Objects().OrderBy(o => o.ZOrder))
             {
                 var (ax, ay, w, h) = ImageRectFromA1(image);
                 double x = ax - originX, y = ay - originY;
@@ -747,6 +749,7 @@ public sealed partial class SheetLayoutEngine
             (double X, double Y, double Width, double Height) visible, List<LayoutItem> items)
         {
             if (obj is SheetShape shape) _engine.EmitShape(shape, x, y, width, height, visible, items);
+            else if (obj is SheetChart chart) _engine.EmitChart(chart, x, y, width, height, visible, items);
             else if (obj is SheetImage image) EmitImage(image, x, y, width, height, visible, items);
         }
 

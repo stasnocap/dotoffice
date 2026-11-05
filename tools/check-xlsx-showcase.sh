@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Charts"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -129,6 +129,22 @@ for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.4392 0.1882 0.6275
 done
 grep -aq '^\[[0-9.]* [0-9.]*\] 0 d$' shapes-qdf.pdf || fail "the dashed outline is missing"
 if grep -E "warning xlsx\.drawing-approximated" "$log"; then fail "the supported shapes should not be reported as approximated"; fi
+
+# Charts: six drawn on one page (titles, legend entries, axis labels, pie percentages, series colors), the scatter chart is the only one reported.
+chart_pages=0; chart_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Charts" ] && { chart_pages=$((chart_pages + 1)); chart_page=$p; }; done
+[ "$chart_pages" = 1 ] || fail "the charts sheet should fit one page, found $chart_pages"
+chart_text=$(page_text "$chart_page")
+for text in "Clustered columns" "Stacked columns" "Bars with labels" "Lines" "Pie shares" "100 % stacked" "100%" "26%" "Units" "North" "Q6"; do
+  [[ $chart_text == *"$text"* ]] || fail "missing chart text: $text"
+done
+[[ $chart_text != *"Scatter"* ]] || fail "the unsupported scatter chart should not be drawn"
+qpdf --qdf --object-streams=disable "$pdf" charts-qdf.pdf
+for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.6471 0.6471 0.6471"; do
+  grep -aq "^$color rg$" charts-qdf.pdf || fail "chart series color $color is missing"
+done
+grep -E "warning xlsx\.drawing" "$log" | grep -q "scatter chart" || fail "the scatter chart should be reported"
+if grep -E "warning xlsx\.(chart|drawing-approximated)" "$log"; then fail "the supported charts should not warn"; fi
 
 # Print areas: the three areas of the "Areas" sheet are three separate pages, and nothing outside them is printed.
 area_pages=0

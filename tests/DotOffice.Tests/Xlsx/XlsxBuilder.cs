@@ -87,6 +87,27 @@ internal sealed class XlsxBuilder
         return this;
     }
 
+    /// <summary>Like <see cref="AddDrawing"/>, with chart parts (<c>c:chartSpace</c> documents) referred to as rId1, rId2… in order.</summary>
+    public XlsxBuilder AddChartDrawing(int sheetNumber, string anchors, params string[] charts)
+    {
+        AddPart($"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+        AddPart($"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{RelNs}\">{anchors}</xdr:wsDr>");
+        var rels = new StringBuilder();
+        for (int i = 0; i < charts.Length; i++)
+        {
+            AddPart($"xl/charts/chart{sheetNumber}_{i + 1}.xml", charts[i]);
+            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}chart\" Target=\"../charts/chart{sheetNumber}_{i + 1}.xml\"/>");
+        }
+        AddPart($"xl/drawings/_rels/drawing{sheetNumber}.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
+        return this;
+    }
+
+    /// <summary>A chart frame referring to relationship <paramref name="embed"/> of the drawing.</summary>
+    public static string ChartRef(string embed = "rId1") =>
+        "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"4\" name=\"Chart\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>" +
+        $"<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" r:id=\"{embed}\"/></a:graphicData></a:graphic></xdr:graphicFrame>";
+
     private const long Emu = 12700;
 
     private static string Point(string tag, int column, int row, double columnOffsetPoints = 0, double rowOffsetPoints = 0) =>

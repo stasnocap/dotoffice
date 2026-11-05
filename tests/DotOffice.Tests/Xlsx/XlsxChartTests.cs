@@ -1,0 +1,119 @@
+using DotOffice.Core;
+using DotOffice.Xlsx;
+using static DotOffice.Tests.Xlsx.XlsxBuilder;
+
+namespace DotOffice.Tests.Xlsx;
+
+public class XlsxChartTests
+{
+    private const string Ns = "xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"";
+
+    private static string Space(string plot, string extra = "") =>
+        $"<c:chartSpace {Ns}><c:chart>{extra}<c:plotArea><c:layout/>{plot}</c:plotArea></c:chart></c:chartSpace>";
+
+    private static string Ser(int i, string? name, string? cats, string vals, string extra = "") =>
+        $"<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/>{(name is null ? "" : $"<c:tx><c:strRef><c:f>{name}</c:f></c:strRef></c:tx>")}{extra}" +
+        $"{(cats is null ? "" : $"<c:cat><c:strRef><c:f>{cats}</c:f></c:strRef></c:cat>")}<c:val><c:numRef><c:f>{vals}</c:f></c:numRef></c:val></c:ser>";
+
+    private static string Bars(string dir, string grouping, string sers, string extra = "") =>
+        $"<c:barChart><c:barDir val=\"{dir}\"/><c:grouping val=\"{grouping}\"/>{sers}{extra}<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+        "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:majorGridlines/></c:valAx>";
+
+    private static (Worksheet Sheet, ConversionWarningList Warnings) Read(string chart)
+    {
+        var warnings = new ConversionWarningList();
+        var rows = Row(1, C("A1", "x") + C("B1", "North")) + Row(2, Inline("A2", "Q1") + C("B2", "10")) + Row(3, Inline("A3", "Q2") + C("B3", "25")) + Row(4, Inline("A4", "Q3") + C("B4", "40"));
+        var builder = new XlsxBuilder().AddSheet("S", rows, tail: DrawingElement).AddChartDrawing(1, TwoCellAnchor(1, 5, 5, 15, ChartRef()), chart);
+        return (XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0], warnings);
+    }
+
+    [Fact]
+    public void Reads_a_column_chart_from_the_cells_it_refers_to()
+    {
+        var (sheet, warnings) = Read(Space(Bars("col", "clustered", Ser(0, "S!$B$1", "S!$A$2:$A$4", "S!$B$2:$B$4")), "<c:title><c:tx><c:rich><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title>") );
+        Assert.Empty(warnings.Warnings);
+        var chart = Assert.Single(sheet.Charts);
+        Assert.Equal((ChartKind.Column, ChartGrouping.Clustered, "Sales"), (chart.Kind, chart.Grouping, chart.Title));
+        Assert.Equal(["Q1", "Q2", "Q3"], chart.Categories);
+        var series = Assert.Single(chart.Series);
+        Assert.Equal("North", series.Name);
+        Assert.Equal(new double?[] { 10, 25, 40 }, series.Values.ToArray());
+        Assert.Equal(Color.TryParseHex("4472C4"), series.Color);
+        Assert.Equal(ImageAnchorKind.TwoCell, chart.Anchor);
+    }
+
+    [Fact]
+    public void Cached_values_win_over_the_cells_and_explicit_colors_are_kept()
+    {
+        var ser = "<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/><c:tx><c:v>Lit</c:v></c:tx><c:spPr><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></c:spPr>" +
+                  "<c:cat><c:strLit><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>a</c:v></c:pt><c:pt idx=\"1\"><c:v>b</c:v></c:pt></c:strLit></c:cat>" +
+                  "<c:val><c:numRef><c:f>S!$B$2:$B$4</c:f><c:numCache><c:formatCode>0.0</c:formatCode><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>1</c:v></c:pt><c:pt idx=\"1\"><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>";
+        var chart = Read(Space(Bars("bar", "clustered", ser))).Sheet.Charts.Single();
+        Assert.Equal(ChartKind.Bar, chart.Kind);
+        Assert.Equal(["a", "b"], chart.Categories);
+        Assert.Equal(new double?[] { 1, 3 }, chart.Series[0].Values.ToArray());
+        Assert.Equal(new Color(255, 0, 0), chart.Series[0].Color);
+        Assert.Equal("0.5", chart.Ticks[1].Label);
+        Assert.Equal("1.0", chart.Ticks[2].Label);
+    }
+
+    [Theory]
+    [InlineData(0, 100, 0, 120, 20)]
+    [InlineData(0, 8, 0, 9, 1)]
+    [InlineData(0, 1000, 0, 1200, 200)]
+    [InlineData(-40, 100, -60, 120, 20)]
+    [InlineData(0, 40, 0, 45, 5)]
+    public void The_automatic_axis_follows_excels_scale(double lo, double hi, double min, double max, double step)
+    {
+        var ser = "<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/><c:val><c:numLit><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>" + lo.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                  "</c:v></c:pt><c:pt idx=\"1\"><c:v>" + hi.ToString(System.Globalization.CultureInfo.InvariantCulture) + "</c:v></c:pt></c:numLit></c:val></c:ser>";
+        var chart = Read(Space(Bars("col", "clustered", ser))).Sheet.Charts.Single();
+        Assert.Equal((min, max, step), (chart.ValueMin, chart.ValueMax, chart.Ticks[1].Value - chart.Ticks[0].Value));
+    }
+
+    [Fact]
+    public void Fixed_axis_limits_and_units_are_honored_and_stacked_axes_use_the_sums()
+    {
+        var axes = "<c:valAx><c:axId val=\"2\"/><c:scaling><c:min val=\"0\"/><c:max val=\"50\"/></c:scaling><c:majorUnit val=\"10\"/></c:valAx>";
+        var chart = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")).Replace("<c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:majorGridlines/></c:valAx>", axes))).Sheet.Charts.Single();
+        Assert.Equal((0.0, 50.0), (chart.ValueMin, chart.ValueMax));
+        Assert.Equal(6, chart.Ticks.Count);
+        var stacked = Read(Space(Bars("col", "stacked", Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single();
+        Assert.True(stacked.ValueMax >= 80);
+        var percent = Read(Space(Bars("col", "percentStacked", Ser(0, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single();
+        Assert.Equal(("0%", "100%"), (percent.Ticks[0].Label, percent.Ticks[^1].Label));
+    }
+
+    [Fact]
+    public void Reads_line_markers_pie_colors_labels_and_legend()
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"none\"/></c:marker>") + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
+        var lineChart = Read(Space(line)).Sheet.Charts.Single();
+        Assert.Equal([false, true], lineChart.Series.Select(s => s.Marker));
+        var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + Ser(0, "S!$B$1", "S!$A$2:$A$4", "S!$B$2:$B$4", "<c:dPt><c:idx val=\"1\"/><c:spPr><a:solidFill><a:srgbClr val=\"00FF00\"/></a:solidFill></c:spPr></c:dPt>").Replace("</c:ser>", "<c:dLbls><c:showVal val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
+        var pieChart = Read(Space(pie, "<c:autoTitleDeleted val=\"0\"/>") .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"b\"/></c:legend>")).Sheet.Charts.Single();
+        Assert.Equal((ChartKind.Pie, LegendPosition.Bottom, "North"), (pieChart.Kind, pieChart.Legend, pieChart.Title));
+        Assert.Equal(new Color(0, 255, 0), pieChart.Series[0].PointColors![1]);
+        Assert.Equal("13%", pieChart.Series[0].Labels![0]);
+        Assert.Equal("53%", pieChart.Series[0].Labels![2]);
+    }
+
+    [Fact]
+    public void Unsupported_chart_types_are_named_in_the_warning_and_not_drawn()
+    {
+        var (sheet, warnings) = Read(Space("<c:scatterChart><c:scatterStyle val=\"lineMarker\"/></c:scatterChart>"));
+        Assert.Empty(sheet.Charts);
+        var warning = Assert.Single(warnings.Warnings);
+        Assert.Equal("xlsx.drawing", warning.Code);
+        Assert.Contains("scatter", warning.Message);
+    }
+
+    [Fact]
+    public void A_combination_chart_draws_its_first_type_and_says_so()
+    {
+        var plot = Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")) + "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
+        var (sheet, warnings) = Read(Space(plot));
+        Assert.Single(sheet.Charts);
+        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated" && w.Message.Contains("combination"));
+    }
+}

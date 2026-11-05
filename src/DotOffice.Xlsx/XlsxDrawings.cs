@@ -11,7 +11,7 @@ internal static class XlsxDrawings
     private const double EmuPerPoint = 12700;
 
     /// <summary>What a drawing contained that is not rendered, and what is rendered only approximately.</summary>
-    internal sealed record Skipped(int Charts, int Shapes, int Other, IReadOnlyList<string> Notes)
+    internal sealed record Skipped(int Charts, int Shapes, int Other, IReadOnlyList<string> Notes, IReadOnlyList<string>? ChartKinds = null)
     {
         public bool Any => Charts + Shapes + Other > 0;
     }
@@ -49,13 +49,13 @@ internal static class XlsxDrawings
                     case "pic" or "sp" or "cxnSp" or "grpSp":
                         ReadObject(state, frame, FrameFraction.Whole, content);
                         break;
-                    case "graphicFrame": state.Charts++; break;
+                    case "graphicFrame": ReadChart(state, frame, FrameFraction.Whole, content); break;
                     case "from" or "to" or "pos" or "ext" or "clientData": break;
                     default: state.Other++; break; // AlternateContent (slicers, …), contentPart
                 }
             }
         }
-        return new Skipped(state.Charts, state.Shapes, state.Other, state.Notes);
+        return new Skipped(state.Charts, state.Shapes, state.Other, state.Notes, state.ChartKinds);
     }
 
     /// <summary>The anchor of a top-level object: where its frame is, and whether the anchor itself states the size (<c>ext</c>).</summary>
@@ -68,6 +68,7 @@ internal static class XlsxDrawings
         public IReadOnlyDictionary<string, Opc.Relationship> Relationships { get; } = rels;
         public int Charts, Shapes, Other, ZOrder;
         public List<string> Notes { get; } = [];
+        public List<string> ChartKinds { get; } = [];
 
         public void Note(string note)
         {
@@ -82,7 +83,44 @@ internal static class XlsxDrawings
             case "pic": ReadPicture(state, anchor, frame, element); break;
             case "sp" or "cxnSp": ReadShape(state, anchor, frame, element); break;
             case "grpSp": ReadGroup(state, anchor, frame, element); break;
+            case "graphicFrame": ReadChart(state, anchor, frame, element); break;
         }
+    }
+
+    /// <summary>Reads a chart frame; charts of kinds that are not drawn are counted and named for the warning.</summary>
+    private static void ReadChart(State state, AnchorFrame anchor, FrameFraction frame, XElement graphicFrame)
+    {
+        var context = state.Context;
+        if (Child(Child(graphicFrame, "nvGraphicFramePr"), "cNvPr") is { } p && (string?)p.Attribute("hidden") is "1" or "true") return;
+        var chartElement = graphicFrame.Descendants().FirstOrDefault(e => e.Name.LocalName == "chart" && e.Attributes().Any(a => a.Name.LocalName == "id"));
+        var id = chartElement?.Attributes().FirstOrDefault(a => a.Name.LocalName == "id")?.Value;
+        if (id is null || !state.Relationships.TryGetValue(id, out var rel) || rel.IsExternal || !context.Package.Exists(rel.Target))
+        {
+            // Not a chart (a table or a diagram) or a chart whose part is missing.
+            state.Charts++;
+            return;
+        }
+        XDocument doc;
+        try
+        {
+            using var reader = context.Package.OpenXml(rel.Target);
+            doc = XDocument.Load(reader);
+        }
+        catch (System.Xml.XmlException)
+        {
+            state.Charts++;
+            return;
+        }
+        var (kind, from, to, x, y, width, height) = Placement(anchor, Child(graphicFrame, "xfrm"), frame);
+        var template = new SheetChart { Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame, ZOrder = state.ZOrder++ };
+        var (unsupported, build) = XlsxCharts.Prepare(context, state.Sheet, doc, template, state.Notes);
+        if (build is null)
+        {
+            state.Charts++;
+            state.ChartKinds.Add(unsupported ?? "unknown");
+            return;
+        }
+        context.DeferChart(state.Sheet, build);
     }
 
     /// <summary>

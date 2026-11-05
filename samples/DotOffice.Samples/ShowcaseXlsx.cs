@@ -37,6 +37,7 @@ internal static class ShowcaseXlsx
             ("Gradients", GradientSheet(), "visible"),
             ("Pictures", PicturesSheet(), "visible"),
             ("Shapes", ShapesSheet(), "visible"),
+            ("Charts", ChartsSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
@@ -65,6 +66,7 @@ internal static class ShowcaseXlsx
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
+        WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
@@ -346,6 +348,86 @@ internal static class ShowcaseXlsx
                    Row(20, Str("A20", "Lines:"));
         return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>", rows,
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+    }
+
+    // ------------------------------------------------------------------ charts
+
+    private const string ChartNs = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+    private static readonly string[] Quarters = ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"];
+    private static readonly double[][] ChartData = [[12, 19, 28, 24, 35, 41], [8, 14, 11, 22, 18, 30], [5, 9, 16, 12, 20, 15]];
+    private static readonly string[] SeriesNames = ["North", "South", "East"];
+
+    private static string ChartSeries(int i, bool cached, string extra = "")
+    {
+        string column = ((char)('B' + i)).ToString();
+        string name = cached ? $"<c:strCache><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>{SeriesNames[i]}</c:v></c:pt></c:strCache>" : "";
+        string cats = cached ? "<c:strCache><c:ptCount val=\"6\"/>" + string.Concat(Quarters.Select((q, k) => $"<c:pt idx=\"{k}\"><c:v>{q}</c:v></c:pt>")) + "</c:strCache>" : "";
+        string vals = cached ? "<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"6\"/>" + string.Concat(ChartData[i].Select((v, k) => $"<c:pt idx=\"{k}\"><c:v>{v}</c:v></c:pt>")) + "</c:numCache>" : "";
+        return $"<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/><c:tx><c:strRef><c:f>Charts!${column}$3</c:f>{name}</c:strRef></c:tx>{extra}" +
+               $"<c:cat><c:strRef><c:f>Charts!$A$4:$A$9</c:f>{cats}</c:strRef></c:cat><c:val><c:numRef><c:f>Charts!${column}$4:${column}$9</c:f>{vals}</c:numRef></c:val></c:ser>";
+    }
+
+    private static string Rich(string tag, string text, int size = 1400) =>
+        $"<c:{tag}><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:rPr lang=\"en-US\" sz=\"{size}\"/><a:t>{text}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:{tag}>";
+
+    private static string ChartSpace(string title, string plot, string legend = "r") =>
+        $"<c:chartSpace xmlns:c=\"{ChartNs}\" xmlns:a=\"{DmlNs}\"><c:chart>{(title.Length == 0 ? "<c:autoTitleDeleted val=\"1\"/>" : Rich("title", title))}<c:plotArea><c:layout/>{plot}</c:plotArea>" +
+        $"{(legend.Length == 0 ? "" : $"<c:legend><c:legendPos val=\"{legend}\"/><c:overlay val=\"0\"/></c:legend>")}</c:chart></c:chartSpace>";
+
+    private static string Axes(string catTitle = "", string valTitle = "") =>
+        $"<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/>{(catTitle.Length == 0 ? "" : Rich("title", catTitle, 1000))}<c:crossAx val=\"2\"/></c:catAx>" +
+        $"<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/>{(valTitle.Length == 0 ? "" : Rich("title", valTitle, 1000))}<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:crossAx val=\"1\"/></c:valAx>";
+
+    private static string Bars(string dir, string grouping, int count, bool cached, string extra = "", string axes = "") =>
+        $"<c:barChart><c:barDir val=\"{dir}\"/><c:grouping val=\"{grouping}\"/><c:varyColors val=\"0\"/>{string.Concat(Enumerable.Range(0, count).Select(i => ChartSeries(i, cached)))}{extra}" +
+        $"<c:gapWidth val=\"150\"/>{(grouping == "clustered" ? "" : "<c:overlap val=\"100\"/>")}<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>{(axes.Length == 0 ? Axes() : axes)}";
+
+    private static void WriteCharts(ZipArchive zip, int sheetNumber)
+    {
+        const string Labels = "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"0\"/></c:dLbls>";
+        const string NoMarker = "<c:marker><c:symbol val=\"none\"/></c:marker>";
+        var line = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true, NoMarker) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
+        var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
+        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/></c:scatterChart>";
+        string[] charts =
+        [
+            ChartSpace("Clustered columns", Bars("col", "clustered", 3, true, axes: Axes("Quarter", "Units")), "b"),
+            ChartSpace("Stacked columns", Bars("col", "stacked", 3, false)),
+            ChartSpace("Bars with labels", Bars("bar", "clustered", 1, true, Labels), ""),
+            ChartSpace("Lines", line, "b"),
+            ChartSpace("Pie shares", pie),
+            ChartSpace("100 % stacked", Bars("col", "percentStacked", 3, true)),
+            ChartSpace("Scatter", scatter),
+        ];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 11, 3, 24), (3, 11, 6, 24), (0, 25, 3, 38), (3, 25, 6, 38), (0, 39, 3, 52), (3, 39, 6, 52), (0, 53, 3, 60)];
+        var anchors = new StringBuilder();
+        var rels = new StringBuilder();
+        for (int i = 0; i < charts.Length; i++)
+        {
+            Entry(zip, $"xl/charts/chart{i + 1}.xml", charts[i]);
+            rels.Append($"<Relationship Id=\"rId{i + 1}\" Type=\"{RelType}chart\" Target=\"../charts/chart{i + 1}.xml\"/>");
+            var (c0, r0, c1, r1) = places[i];
+            anchors.Append(TwoCell(c0, r0, c1, r1,
+                "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"" + (i + 2) + "\" name=\"Chart " + (i + 1) + "\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>" +
+                $"<a:graphic><a:graphicData uri=\"{ChartNs}\"><c:chart xmlns:c=\"{ChartNs}\" r:id=\"rId{i + 1}\"/></a:graphicData></a:graphic></xdr:graphicFrame>"));
+        }
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+    }
+
+    private static string ChartsSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Charts: columns, bars, lines and pies", Bold)));
+        rows.Append(Row(3, Str("A3", "Quarter", Header) + Str("B3", SeriesNames[0], Header) + Str("C3", SeriesNames[1], Header) + Str("D3", SeriesNames[2], Header)));
+        for (int k = 0; k < 6; k++)
+            rows.Append(Row(4 + k, Str($"A{4 + k}", Quarters[k]) + Num($"B{4 + k}", ChartData[0][k]) + Num($"C{4 + k}", ChartData[1][k]) + Num($"D{4 + k}", ChartData[2][k])));
+        rows.Append(Row(11, Str("A11", "The scatter chart at the bottom is not supported and is reported.")));
+        return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>", rows.ToString(),
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
     }
 
     // ------------------------------------------------------------------ comments

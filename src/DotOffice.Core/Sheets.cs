@@ -77,6 +77,9 @@ public sealed class Worksheet(string name)
     /// <summary>Shapes, text boxes and lines of the drawing.</summary>
     public List<SheetShape> Shapes { get; } = [];
 
+    /// <summary>Charts of the drawing.</summary>
+    public List<SheetChart> Charts { get; } = [];
+
     /// <summary>Cell comments (notes); printed after the sheet when <see cref="SheetPageSetup.Comments"/> asks for it.</summary>
     public List<SheetComment> Comments { get; } = [];
 
