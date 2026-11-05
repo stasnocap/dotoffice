@@ -328,13 +328,63 @@ public class XlsxShapeTests
     }
 
     [Fact]
-    public void A_picture_fill_without_its_image_leaves_it_out_and_a_tile_is_noted()
+    public void A_picture_fill_without_its_image_leaves_it_out()
     {
         var (sheet, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId9\"/><a:stretch/></a:blipFill><a:ln><a:solidFill><a:srgbClr val=\"0000FF\"/></a:solidFill></a:ln>")));
         Assert.Null(Assert.Single(sheet.Shapes).FillImage);
         Assert.Contains("picture fill whose image is missing", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
-        var (tiled, tileWarnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile tx=\"0\" ty=\"0\" sx=\"100000\" sy=\"100000\"/></a:blipFill>")));
-        Assert.NotNull(Assert.Single(tiled.Shapes).FillImage);
-        Assert.Contains("tiled picture fills are stretched", Assert.Single(tileWarnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+    }
+
+    [Fact]
+    public void A_tiled_picture_fill_gets_its_tile_size_offset_alignment_and_opacity()
+    {
+        // The 2 x 2 pixel picture is 1.5 points square at 96 dots per inch; sx/sy scale it.
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"><a:alphaModFix amt=\"40000\"/></a:blip><a:tile tx=\"127000\" ty=\"254000\" sx=\"400000\" sy=\"200000\" algn=\"ctr\"/></a:blipFill>"));
+        Assert.NotNull(shape.FillImage);
+        var tile = shape.FillTile!;
+        Assert.Equal((6.0, 3.0, 10.0, 20.0, "ctr"), (tile.Width, tile.Height, tile.OffsetX, tile.OffsetY, tile.Alignment));
+        Assert.Equal(0.4, shape.FillImageAlpha);
+        var plain = ReadOne(Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:stretch/></a:blipFill>"));
+        Assert.Null(plain.FillTile);
+        Assert.Equal(1, plain.FillImageAlpha);
+        // A tile smaller than a point is not worth drawing: the picture is stretched, which is noted.
+        var (tiny, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile sx=\"10000\" sy=\"10000\"/></a:blipFill>")));
+        Assert.Null(Assert.Single(tiny.Shapes).FillTile);
+        Assert.Contains("tiled picture fills of this picture are stretched", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+    }
+
+    [Fact]
+    public void Glow_and_soft_edges_are_read_from_the_effects()
+    {
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst><a:glow rad=\"127000\"><a:srgbClr val=\"00B0F0\"><a:alpha val=\"40000\"/></a:srgbClr></a:glow><a:softEdge rad=\"63500\"/></a:effectLst>"));
+        Assert.Equal(new ShapeGlow(new Color(0, 0xB0, 0xF0), 0.4, 10), shape.Glow);
+        Assert.Equal(5, shape.SoftEdge);
+        var none = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst><a:glow rad=\"0\"><a:srgbClr val=\"00B0F0\"/></a:glow></a:effectLst>"));
+        Assert.Null(none.Glow);
+        Assert.Equal(0, none.SoftEdge);
+    }
+
+    [Fact]
+    public void A_rotated_group_turns_its_children_and_remembers_the_turn()
+    {
+        string Child(int x) => Sp($"<a:xfrm rot=\"1800000\"><a:off x=\"{x}\" y=\"0\"/><a:ext cx=\"1000\" cy=\"2000\"/></a:xfrm><a:prstGeom prst=\"rect\"/>" + SolidRed);
+        string Group(string rot, string children) => "<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id=\"9\" name=\"G\"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr>" +
+            $"<xdr:grpSpPr><a:xfrm rot=\"{rot}\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"4000\" cy=\"2000\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"4000\" cy=\"2000\"/></a:xfrm></xdr:grpSpPr>{children}</xdr:grpSp>";
+        var (sheet, warnings) = Read(OneCellAnchor(1, 1, 200, 100, Group("5400000", Child(0) + Child(3000))));
+        Assert.Empty(warnings.Warnings);                  // no longer reported as drawn unrotated
+        Assert.Equal(2, sheet.Shapes.Count);
+        // The file turns clockwise; the model counter-clockwise: the child's -30° and the group's -90°.
+        Assert.All(sheet.Shapes, s => Assert.Equal(-120, s.Rotation));
+        var turn = Assert.Single(sheet.Shapes[0].GroupTurns);
+        Assert.Equal((-90.0, new FrameFraction(0, 0, 1, 1)), (turn.Rotation, turn.Frame));
+        // A group in a group adds its turn, outermost first; a group that is not turned leaves no trace.
+        var inner = Group("2700000", Child(0));
+        var (nested, _) = Read(OneCellAnchor(1, 1, 200, 100, Group("5400000", inner)));
+        var shape = Assert.Single(nested.Shapes);
+        Assert.Equal([-90.0, -45.0], shape.GroupTurns.Select(t => t.Rotation));
+        Assert.Equal(-90 - 45 - 30, shape.Rotation);
+        var (flat, _) = Read(OneCellAnchor(1, 1, 200, 100, Group("0", Child(0))));
+        Assert.Empty(flat.Shapes[0].GroupTurns);
+        Assert.Equal(-30, flat.Shapes[0].Rotation);
     }
 }

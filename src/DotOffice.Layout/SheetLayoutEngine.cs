@@ -712,7 +712,18 @@ public sealed partial class SheetLayoutEngine
                 _ => (image.X, image.Y, image.Width, image.Height),
             };
             var f = image.Frame;
-            return (x + f.X * width, y + f.Y * height, f.Width * width, f.Height * height);
+            var rect = (X: x + f.X * width, Y: y + f.Y * height, Width: f.Width * width, Height: f.Height * height);
+            if (image.GroupTurns.Count == 0) return rect;
+            // The rotated groups swing the object about their centers (innermost first); its own turn, already counting theirs, is applied later.
+            double cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
+            for (int i = image.GroupTurns.Count - 1; i >= 0; i--)
+            {
+                var (gf, degrees) = (image.GroupTurns[i].Frame, image.GroupTurns[i].Rotation);
+                double gx = x + (gf.X + gf.Width / 2) * width, gy = y + (gf.Y + gf.Height / 2) * height;
+                double angle = degrees * Math.PI / 180, dx = cx - gx, dy = cy - gy;
+                (cx, cy) = (gx + dx * Math.Cos(angle) + dy * Math.Sin(angle), gy - dx * Math.Sin(angle) + dy * Math.Cos(angle));
+            }
+            return (cx - rect.Width / 2, cy - rect.Height / 2, rect.Width, rect.Height);
         }
 
         private (double X, double Y, double Width, double Height) TwoCellRect(SheetObject image)
@@ -759,7 +770,12 @@ public sealed partial class SheetLayoutEngine
                 // The turned bounding box of a rotated object reaches beyond its frame by at most this much on each side, and outlines and
                 // text that overflow the frame reach beyond it as well.
                 double reach = image.Rotation == 0 ? 0 : (Math.Abs(w) + Math.Abs(h));
-                if (image is SheetShape shape) reach = Math.Max(reach, shape.LineWidth + 1);
+                if (image is SheetShape shape)
+                {
+                    reach = Math.Max(reach, shape.LineWidth + 1);
+                    if (shape.Glow is { } glow) reach = Math.Max(reach, glow.Radius + 1);
+                    if (shape.Shadow is { } shade) reach = Math.Max(reach, Math.Max(Math.Abs(shade.Dx), Math.Abs(shade.Dy)) + shade.Blur + 1);
+                }
                 foreach (var columnSegment in columnSegments)
                 {
                     double x0 = Math.Max(x - reach, columnSegment.S0), x1 = Math.Min(x + w + reach, columnSegment.S1);

@@ -476,6 +476,17 @@ internal static class ShowcaseXlsx
         anchors.Append(OneCell(1, 25, 0, 0, 100, 50, Shape("rect", "Rectangular", "").Replace("<a:noFill/>", PathGradient("rect", "FFFFFF", "C00000")).Replace("</xdr:sp>", Text("Rectangular", "000000", 900, bold: true) + "</xdr:sp>")));
         anchors.Append(OneCell(3, 25, 0, 0, 100, 50, Shape("diamond", "Rect in a diamond", "").Replace("<a:noFill/>", PathGradient("rect", "FFC000", "7030A0")).Replace("</xdr:sp>", Text("Diamond", "FFFFFF", 900, bold: true) + "</xdr:sp>")));
         anchors.Append(OneCell(5, 25, 0, 0, 100, 50, Shape("rect", "Circular", "").Replace("<a:noFill/>", PathGradient("circle", "FFFFFF", "2F5597")).Replace("</xdr:sp>", Text("Circular", "000000", 900, bold: true) + "</xdr:sp>")));
+        // Tiled and translucent picture fills, a glow, soft edges and a rotated group.
+        string Blip(string inside, string rest) => $"<a:blipFill><a:blip r:embed=\"rId1\">{inside}</a:blip>{rest}</a:blipFill>";
+        anchors.Append(OneCell(1, 31, 0, 0, 100, 60, Shape("rect", "Tiled picture", "", Line("404040", 1), Text("Tiled picture", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("", "<a:tile tx=\"0\" ty=\"0\" sx=\"30000\" sy=\"30000\" algn=\"tl\" flip=\"none\"/>"))));
+        anchors.Append(OneCell(3, 31, 0, 0, 100, 60, Shape("rect", "Translucent picture", "", Line("404040", 1), Text("Translucent picture", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("<a:alphaModFix amt=\"45000\"/>", "<a:stretch><a:fillRect/></a:stretch>"))));
+        anchors.Append(OneCell(5, 31, 0, 0, 100, 50, Shadowed("Glow", "ellipse", "5B9BD5", "<a:effectLst><a:glow rad=\"101600\"><a:srgbClr val=\"FFC000\"><a:alpha val=\"45000\"/></a:srgbClr></a:glow></a:effectLst>")));
+        anchors.Append(OneCell(7, 31, 0, 0, 100, 50, Shadowed("Soft edges", "rect", "C00000", "<a:effectLst><a:softEdge rad=\"127000\"/></a:effectLst>")));
+        string Child(string name, string fill, int x, int y, int cx, int cy) =>
+            $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"{name}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>{Fill(fill)}</xdr:spPr>{Text(name, "FFFFFF", 900, bold: true)}</xdr:sp>";
+        anchors.Append(OneCell(1, 37, 0, 0, 200, 70,
+            "<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id=\"9\" name=\"Rotated group\"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm rot=\"1200000\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2540000\" cy=\"889000\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"2540000\" cy=\"889000\"/></a:xfrm></xdr:grpSpPr>" +
+            Child("Group A", "2F5597", 0, 0, 1000000, 889000) + Child("Group B", "70AD47", 1270000, 0, 1270000, 444500) + "</xdr:grpSp>"));
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/shapefill.png\"/></Relationships>");
@@ -485,7 +496,7 @@ internal static class ShowcaseXlsx
     }
 
     private static string ShapeFillsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
-        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides, soft shadow, picture fills:")) + Row(25, Str("A25", "Rectangular and circular path gradients:")),
+        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides, soft shadow, picture fills:")) + Row(25, Str("A25", "Rectangular and circular path gradients:")) + Row(31, Str("A31", "Tiled and translucent picture fills, glow, soft edges:")) + Row(37, Str("A37", "A rotated group:")) + Row(46, Str("A46", "(the print range ends here)")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ charts

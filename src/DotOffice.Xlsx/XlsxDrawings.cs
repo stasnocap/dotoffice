@@ -70,6 +70,12 @@ internal static class XlsxDrawings
         public List<string> Notes { get; } = [];
         public List<string> ChartKinds { get; } = [];
 
+        /// <summary>The rotated groups being read, outermost first.</summary>
+        public List<GroupTurn> Turns { get; } = [];
+
+        /// <summary>An object's own rotation plus the turns of its groups.</summary>
+        public double Turned(double own) => own + Turns.Sum(t => t.Rotation);
+
         public void Note(string note)
         {
             if (!Notes.Contains(note)) Notes.Add(note);
@@ -112,7 +118,7 @@ internal static class XlsxDrawings
             return;
         }
         var (kind, from, to, x, y, width, height) = Placement(anchor, Child(graphicFrame, "xfrm"), frame);
-        var template = new SheetChart { Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame, ZOrder = state.ZOrder++ };
+        var template = new SheetChart { Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame, GroupTurns = state.Turns.ToArray(), Rotation = state.Turned(0), ZOrder = state.ZOrder++ };
         var (unsupported, build) = XlsxCharts.Prepare(context, state.Sheet, doc, template, state.Notes);
         if (build is null)
         {
@@ -125,13 +131,14 @@ internal static class XlsxDrawings
 
     /// <summary>
     /// Reads a group by placing its children inside the group's frame: a child's own coordinates are mapped from the group's child space
-    /// (<c>chOff</c>, <c>chExt</c>) onto the group's frame. A rotated group's children are drawn unrotated.
+    /// (<c>chOff</c>, <c>chExt</c>) onto the group's frame. A rotated group swings its children about its center and turns them with it.
     /// </summary>
     private static void ReadGroup(State state, AnchorFrame anchor, FrameFraction frame, XElement group)
     {
         if (Child(Child(group, "nvGrpSpPr"), "cNvPr") is { } p && (string?)p.Attribute("hidden") is "1" or "true") return;
         var xfrm = Child(Child(group, "grpSpPr"), "xfrm");
-        if (Number(xfrm, "rot") != 0) state.Note("a rotated group is drawn unrotated");
+        double turn = -Number(xfrm, "rot") / 60_000.0;
+        if (turn != 0) state.Turns.Add(new GroupTurn(frame, turn));
         var childOffset = Child(xfrm, "chOff");
         var childExtent = Child(xfrm, "chExt");
         double cx = Number(childExtent, "cx"), cy = Number(childExtent, "cy");
@@ -149,6 +156,7 @@ internal static class XlsxDrawings
                 : FrameFraction.Whole;
             ReadObject(state, anchor, frame.Within(fraction), child);
         }
+        if (turn != 0) state.Turns.RemoveAt(state.Turns.Count - 1);
     }
 
     /// <summary>The size and position fields every object takes from its anchor.</summary>
@@ -194,7 +202,7 @@ internal static class XlsxDrawings
             Image = image,
             Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame,
             CropLeft = Crop("l"), CropTop = Crop("t"), CropRight = Crop("r"), CropBottom = Crop("b"),
-            Rotation = rotation,
+            Rotation = state.Turned(rotation), GroupTurns = state.Turns.ToArray(),
             FlipH = flipH, FlipV = flipV,
             ZOrder = state.ZOrder++,
         });
@@ -273,6 +281,8 @@ internal static class XlsxDrawings
         GradientFill? gradient = null;
         ShapePattern? pattern = null;
         ImageData? fillImage = null;
+        ShapeTile? fillTile = null;
+        double fillAlpha = 1;
         if (!lineOnly)
         {
             var explicitFill = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
@@ -280,7 +290,7 @@ internal static class XlsxDrawings
             {
                 gradient = ReadGradientFill(explicitFill, theme, state, null);
                 pattern = ReadPattern(explicitFill, theme);
-                if (explicitFill.Name.LocalName == "blipFill") fillImage = ReadPictureFill(state, explicitFill);
+                if (explicitFill.Name.LocalName == "blipFill") (fillImage, fillTile, fillAlpha) = ReadPictureFill(state, explicitFill);
             }
             else if (theme.FillStyle((int)Number(fillRef, "idx")) is { } themed && StyleColor("fillRef") is { } phColor)
             {
@@ -289,6 +299,9 @@ internal static class XlsxDrawings
                 if (gradient is not null) fill = gradient.Stops[0].Color;
             }
         }
+        var effects = Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } themedEffects ? theme.EffectStyle((int)Number(themedEffects, "idx")) : null);
+        var glow = lineOnly ? null : ReadGlow(effects, theme, Resolve(Child(style, "effectRef"), theme));
+        double softEdge = lineOnly || Child(effects, "softEdge") is not { } soft ? 0 : Number(soft, "rad") / EmuPerPoint;
         var shadow = lineOnly ? null : ReadShadow(Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } effectRef ? theme.EffectStyle((int)Number(effectRef, "idx")) : null), theme, Resolve(Child(style, "effectRef"), theme));
 
         var ln = Child(spPr, "ln");
@@ -322,15 +335,15 @@ internal static class XlsxDrawings
         state.Sheet.Shapes.Add(new SheetShape
         {
             Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame,
-            Rotation = -Number(xfrm, "rot") / 60_000.0,
+            Rotation = state.Turned(-Number(xfrm, "rot") / 60_000.0), GroupTurns = state.Turns.ToArray(),
             FlipH = Flag(xfrm, "flipH"), FlipV = Flag(xfrm, "flipV"),
             ZOrder = state.ZOrder++,
             Geometry = geometry.Value,
             Fill = fill,
             FillGradient = gradient,
             FillPattern = pattern,
-            FillImage = fillImage,
-            Shadow = shadow,
+            FillImage = fillImage, FillTile = fillTile, FillImageAlpha = fillAlpha,
+            Shadow = shadow, Glow = glow, SoftEdge = softEdge,
             Paths = paths,
             HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
             LineColor = lineColor,
@@ -368,27 +381,41 @@ internal static class XlsxDrawings
     }
 
     /// <summary>
-    /// The picture of a <c>blipFill</c> shape fill, stretched over the shape. Null when the image is missing or unreadable (the shape then takes
-    /// the color it would otherwise have); a tiled picture is stretched instead, which is noted.
+    /// The picture of a <c>blipFill</c> shape fill, with its tiling (<c>a:tile</c>: the tile size from the picture's pixels and resolution times
+    /// the scale, and the offset and alignment) and its opacity (<c>alphaModFix</c>). The image is null when it is missing or unreadable (the
+    /// shape then takes the color it would otherwise have); a tiled picture whose size is unknown is stretched instead, which is noted.
     /// </summary>
-    private static ImageData? ReadPictureFill(State state, XElement blipFill)
+    private static (ImageData? Image, ShapeTile? Tile, double Alpha) ReadPictureFill(State state, XElement blipFill)
     {
-        var embed = Child(blipFill, "blip")?.Attributes().FirstOrDefault(a => a.Name.LocalName == "embed")?.Value;
+        var blip = Child(blipFill, "blip");
+        var embed = blip?.Attributes().FirstOrDefault(a => a.Name.LocalName == "embed")?.Value;
         if (embed is null || !state.Relationships.TryGetValue(embed, out var rel) || rel.IsExternal || !state.Context.Package.Exists(rel.Target))
         {
             state.Note("a shape's picture fill whose image is missing is left out");
-            return null;
+            return (null, null, 1);
         }
         try
         {
             var image = state.Context.GetImage(rel.Target);
-            if (Child(blipFill, "tile") is not null) state.Note("tiled picture fills are stretched over the shape");
-            return image;
+            double alpha = Child(blip, "alphaModFix") is { } fix ? Math.Clamp((fix.Attribute("amt") is null ? 100_000 : Number(fix, "amt")) / 100_000.0, 0, 1) : 1;
+            ShapeTile? tile = null;
+            if (Child(blipFill, "tile") is { } t)
+            {
+                if (image.PixelSize is { } size)
+                {
+                    double scaleX = t.Attribute("sx") is null ? 1 : Number(t, "sx") / 100_000.0, scaleY = t.Attribute("sy") is null ? 1 : Number(t, "sy") / 100_000.0;
+                    double width = size.Width / size.Dpi * 72 * scaleX, height = size.Height / size.Dpi * 72 * scaleY;
+                    if (width >= 1 && height >= 1) tile = new ShapeTile(width, height, Number(t, "tx") / EmuPerPoint, Number(t, "ty") / EmuPerPoint, (string?)t.Attribute("algn") ?? "tl");
+                }
+                if (tile is null) state.Note("tiled picture fills of this picture are stretched over the shape");
+                else if ((string?)t.Attribute("flip") is { } flip && flip != "none") state.Note("mirrored tiles of a picture fill are drawn unmirrored");
+            }
+            return (image, tile, alpha);
         }
         catch (InvalidDataException)
         {
             state.Note("a shape's picture fill whose image could not be read is left out");
-            return null;
+            return (null, null, 1);
         }
     }
 
@@ -424,6 +451,16 @@ internal static class XlsxDrawings
         if (distance <= 0 && blur <= 0) return null;
         var color = Resolve(shadow, theme, placeholder) ?? Color.Black;
         return new ShapeShadow(color, ColorOpacity(shadow), distance * Math.Cos(direction), distance * Math.Sin(direction), blur);
+    }
+
+    /// <summary>A glow from an <c>effectLst</c>: its radius, color and opacity.</summary>
+    private static ShapeGlow? ReadGlow(XElement? effects, XlsxTheme theme, Color? placeholder)
+    {
+        var glow = Child(effects, "glow");
+        if (glow is null) return null;
+        double radius = Number(glow, "rad") / EmuPerPoint;
+        if (radius <= 0) return null;
+        return new ShapeGlow(Resolve(glow, theme, placeholder) ?? Color.Black, ColorOpacity(glow), radius);
     }
 
     /// <summary>The route of a bent or curved connector as points in fractions of its frame; null for any other geometry.</summary>

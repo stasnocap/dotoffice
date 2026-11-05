@@ -321,4 +321,77 @@ public class SheetShapeLayoutTests
         Assert.InRange(item.Clip!.Max(p => p.X), item.X + item.Width - 1, item.X + item.Width + 1e-6);
         Assert.InRange(item.Clip!.Max(p => p.Y), item.Y + item.Height - 1, item.Y + item.Height + 1e-6);
     }
+
+    [Fact]
+    public void A_tiled_picture_fill_repeats_the_picture_from_the_alignment_corner_and_cuts_each_tile_at_the_outline()
+    {
+        var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");
+        // The frame is 100 x 40 points; 30 x 20 point tiles from the top-left corner: 4 columns by 2 rows.
+        var tiles = Page(Shape(fill: Red) with { FillImage = picture, FillTile = new ShapeTile(30, 20, 0, 0) }).Items.OfType<ImageItem>().ToList();
+        Assert.Equal(8, tiles.Count);
+        var (left, top) = Origin;
+        Assert.Equal((left + 50, top + 20), (tiles.Min(t => t.X), tiles.Min(t => t.Y)));
+        Assert.All(tiles, t => Assert.Equal((30.0, 20.0), (t.Width, t.Height)));
+        Assert.All(tiles, t => Assert.Equal(4, t.Clip!.Count));
+        // From the bottom-right corner (and shifted 5 points right) the grid lines up with that corner instead.
+        var right = Page(Shape(fill: Red) with { FillImage = picture, FillTile = new ShapeTile(30, 20, 5, 0, "br") }).Items.OfType<ImageItem>().ToList();
+        Assert.Contains(right, t => Math.Abs(t.X + t.Width - (left + 155)) < 1e-6 && Math.Abs(t.Y + t.Height - (top + 60)) < 1e-6);
+        // Far too many tiles give up and stretch the picture over the frame.
+        var many = Page(Shape(fill: Red) with { FillImage = picture, FillTile = new ShapeTile(1, 1, 0, 0) }).Items.OfType<ImageItem>().ToList();
+        Assert.Single(many);
+        Assert.Equal(100, many[0].Width);
+    }
+
+    [Fact]
+    public void A_picture_fill_with_an_alpha_is_painted_translucent()
+    {
+        var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");
+        var items = Page(Shape(fill: Red) with { FillImage = picture, FillImageAlpha = 0.4 }).Items;
+        int at = items.ToList().FindIndex(i => i is PushItem { Opacity: 0.4 });
+        Assert.True(at >= 0);
+        Assert.IsType<ImageItem>(items[at + 1]);
+        Assert.IsType<PopItem>(items[at + 2]);
+    }
+
+    [Fact]
+    public void A_glow_is_four_translucent_strokes_under_the_shape_that_reach_its_radius()
+    {
+        var glowColor = new Color(0, 176, 240);
+        var page = Page(Shape(fill: Red) with { Glow = new ShapeGlow(glowColor, 0.4, 8) });
+        var layers = page.Items.OfType<PushItem>().Where(p => p.Opacity < 1).ToList();
+        Assert.Equal(4, layers.Count);
+        Assert.Equal(0.4, 1 - Math.Pow(1 - layers[0].Opacity, 4), 6);
+        var strokes = page.Items.OfType<LineItem>().Where(l => l.Color == glowColor).ToList();
+        Assert.Equal([16.0, 12.0, 8.0, 4.0], strokes.Select(l => l.Width).Distinct());   // widest first, up to twice the radius (half of it lies outside)
+        // The glow is drawn before the fill so it lies underneath.
+        var items = page.Items.ToList();
+        Assert.True(items.FindIndex(i => i is LineItem l && l.Color == glowColor) < items.FindIndex(i => i is PolygonItem p && p.Fill == Red));
+    }
+
+    [Fact]
+    public void Soft_edges_draw_shrinking_copies_that_add_up_to_full_opacity_inside()
+    {
+        var page = Page(Shape(fill: Red, line: Blue) with { SoftEdge = 6 });
+        var fills = page.Items.OfType<PolygonItem>().Where(p => p.Fill == Red).ToList();
+        Assert.Equal(6, fills.Count);
+        Assert.Equal(fills.Select(f => f.Points.Max(p => p.X) - f.Points.Min(p => p.X)).OrderDescending(), fills.Select(f => f.Points.Max(p => p.X) - f.Points.Min(p => p.X)));
+        Assert.True(fills[0].Points.Max(p => p.X) - fills[0].Points.Min(p => p.X) > fills[5].Points.Max(p => p.X) - fills[5].Points.Min(p => p.X) + 9);
+        var opacities = page.Items.OfType<PushItem>().Where(p => p.Clip is null).Select(p => p.Opacity).ToList();
+        double visible = 1;
+        foreach (var o in opacities) visible *= 1 - o;
+        Assert.Equal(0, visible, 9);                      // the innermost copy is opaque, so the middle is solid
+        Assert.Empty(page.Items.OfType<LineItem>());      // the outline fades with the edges
+    }
+
+    [Fact]
+    public void A_rotated_group_swings_its_children_about_the_groups_center()
+    {
+        // The group frame is the whole 100 x 40 shape frame; the child is its left half (center 25 left of the group's center).
+        var child = Shape(fill: Red) with { Frame = new FrameFraction(0, 0, 0.5, 1), Rotation = 90, GroupTurns = [new GroupTurn(FrameFraction.Whole, 90)] };
+        var polygon = Page(child).Items.OfType<PolygonItem>().Single();
+        var (left, top) = Origin;
+        // The child's own frame is 50 x 40 around (left + 75, top + 40); a quarter turn counter-clockwise about (left + 100, top + 40) puts its center at (left + 100, top + 65).
+        double cx = (polygon.Points.Min(p => p.X) + polygon.Points.Max(p => p.X)) / 2, cy = (polygon.Points.Min(p => p.Y) + polygon.Points.Max(p => p.Y)) / 2;
+        Assert.Equal((left + 100, top + 65), (Math.Round(cx, 6), Math.Round(cy, 6)));
+    }
 }

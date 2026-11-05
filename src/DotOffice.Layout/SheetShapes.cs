@@ -20,6 +20,7 @@ public sealed partial class SheetLayoutEngine
             pushed++;
         }
         bool flipped = shape.FlipH || shape.FlipV;
+        if (shape.Glow is { } glow) EmitGlow(shape, glow, x, y, width, height, flipped, items);
         if (shape.Shadow is { } shadow)
         {
             // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 3 x 3 grid of such copies spread
@@ -42,10 +43,54 @@ public sealed partial class SheetLayoutEngine
                 }
         }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
-        EmitOutline(shape, x, y, width, height, items);
+        if (shape.SoftEdge >= 0.5 && shape.Geometry != ShapeGeometry.Line) EmitSoftEdged(shape, x, y, width, height, items);
+        else EmitOutline(shape, x, y, width, height, items);
         if (flipped) items.Add(new PopItem());
         if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line) EmitShapeText(shape, x, y, width, height, items);
         for (int i = 0; i < pushed; i++) items.Add(new PopItem());
+    }
+
+    /// <summary>
+    /// A glow: the outline stroked four times, from thin to as wide as the glow's radius reaches, each translucent, under the shape. Near the
+    /// outline all four overlap and the glow is at its strongest; it fades out to the radius.
+    /// </summary>
+    private static void EmitGlow(SheetShape shape, ShapeGlow glow, double x, double y, double w, double h, bool flipped, List<LayoutItem> items)
+    {
+        const int Layers = 4;
+        double cx = x + w / 2, cy = y + h / 2;
+        double layerOpacity = 1 - Math.Pow(1 - Math.Min(glow.Opacity, 0.999), 1.0 / Layers);
+        var outlines = new List<(List<(double X, double Y)> Points, bool Closed)>();
+        if (shape.Paths is { } paths)
+            outlines.AddRange(paths.Where(p => p.Points.Count >= 2).Select(p => (p.Points.Select(q => (X: x + q.X * w, Y: y + q.Y * h)).ToList(), p.Closed)));
+        else if (shape.Geometry == ShapeGeometry.Line) outlines.Add(([(x, y), (x + w, y + h)], false));
+        else outlines.Add((Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList(), true));
+        if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
+        for (int k = Layers; k >= 1; k--)
+        {
+            items.Add(new PushItem(null, Opacity: layerOpacity));
+            foreach (var (points, closed) in outlines)
+                EmitStroke(points, closed, 2 * glow.Radius * k / Layers, glow.Color, LineStyle.Solid, default, default, items);
+            items.Add(new PopItem());
+        }
+        if (flipped) items.Add(new PopItem());
+    }
+
+    /// <summary>
+    /// A shape with soft edges: its fill drawn as copies shrunk step by step towards the middle, each translucent enough that the opacity rises
+    /// evenly from nothing at the outline to full one radius inside it. The outline stroke fades with it, so it is left out.
+    /// </summary>
+    private static void EmitSoftEdged(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
+    {
+        const int Steps = 6;
+        var plain = shape with { LineColor = null, SoftEdge = 0, Glow = null, Shadow = null };
+        double radius = Math.Min(shape.SoftEdge, Math.Min(w, h) / 2 - 0.5);
+        for (int j = 1; j <= Steps; j++)
+        {
+            double inset = radius * (j - 1) / Steps;
+            items.Add(new PushItem(null, Opacity: 1.0 / (Steps - j + 1)));
+            EmitOutline(plain, x + inset, y + inset, Math.Max(w - 2 * inset, 0.5), Math.Max(h - 2 * inset, 0.5), items);
+            items.Add(new PopItem());
+        }
     }
 
     private static List<(double X, double Y)> Outline(SheetShape shape, double w, double h)
@@ -161,12 +206,37 @@ public sealed partial class SheetLayoutEngine
         else if (shape.FillPattern is { } pattern)
             EmitPattern(pattern, points, x, y, w, h, ellipse, items);
         else if (shape.FillImage is { } picture)
-            items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle ? null : points });
+        {
+            if (shape.FillImageAlpha < 1) items.Add(new PushItem(null, Opacity: shape.FillImageAlpha));
+            if (shape.FillTile is not { } tile || !EmitTiles(picture, tile, points, x, y, w, h, items))
+                items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle ? null : points });
+            if (shape.FillImageAlpha < 1) items.Add(new PopItem());
+        }
         else if (shape.Fill is { } fill)
         {
             if (ellipse) items.Add(new EllipseItem(x, y, w, h, fill));
             else items.Add(new PolygonItem(points, fill));
         }
+    }
+
+    /// <summary>
+    /// A picture fill repeated in tiles from the corner or edge the tile's alignment names, each clipped to the outline. False (nothing drawn)
+    /// when the tiles would be too many to be worth drawing, so that the picture is stretched instead.
+    /// </summary>
+    private static bool EmitTiles(ImageData picture, ShapeTile tile, List<(double X, double Y)> outline, double x, double y, double w, double h, List<LayoutItem> items)
+    {
+        string align = tile.Alignment;
+        double originX = align.EndsWith('r') ? x + w - tile.Width : align is "t" or "ctr" or "b" ? x + (w - tile.Width) / 2 : x;
+        double originY = align.StartsWith('b') ? y + h - tile.Height : align is "l" or "ctr" or "r" ? y + (h - tile.Height) / 2 : y;
+        originX += tile.OffsetX;
+        originY += tile.OffsetY;
+        int firstColumn = (int)Math.Floor((x - originX) / tile.Width), lastColumn = (int)Math.Ceiling((x + w - originX) / tile.Width) - 1;
+        int firstRow = (int)Math.Floor((y - originY) / tile.Height), lastRow = (int)Math.Ceiling((y + h - originY) / tile.Height) - 1;
+        if ((long)(lastColumn - firstColumn + 1) * (lastRow - firstRow + 1) > 2500) return false;
+        for (int row = firstRow; row <= lastRow; row++)
+            for (int column = firstColumn; column <= lastColumn; column++)
+                items.Add(new ImageItem(originX + column * tile.Width, originY + row * tile.Height, tile.Width, tile.Height, picture) { Clip = outline });
+        return true;
     }
 
     /// <summary>

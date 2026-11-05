@@ -9,6 +9,9 @@ public readonly record struct FrameFraction(double X, double Y, double Width, do
     public FrameFraction Within(FrameFraction inner) => new(X + inner.X * Width, Y + inner.Y * Height, inner.Width * Width, inner.Height * Height);
 }
 
+/// <summary>A group an object belongs to that is turned: the group's frame (a fraction of the anchor's) and its rotation in degrees counter-clockwise.</summary>
+public sealed record GroupTurn(FrameFraction Frame, double Rotation);
+
 /// <summary>An object placed on a worksheet by a drawing anchor (a picture or a shape). Lengths in points.</summary>
 public abstract record SheetObject
 {
@@ -29,8 +32,14 @@ public abstract record SheetObject
     /// <summary>Where the object lies inside the frame the anchor describes; the whole frame unless the object is part of a group.</summary>
     public FrameFraction Frame { get; init; } = FrameFraction.Whole;
 
-    /// <summary>Rotation in degrees counter-clockwise.</summary>
+    /// <summary>
+    /// Rotation in degrees counter-clockwise, including the turns of the groups the object belongs to (which also swing it about their centers,
+    /// see <see cref="GroupTurns"/>).
+    /// </summary>
     public double Rotation { get; init; }
+
+    /// <summary>The rotated groups the object lies in, outermost first; empty for an object outside groups or in groups that are not turned.</summary>
+    public IReadOnlyList<GroupTurn> GroupTurns { get; init; } = [];
 
     /// <summary>Mirrored left to right / top to bottom (about the center of the frame, before the rotation is applied).</summary>
     public bool FlipH { get; init; }
@@ -95,6 +104,15 @@ public sealed record ShapePattern(HatchKind Kind, Color Foreground, Color Backgr
 /// </summary>
 public sealed record ShapeShadow(Color Color, double Opacity, double Dx, double Dy, double Blur = 0);
 
+/// <summary>
+/// A picture fill repeated over the shape: tiles of <paramref name="Width"/> x <paramref name="Height"/> points, shifted by the offsets, starting
+/// from the corner or edge <paramref name="Alignment"/> names (tl, t, tr, l, ctr, r, bl, b, br).
+/// </summary>
+public sealed record ShapeTile(double Width, double Height, double OffsetX, double OffsetY, string Alignment = "tl");
+
+/// <summary>A glow: the shape's outline spread by <paramref name="Radius"/> points in a translucent color.</summary>
+public sealed record ShapeGlow(Color Color, double Opacity, double Radius);
+
 /// <summary>A shape, text box or line of a drawing.</summary>
 public sealed record SheetShape : SheetObject
 {
@@ -114,6 +132,18 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>A picture fill, stretched over the shape's frame and cut at its outline; drawn instead of <see cref="Fill"/>.</summary>
     public ImageData? FillImage { get; init; }
+
+    /// <summary>When set, <see cref="FillImage"/> is repeated at this size instead of being stretched.</summary>
+    public ShapeTile? FillTile { get; init; }
+
+    /// <summary>How opaque the picture fill is (the blip's alphaModFix); 1 is fully opaque.</summary>
+    public double FillImageAlpha { get; init; } = 1;
+
+    /// <summary>A glow around the outline; null means none.</summary>
+    public ShapeGlow? Glow { get; init; }
+
+    /// <summary>Radius in points over which the edges of the shape fade out (a soft-edge effect); 0 means hard edges.</summary>
+    public double SoftEdge { get; init; }
 
     /// <summary>An outer shadow; null means none.</summary>
     public ShapeShadow? Shadow { get; init; }
