@@ -20,7 +20,7 @@ internal sealed record CfError(string Code)
 internal abstract record CfExpr;
 internal sealed record CfConst(object Value) : CfExpr;
 /// <summary>A reference as written (zero-based); relative parts move with the cell the formula is evaluated for.</summary>
-internal sealed record CfRef(int Row, bool RowAbsolute, int Column, bool ColumnAbsolute) : CfExpr;
+internal sealed record CfRef(int Row, bool RowAbsolute, int Column, bool ColumnAbsolute, string? Sheet = null) : CfExpr;
 internal sealed record CfRange(CfRef From, CfRef To) : CfExpr;
 internal sealed record CfUnary(char Op, CfExpr Operand) : CfExpr;
 internal sealed record CfBinary(string Op, CfExpr Left, CfExpr Right) : CfExpr;
@@ -28,7 +28,7 @@ internal sealed record CfCall(string Name, IReadOnlyList<CfExpr> Args) : CfExpr;
 
 /// <summary>
 /// Parser for the formulas that conditional-formatting rules use: arithmetic, comparison, text concatenation, cell references
-/// and ranges on the same sheet, and a fixed set of functions. Anything else throws <see cref="NotSupportedException"/>.
+/// and ranges on this or another sheet, defined names that stand for a reference or a constant, and a fixed set of functions. Anything else throws <see cref="NotSupportedException"/>.
 /// </summary>
 internal sealed class CfParser
 {
@@ -40,8 +40,15 @@ internal sealed class CfParser
 
     private readonly string _text;
     private int _i;
+    private int _depth;
 
     private CfParser(string text) => _text = text;
+
+    /// <summary>
+    /// Looks up a defined name (the workbook's, or the sheet's own) and returns its formula; set around the parsing of one sheet's rules
+    /// by the reader, which knows the names.
+    /// </summary>
+    [ThreadStatic] internal static Func<string, string?>? NameResolver;
 
     /// <summary>Parses a formula with or without the leading <c>=</c>.</summary>
     public static CfExpr Parse(string formula)
@@ -138,6 +145,14 @@ internal sealed class CfParser
             return inner;
         }
         if (c == '"') return new CfConst(ReadString());
+        if (c == '\'')
+        {
+            // A quoted sheet name: 'My sheet'!A1
+            var sheet = ReadQuotedSheet();
+            if (_i >= _text.Length || _text[_i] != '!') throw new NotSupportedException("A quoted sheet name must be followed by '!'.");
+            _i++;
+            return ReferenceOn(sheet);
+        }
         if (char.IsAsciiDigit(c) || c == '.') return new CfConst(ReadNumber());
         if (char.IsAsciiLetter(c) || c is '$' or '_')
         {
@@ -158,27 +173,78 @@ internal sealed class CfParser
                 }
                 return new CfCall(name, args);
             }
-            if (_i < _text.Length && _text[_i] == '!') throw new NotSupportedException("References to other sheets are not supported.");
-            if (word.Equals("TRUE", StringComparison.OrdinalIgnoreCase)) return new CfConst(true);
-            if (word.Equals("FALSE", StringComparison.OrdinalIgnoreCase)) return new CfConst(false);
-            var from = Reference(word) ?? throw new NotSupportedException($"'{word}' is not a cell reference or a supported name.");
-            if (_i < _text.Length && _text[_i] == ':')
+            if (_i < _text.Length && _text[_i] == '!')
             {
                 _i++;
-                int s2 = _i;
-                while (_i < _text.Length && (char.IsAsciiLetterOrDigit(_text[_i]) || _text[_i] == '$')) _i++;
-                var to = Reference(_text[s2.._i]) ?? throw new NotSupportedException("Unsupported range.");
-                return new CfRange(from, to);
+                return ReferenceOn(word);
             }
-            return from;
+            if (word.Equals("TRUE", StringComparison.OrdinalIgnoreCase)) return new CfConst(true);
+            if (word.Equals("FALSE", StringComparison.OrdinalIgnoreCase)) return new CfConst(false);
+            var from = Reference(word, null);
+            if (from is null) return Name(word);
+            return Range(from, null);
         }
         throw new NotSupportedException($"Unexpected '{c}' in formula.");
     }
 
-    private static CfRef? Reference(string word)
+    /// <summary>A reference or range on <paramref name="sheet"/>, just after the '!'.</summary>
+    private CfExpr ReferenceOn(string sheet)
+    {
+        SkipSpaces();
+        int start = _i;
+        while (_i < _text.Length && (char.IsAsciiLetterOrDigit(_text[_i]) || _text[_i] == '$')) _i++;
+        var word = _text[start.._i];
+        var from = Reference(word, sheet) ?? throw new NotSupportedException($"'{word}' is not a cell reference.");
+        return Range(from, sheet);
+    }
+
+    private CfExpr Range(CfRef from, string? sheet)
+    {
+        if (_i < _text.Length && _text[_i] == ':')
+        {
+            _i++;
+            int s2 = _i;
+            while (_i < _text.Length && (char.IsAsciiLetterOrDigit(_text[_i]) || _text[_i] == '$')) _i++;
+            var to = Reference(_text[s2.._i], sheet) ?? throw new NotSupportedException("Unsupported range.");
+            return new CfRange(from, to);
+        }
+        return from;
+    }
+
+    /// <summary>A defined name: what it stands for (a reference, a range or a constant) is parsed in its place.</summary>
+    private CfExpr Name(string word)
+    {
+        var resolved = NameResolver?.Invoke(word);
+        if (resolved is null) throw new NotSupportedException($"'{word}' is not a cell reference or a defined name.");
+        if (_depth >= 5) throw new NotSupportedException($"The name '{word}' refers to itself.");
+        var inner = new CfParser(resolved.Trim().TrimStart('=')) { _depth = _depth + 1 };
+        var expr = inner.Comparison();
+        inner.SkipSpaces();
+        if (inner._i < inner._text.Length) throw new NotSupportedException($"The name '{word}' is not a plain reference or value.");
+        return expr;
+    }
+
+    private string ReadQuotedSheet()
+    {
+        _i++;
+        var sb = new System.Text.StringBuilder();
+        while (_i < _text.Length)
+        {
+            if (_text[_i] == '\'')
+            {
+                if (_i + 1 < _text.Length && _text[_i + 1] == '\'') { sb.Append('\''); _i += 2; continue; }
+                _i++;
+                return sb.ToString();
+            }
+            sb.Append(_text[_i++]);
+        }
+        throw new NotSupportedException("Unterminated sheet name.");
+    }
+
+    private static CfRef? Reference(string word, string? sheet)
     {
         if (!CellReference.TryParse(word, out var row, out var column)) return null;
-        return new CfRef(row, HasRowDollar(word), column, word[0] == '$');
+        return new CfRef(row, HasRowDollar(word), column, word[0] == '$', sheet);
     }
 
     // "$A$1" and "A$1" fix the row (a '$' after the column letters); "$A1" does not.
@@ -224,9 +290,15 @@ internal sealed class CfParser
 }
 
 /// <summary>What a formula can see: cell values by position and which cell it is being evaluated for.</summary>
-internal sealed class CfContext(Func<int, int, object> cellAt, int originRow, int originColumn, int row, int column, CellRange bounds)
+/// <summary>The cells of another sheet as formulas see them, and the rectangle worth reading.</summary>
+internal sealed record CfSheetView(Func<int, int, object> CellAt, CellRange? Bounds);
+
+internal sealed class CfContext(Func<int, int, object> cellAt, int originRow, int originColumn, int row, int column, CellRange bounds, Func<string, CfSheetView?>? sheets = null)
 {
     public Func<int, int, object> CellAt { get; } = cellAt;
+
+    /// <summary>Finds another sheet by name; null when the sheet does not exist.</summary>
+    public Func<string, CfSheetView?>? Sheets { get; } = sheets;
 
     public int Row { get; } = row;
 
@@ -255,7 +327,9 @@ internal static class CfEvaluator
             case CfRef r:
             {
                 var (row, column) = ctx.Resolve(r);
-                return row < 0 || column < 0 ? CfError.Value : ctx.CellAt(row, column);
+                if (row < 0 || column < 0) return CfError.Value;
+                if (r.Sheet is null) return ctx.CellAt(row, column);
+                return ctx.Sheets?.Invoke(r.Sheet) is { } other ? other.CellAt(row, column) : CfError.Value;
             }
             case CfRange: return CfError.Value;
             case CfUnary u:
@@ -353,8 +427,20 @@ internal static class CfEvaluator
         {
             var (r1, c1) = ctx.Resolve(range.From);
             var (r2, c2) = ctx.Resolve(range.To);
-            int firstRow = Math.Max(Math.Min(r1, r2), ctx.Bounds.FirstRow), lastRow = Math.Min(Math.Max(r1, r2), ctx.Bounds.LastRow);
-            int firstColumn = Math.Max(Math.Min(c1, c2), ctx.Bounds.FirstColumn), lastColumn = Math.Min(Math.Max(c1, c2), ctx.Bounds.LastColumn);
+            var cellAt = ctx.CellAt;
+            var bounds = (CellRange?)ctx.Bounds;
+            if (range.From.Sheet is { } sheetName)
+            {
+                if (ctx.Sheets?.Invoke(sheetName) is not { } other)
+                {
+                    yield return CfError.Value;
+                    yield break;
+                }
+                (cellAt, bounds) = (other.CellAt, other.Bounds);
+            }
+            if (bounds is not { } limit) yield break; // nothing on that sheet
+            int firstRow = Math.Max(Math.Min(r1, r2), limit.FirstRow), lastRow = Math.Min(Math.Max(r1, r2), limit.LastRow);
+            int firstColumn = Math.Max(Math.Min(c1, c2), limit.FirstColumn), lastColumn = Math.Min(Math.Max(c1, c2), limit.LastColumn);
             if (((long)lastRow - firstRow + 1) * (lastColumn - firstColumn + 1) > MaxRangeCells)
             {
                 yield return CfError.Value;
@@ -362,7 +448,7 @@ internal static class CfEvaluator
             }
             for (int r = firstRow; r <= lastRow; r++)
                 for (int c = firstColumn; c <= lastColumn; c++)
-                    yield return ctx.CellAt(r, c);
+                    yield return cellAt(r, c);
             yield break;
         }
         yield return Evaluate(arg, ctx);

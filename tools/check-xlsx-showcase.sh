@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -114,6 +114,18 @@ grep -aq '^0.1843 0.3333 0.5922 rg$' conditional-qdf.pdf || fail "the data bars 
 grep -aq '^0.498 0 0 rg$' conditional-qdf.pdf || fail "the negative data bars should have a dark red border"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
+
+# Conditional links: cross-sheet formulas, names and COUNTIF over another sheet fill the right cells; custom icons and data-bar axes are drawn.
+link_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Conditional links" ] && link_page=$p; done
+[ "$link_page" != 0 ] || fail "no page for the conditional links sheet"
+qpdf --qdf --object-streams=disable "$pdf" links-qdf.pdf
+# 63, 77 and 90 exceed 50 (bad fill, light red); 63 and 18 are in the list (top fill); 63, 77 and 90 exceed the named limit (good fill).
+for color in "1 0.7804 0.8078" "0.7765 0.9373 0.8078" "1 0.9216 0.6118"; do
+  grep -aq "^$color rg$" links-qdf.pdf || fail "a conditional link fill $color is missing"
+done
+grep -aq '^0.498 0 0 rg$' links-qdf.pdf || fail "the data-bar axis color is missing"
+if grep -E "warning xlsx\.conditional" "$log"; then fail "the conditional links should not warn"; fi
 
 # Shapes: drawn as vector content on a single page (themed blue fill, group parts, a dashed outline), with their text, and not reported.
 shape_pages=0; shape_page=0

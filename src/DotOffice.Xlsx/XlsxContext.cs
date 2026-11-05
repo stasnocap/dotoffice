@@ -75,15 +75,31 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             var sheet = new Worksheet(entry.Name) { Visibility = entry.Visibility };
             _sheetWarnings.Clear();
             _conditional = new CfSheet();
-            using (var r = Package.OpenXml(rel.Target))
+            int position = index;
+            CfParser.NameResolver = word =>
+                (names.FirstOrDefault(n => n.LocalSheetId == position && string.Equals(n.Name, word, StringComparison.OrdinalIgnoreCase))
+                 ?? names.FirstOrDefault(n => n.LocalSheetId is null && string.Equals(n.Name, word, StringComparison.OrdinalIgnoreCase)))?.Formula;
+            try
+            {
+                using var r = Package.OpenXml(rel.Target);
                 ReadWorksheet(r, sheet);
+            }
+            finally { CfParser.NameResolver = null; }
             ReadDrawing(sheet, rel.Target);
             ReadComments(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
-            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette, (Options.Today ?? DateTime.Today).Date),
-                message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
+            _conditionalJobs.Add((sheet, _conditional));
             workbook.Sheets.Add(sheet);
+        }
+        // Conditional-formatting formulas may read other sheets, so the rules are applied once every sheet has been read.
+        foreach (var (sheet, rules) in _conditionalJobs)
+        {
+            _sheetWarnings.Clear();
+            ConditionalFormatting.Apply(sheet, rules,
+                new ConditionalFormatting.Environment(_dxfs, Date1904, _palette, (Options.Today ?? DateTime.Today).Date,
+                    name => workbook.Sheets.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))),
+                message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
         }
         // Charts may refer to cells of any sheet, so they are built once every sheet has been read.
         foreach (var (sheet, build) in _chartJobs)
@@ -98,6 +114,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     }
 
     private readonly List<(Worksheet Sheet, Func<IReadOnlyList<Worksheet>, SheetChart> Build)> _chartJobs = [];
+    private readonly List<(Worksheet Sheet, CfSheet Rules)> _conditionalJobs = [];
 
     internal void DeferChart(Worksheet sheet, Func<IReadOnlyList<Worksheet>, SheetChart> build) => _chartJobs.Add((sheet, build));
 

@@ -512,7 +512,7 @@ public class XlsxConditionalFormattingTests
     public void X14_only_rules_with_unsupported_content_warn()
     {
         var warnings = new ConversionWarningList();
-        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>Other!A1&gt;1</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
+        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>SUMPRODUCT(A1:A2)&gt;1</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
         Read(Column("A", 1), X14Block("A1", rule), warnings: warnings);
         Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
     }
@@ -561,5 +561,160 @@ public class XlsxConditionalFormattingTests
     {
         var sheet = Read(Row(1, Inline("A1", "today")), ConditionalFormatting("A1:A2", CfRule("timePeriod", 1, " timePeriod=\"today\"", dxfId: 0)), today: new DateTime(2024, 5, 15));
         Assert.Empty(FilledRows(sheet));
+    }
+
+    private static (Worksheet Main, Worksheet Other, ConversionWarningList Warnings) ReadTwo(string rows, string tail, string otherRows, string? names = null, string otherName = "Lists")
+    {
+        var warnings = new ConversionWarningList();
+        var builder = new XlsxBuilder { Styles = StylesWithDxfs([Dxf(Red), Dxf(Green)]), DefinedNames = names }.AddSheet("S", rows, tail: tail).AddSheet(otherName, otherRows);
+        var workbook = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings });
+        return (workbook.Sheets[0], workbook.Sheets[1], warnings);
+    }
+
+    [Fact]
+    public void Formulas_can_read_cells_of_other_sheets_even_when_that_sheet_comes_later()
+    {
+        // A cell is filled when it exceeds the limit stored on the (later) sheet "Lists"; the relative reference moves with the cell.
+        var rows = Column("A", 1, 10, 5);
+        var other = Row(1, C("A1", "4")) + Row(2, C("A2", "20")) + Row(3, C("A3", "1"));
+        var (main, _, warnings) = ReadTwo(rows, ConditionalFormatting("A1:A3", Expression("A1>Lists!A1", 1, 0)), other);
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal("A3", FilledRows(main)); // 1>4 no, 10>20 no, 5>1 yes
+    }
+
+    [Fact]
+    public void Quoted_sheet_names_absolute_ranges_and_functions_over_other_sheets_work()
+    {
+        var rows = Column("A", 1, 10, 5);
+        var other = Row(1, C("A1", "1")) + Row(2, C("A2", "10"));
+        var rule = Expression("COUNTIF('My list'!$A$1:$A$3,A1)>0", 1, 0);
+        var (main, _, warnings) = ReadTwo(rows, ConditionalFormatting("A1:A3", rule), other, otherName: "My list");
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal("A1,A2", FilledRows(main)); // 1 and 10 are in the list, 5 is not
+        var sum = ReadTwo(rows, ConditionalFormatting("A1:A3", Expression("A1<SUM('My list'!$A$1:$A$3)/2", 1, 0)), other, otherName: "My list").Main;
+        Assert.Equal("A1,A3", FilledRows(sum)); // 11 / 2 = 5.5: 1 and 5 are below it
+    }
+
+    [Fact]
+    public void Cell_is_rules_and_thresholds_can_refer_to_other_sheets()
+    {
+        var rows = Column("A", 1, 10, 5);
+        var other = Row(1, C("A1", "4"));
+        var (main, _, warnings) = ReadTwo(rows, ConditionalFormatting("A1:A3", CellIs("greaterThan", "Lists!$A$1", 1, 0)), other);
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal("A2,A3", FilledRows(main));
+    }
+
+    [Fact]
+    public void Defined_names_standing_for_references_ranges_and_constants_are_resolved()
+    {
+        var rows = Column("A", 1, 10, 5);
+        var other = Row(1, C("A1", "4")) + Row(2, C("A2", "6"));
+        var names = "<definedName name=\"Limit\">Lists!$A$1</definedName><definedName name=\"Bad\" localSheetId=\"0\">Lists!$A$2:$A$2</definedName><definedName name=\"Fixed\">7</definedName>";
+        var (limit, _, w1) = ReadTwo(rows, ConditionalFormatting("A1:A3", Expression("A1>Limit", 1, 0)), other, names);
+        Assert.Empty(w1.Warnings);
+        Assert.Equal("A2,A3", FilledRows(limit));
+        var (fixedValue, _, w2) = ReadTwo(rows, ConditionalFormatting("A1:A3", Expression("A1>Fixed", 1, 0)), other, names);
+        Assert.Empty(w2.Warnings);
+        Assert.Equal("A2", FilledRows(fixedValue));
+        var (range, _, w3) = ReadTwo(rows, ConditionalFormatting("A1:A3", Expression("A1>MAX(Bad)", 1, 0)), other, names);
+        Assert.Empty(w3.Warnings);
+        Assert.Equal("A2", FilledRows(range)); // a sheet-scoped name: > 6
+    }
+
+    [Fact]
+    public void Names_that_are_not_plain_references_and_unknown_names_are_reported_as_unsupported()
+    {
+        var names = "<definedName name=\"Dynamic\">OFFSET(Lists!$A$1,0,0,2,1)</definedName>";
+        var (main, _, warnings) = ReadTwo(Column("A", 1, 10), ConditionalFormatting("A1:A2", Expression("A1>MAX(Dynamic)", 1, 0), Expression("A1>Nothing", 2, 1)), Row(1, C("A1", "4")), names);
+        Assert.Equal("", FilledRows(main));
+        Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void A_rule_reading_a_sheet_that_does_not_exist_never_applies_and_says_so()
+    {
+        var (main, _, warnings) = ReadTwo(Column("A", 1, 10), ConditionalFormatting("A1:A2", Expression("A1>Gone!A1", 1, 0)), Row(1, C("A1", "4")));
+        Assert.Equal("", FilledRows(main));
+        var warning = Assert.Single(warnings.Warnings);
+        Assert.Equal("xlsx.conditional-formatting", warning.Code);
+        Assert.Contains("'Gone'", warning.Message);
+    }
+
+    private static string ThreeThresholds => Thresholds(0, 33, 67);
+
+    [Fact]
+    public void Custom_icons_replace_single_levels_with_icons_of_any_set_or_none()
+    {
+        const string id = "{55555555-5555-5555-5555-555555555555}";
+        var tail = ConditionalFormatting("A1:A3", IconSet(1, "3Arrows", ThreeThresholds, extensionId: id)) +
+                   IconSetExtension(id, "3Arrows", ("3Flags", 0), ("NoIcons", 0), ("3Stars", 2));
+        var sheet = Read(Column("A", 1, 50, 100), tail);
+        Assert.Equal(new CellIcon(IconShape.Flag, Hex("E03030")), sheet.Cells[(0, 0)].Icon);
+        Assert.Null(sheet.Cells[(1, 0)].Icon);
+        Assert.Equal(IconShape.Star, sheet.Cells[(2, 0)].Icon!.Shape);
+        Assert.Equal(2, sheet.Cells[(2, 0)].Icon!.Level);
+        // Without the extension the set is used as it is.
+        var plain = Read(Column("A", 1, 50, 100), ConditionalFormatting("A1:A3", IconSet(1, "3Arrows", ThreeThresholds)));
+        Assert.Equal([IconShape.ArrowDown, IconShape.ArrowSideways, IconShape.ArrowUp], Enumerable.Range(0, 3).Select(i => plain.Cells[(i, 0)].Icon!.Shape));
+    }
+
+    [Fact]
+    public void Custom_icons_of_x14_only_rules_and_invalid_choices_fall_back_to_the_sets_icons()
+    {
+        var rule = "<x14:cfRule type=\"iconSet\" priority=\"1\" id=\"{00000000-0000-0000-0000-0000000000AA}\"><x14:iconSet iconSet=\"3Triangles\" custom=\"1\">" +
+                   X14Cfvo("percent", "0") + X14Cfvo("percent", "33") + X14Cfvo("percent", "67") +
+                   "<x14:cfIcon iconSet=\"3Symbols\" iconId=\"2\"/><x14:cfIcon iconSet=\"3Symbols\" iconId=\"9\"/></x14:iconSet></x14:cfRule>";
+        var sheet = Read(Column("A", 1, 50, 100), X14Block("A1:A3", rule));
+        Assert.Equal(IconShape.Check, sheet.Cells[(0, 0)].Icon!.Shape);
+        Assert.Equal(IconShape.Dash, sheet.Cells[(1, 0)].Icon!.Shape); // an unknown icon id keeps the set's own
+        Assert.Equal(IconShape.TriangleUp, sheet.Cells[(2, 0)].Icon!.Shape); // no choice for the third level
+    }
+
+    private static string AxisExtension(string id, string attributes, string children = "") => DataBarExtension(id, gradient: false, attributes, children);
+
+    [Fact]
+    public void A_data_bar_axis_in_the_middle_splits_the_cell_in_half()
+    {
+        const string id = "{66666666-6666-6666-6666-666666666666}";
+        var tail = ConditionalFormatting("A1:A3", DataBar(1, extensionId: id)) + AxisExtension(id, "axisPosition=\"middle\"", "<x14:axisColor rgb=\"FFFF0000\"/>");
+        var sheet = Read(Column("A", -50, 0, 100), tail);
+        var negative = sheet.Cells[(0, 0)].DataBar!;
+        Assert.Equal((0.0, 0.5, 0.5), (negative.Start, negative.End, negative.Axis!.Value)); // the minimum fills the left half
+        var positive = sheet.Cells[(2, 0)].DataBar!;
+        Assert.Equal((0.5, 1.0), (positive.Start, positive.End));
+        Assert.Equal(Hex("FF0000"), positive.AxisColor);
+        Assert.Equal(0.75, Read(Column("A", -50, 50, 100), tail).Cells[(1, 0)].DataBar!.End); // half of the maximum
+    }
+
+    [Fact]
+    public void An_automatic_axis_is_drawn_in_black_by_default_and_none_draws_no_axis()
+    {
+        const string id = "{77777777-7777-7777-7777-777777777777}";
+        var automatic = Read(Column("A", -50, 0, 100), ConditionalFormatting("A1:A3", DataBar(1, extensionId: id)) + AxisExtension(id, ""));
+        Assert.Equal(1.0 / 3, automatic.Cells[(2, 0)].DataBar!.Axis!.Value, 6);
+        Assert.Equal(Color.Black, automatic.Cells[(2, 0)].DataBar!.AxisColor);
+
+        var none = Read(Column("A", -50, 0, 100), ConditionalFormatting("A1:A3", DataBar(1, extensionId: id)) + AxisExtension(id, "axisPosition=\"none\"", "<x14:negativeFillColor rgb=\"FF00FF00\"/>"));
+        var low = none.Cells[(0, 0)].DataBar!;
+        Assert.Null(low.Axis);
+        Assert.False(low.Negative);
+        Assert.Equal(Hex("00FF00"), low.Color); // negative values keep their own color
+        Assert.Equal(0.0, low.Start);
+        Assert.True(none.Cells[(0, 0)].DataBar!.End < none.Cells[(2, 0)].DataBar!.End); // bars grow with the value from the left
+    }
+
+    [Fact]
+    public void A_right_to_left_data_bar_is_mirrored()
+    {
+        const string id = "{88888888-8888-8888-8888-888888888888}";
+        var tail = ConditionalFormatting("A1:A3", DataBar(1, extensionId: id)) + AxisExtension(id, "direction=\"rightToLeft\"");
+        var sheet = Read(Column("A", 1, 50, 100), tail);
+        var full = sheet.Cells[(2, 0)].DataBar!;
+        Assert.True(full.Mirrored);
+        Assert.Equal((0.0, 1.0), (full.Start, full.End));
+        var small = sheet.Cells[(0, 0)].DataBar!;
+        Assert.Equal(1.0, small.End, 6); // the base is at the right edge
+        Assert.True(small.Start > 0.5);
     }
 }

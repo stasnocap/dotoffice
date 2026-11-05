@@ -264,8 +264,15 @@ internal sealed class XlsxBuilder
         $"<x14:cfRule type=\"dataBar\" id=\"{id}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"{(gradient ? 1 : 0)}\" {attributes}>" +
         $"<x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/>{children}</x14:dataBar></x14:cfRule><xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
 
-    public static string IconSet(int priority, string name, string thresholds, string attributes = "") =>
-        CfRule("iconSet", priority, "", $"<iconSet iconSet=\"{name}\" {attributes}>{thresholds}</iconSet>");
+    public static string IconSet(int priority, string name, string thresholds, string attributes = "", string? extensionId = null) =>
+        CfRule("iconSet", priority, "", $"<iconSet iconSet=\"{name}\" {attributes}>{thresholds}</iconSet>" +
+            (extensionId is null ? "" : $"<extLst><ext uri=\"{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}\" xmlns:x14=\"{X14Ns}\"><x14:id>{extensionId}</x14:id></ext></extLst>"));
+
+    /// <summary>The Excel 2010 half of an icon-set rule with custom icons: one <c>cfIcon</c> per level as (set, icon id).</summary>
+    public static string IconSetExtension(string id, string name, params (string Set, int Id)[] icons) =>
+        $"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14Ns}\"><x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\">" +
+        $"<x14:cfRule type=\"iconSet\" priority=\"1\" id=\"{id}\"><x14:iconSet iconSet=\"{name}\" custom=\"1\">{string.Concat(Enumerable.Range(0, icons.Length).Select(i => "<x14:cfvo type=\"percent\"><xm:f>" + (i * 100 / icons.Length) + "</xm:f></x14:cfvo>"))}" +
+        $"{string.Concat(icons.Select(c => $"<x14:cfIcon iconSet=\"{c.Set}\" iconId=\"{c.Id}\"/>"))}</x14:iconSet></x14:cfRule><xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
 
     // ------------------------------------------------------------ small markup helpers
 

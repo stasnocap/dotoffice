@@ -9,7 +9,8 @@ internal sealed record Cfvo(string Type, CfExpr? Value, bool GreaterOrEqual = tr
 
 /// <summary>Settings a data bar takes from its Excel 2010 extension (<c>x14:dataBar</c>), matched by the rule's <c>x14:id</c>.</summary>
 internal sealed record DataBarExtension(bool Gradient, double? MinLength, double? MaxLength, Color? NegativeColor, bool NegativeSameAsPositive,
-    bool Border = false, Color? BorderColor = null, Color? NegativeBorderColor = null, bool NegativeBorderSameAsPositive = true);
+    bool Border = false, Color? BorderColor = null, Color? NegativeBorderColor = null, bool NegativeBorderSameAsPositive = true,
+    string AxisPosition = "automatic", Color? AxisColor = null, bool RightToLeft = false);
 
 /// <summary>One <c>cfRule</c> of the main namespace.</summary>
 internal sealed class CfRule
@@ -46,6 +47,12 @@ internal sealed class CfRule
     public string? IconSet { get; init; }
     public bool Reverse { get; init; }
 
+    /// <summary>
+    /// The icons chosen one by one in the Excel 2010 extension, per level from the lowest; a null entry means no icon. Null when the
+    /// rule uses the set as it is.
+    /// </summary>
+    public CellIcon?[]? CustomIcons { get; set; }
+
     public bool Contains(int row, int column)
     {
         foreach (var range in Ranges) if (range.Contains(row, column)) return true;
@@ -58,6 +65,9 @@ internal sealed class CfSheet
 {
     public List<CfRule> Rules { get; } = [];
     public Dictionary<string, DataBarExtension> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The <c>x14:cfIcon</c> choices of icon-set rules, by the rule's extension id.</summary>
+    public Dictionary<string, List<(string Set, int Id)>> IconExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Descriptions of unsupported rules, reported together as one warning.</summary>
     public SortedSet<string> Unsupported { get; } = new(StringComparer.Ordinal);
@@ -151,8 +161,37 @@ internal static class ConditionalFormatting
                 Border: (string?)bar.Attribute("border") is "1" or "true",
                 BorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "borderColor")),
                 NegativeBorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeBorderColor")),
-                NegativeBorderSameAsPositive: (string?)bar.Attribute("negativeBarBorderColorSameAsPositive") is not ("0" or "false"));
+                NegativeBorderSameAsPositive: (string?)bar.Attribute("negativeBarBorderColorSameAsPositive") is not ("0" or "false"),
+                AxisPosition: (string?)bar.Attribute("axisPosition") is "middle" or "none" ? (string)bar.Attribute("axisPosition")! : "automatic",
+                AxisColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "axisColor")),
+                RightToLeft: (string?)bar.Attribute("direction") == "rightToLeft");
         }
+        foreach (var rule in extList.Descendants().Where(e => e.Name.LocalName == "cfRule" && (string?)e.Attribute("type") == "iconSet"))
+        {
+            if ((string?)rule.Attribute("id") is not { } id) continue;
+            var picks = CustomIconPicks(rule.Elements().FirstOrDefault(e => e.Name.LocalName == "iconSet"));
+            if (picks.Count > 0) sheet.IconExtensions[id] = picks;
+        }
+    }
+
+    private static List<(string Set, int Id)> CustomIconPicks(XElement? iconSet) =>
+        iconSet?.Elements().Where(e => e.Name.LocalName == "cfIcon")
+            .Select(e => ((string?)e.Attribute("iconSet") ?? "", int.TryParse((string?)e.Attribute("iconId"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : -1)).ToList() ?? [];
+
+    /// <summary>The icon of each level when some levels use icons of other sets; levels without a valid choice keep the set's own icon.</summary>
+    private static CellIcon?[]? ResolveIcons(string setName, IReadOnlyList<(string Set, int Id)> picks)
+    {
+        if (picks.Count == 0 || !IconSets.TryGetValue(setName, out var set)) return null;
+        var result = new CellIcon?[set.Length];
+        for (int i = 0; i < set.Length; i++)
+        {
+            result[i] = set[i];
+            if (i >= picks.Count) continue;
+            var (pickedSet, id) = picks[i];
+            if (pickedSet == "NoIcons") result[i] = null;
+            else if (IconSets.TryGetValue(pickedSet, out var other) && id >= 0 && id < other.Length) result[i] = other[id];
+        }
+        return result;
     }
 
     /// <summary>
@@ -187,6 +226,8 @@ internal static class ConditionalFormatting
                                 if (cfvo.Elements().FirstOrDefault(e => e.Name.LocalName == "f") is { } f) converted.SetAttributeValue("val", f.Value);
                                 icons.Add(converted);
                             }
+                            foreach (var pick in child.Elements().Where(e => e.Name.LocalName == "cfIcon"))
+                                icons.Add(new XElement("cfIcon", pick.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value))));
                             main.Add(icons);
                             break;
                         }
@@ -301,6 +342,7 @@ internal static class ConditionalFormatting
                 if (!IconSets.TryGetValue(result.IconSet!, out var set)) throw new NotSupportedException($"icon set {result.IconSet}");
                 ReadCfvos(icons, result, resolve);
                 if (result.Cfvos.Count != set.Length) throw new NotSupportedException("unexpected number of thresholds");
+                result.CustomIcons = ResolveIcons(result.IconSet!, CustomIconPicks(icons));
                 break;
             }
         }
@@ -338,7 +380,7 @@ internal static class ConditionalFormatting
     // ------------------------------------------------------------------ applying
 
     /// <summary>Everything an evaluation needs besides the sheet.</summary>
-    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904, IReadOnlyList<Color?>? Palette = null, DateTime? Today = null);
+    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904, IReadOnlyList<Color?>? Palette = null, DateTime? Today = null, Func<string, Worksheet?>? SheetByName = null);
 
     /// <summary>What the rules decided for one cell; the first rule (highest priority) to set a property keeps it.</summary>
     private sealed class Outcome
@@ -380,12 +422,27 @@ internal static class ConditionalFormatting
 
     public static void Apply(Worksheet sheet, CfSheet cf, Environment env, Action<string> warn)
     {
+        var messages = new List<string>();
+        var missing = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tracked = env with { SheetByName = name => env.SheetByName?.Invoke(name) ?? (missing.Add(name) ? null : null) };
+        ApplyRules(sheet, cf, tracked, messages.Add);
+        if (missing.Count > 0)
+            messages.Add($"has conditional formatting that reads {(missing.Count == 1 ? "the sheet" : "the sheets")} {string.Join(", ", missing.Select(m => $"'{m}'"))}, which {(missing.Count == 1 ? "does" : "do")} not exist; those rules never apply.");
+        if (messages.Count > 0) warn(string.Join(" ", messages));
+    }
+
+    private static void ApplyRules(Worksheet sheet, CfSheet cf, Environment env, Action<string> warn)
+    {
         if (cf.Unsupported.Count > 0)
             warn($"uses conditional formatting that is not supported ({string.Join(", ", cf.Unsupported)}); those rules are ignored.");
         if (cf.Rules.Count == 0) return;
         foreach (var rule in cf.Rules)
+        {
             if (rule.Type == "dataBar" && rule.X14Id is { } id && cf.Extensions.TryGetValue(id, out var ext))
                 rule.Extension = ext;
+            else if (rule.Type == "iconSet" && rule.X14Id is { } iconId && cf.IconExtensions.TryGetValue(iconId, out var picks))
+                rule.CustomIcons = ResolveIcons(rule.IconSet!, picks) ?? rule.CustomIcons;
+        }
 
         if (Bounds(sheet) is not { } bounds) return;
         var rules = cf.Rules.Select((r, i) => (Rule: r, Order: i)).OrderBy(x => x.Rule.Priority).ThenBy(x => x.Order).Select(x => x.Rule).ToList();
@@ -406,6 +463,17 @@ internal static class ConditionalFormatting
 
         var cells = sheet.Cells;
         object ValueAt(int row, int column) => ValueOf(cells.GetValueOrDefault((row, column)));
+        // Formulas may read other sheets (all sheets are known by now): their values and the rectangle worth reading.
+        var views = new Dictionary<string, CfSheetView?>(StringComparer.OrdinalIgnoreCase);
+        CfSheetView? ViewOf(string name)
+        {
+            if (views.TryGetValue(name, out var cached)) return cached;
+            CfSheetView? view = null;
+            if (string.Equals(name, sheet.Name, StringComparison.OrdinalIgnoreCase)) view = new CfSheetView(ValueAt, bounds);
+            else if (env.SheetByName?.Invoke(name) is { } other)
+                view = new CfSheetView((r, c) => ValueOf(other.Cells.GetValueOrDefault((r, c))), Bounds(other));
+            return views[name] = view;
+        }
         var stats = new Dictionary<CfRule, Stats>();
         Stats StatsOf(CfRule rule)
         {
@@ -445,7 +513,7 @@ internal static class ConditionalFormatting
             {
                 if (!clamped.TryGetValue(rule, out var ranges) || !ranges.Any(range => range.Contains(row, column))) continue;
                 var cell = cells.GetValueOrDefault((row, column));
-                var ctx = new CfContext(ValueAt, rule.OriginRow, rule.OriginColumn, row, column, bounds);
+                var ctx = new CfContext(ValueAt, rule.OriginRow, rule.OriginColumn, row, column, bounds, ViewOf);
                 bool scaleLike = rule.Type is "colorScale" or "dataBar" or "iconSet";
                 if (scaleLike)
                 {
@@ -689,28 +757,45 @@ internal static class ConditionalFormatting
                 bool gradient = ext?.Gradient ?? true;
                 Color? border = ext is { Border: true } ? ext.BorderColor ?? color : null;
                 outcome.Any = true;
-                if (ext is not null && min < 0 && max > min)
+                string axisPosition = ext?.AxisPosition ?? "automatic";
+                double? axisAt = null;
+                CellDataBar bar;
+                Color NegativeFill() => ext!.NegativeSameAsPositive ? color : ext.NegativeColor ?? new Color(0xFF, 0, 0);
+                Color? NegativeEdge() => border is null ? null : ext!.NegativeBorderSameAsPositive ? border : ext.NegativeBorderColor ?? new Color(0xFF, 0, 0);
+                if (ext is not null && axisPosition == "none")
                 {
-                    // Excel 2010 bars with negative values grow from an axis placed in proportion to the range.
-                    double axis = Math.Clamp(-min / (max - min), 0, 1);
+                    // Without an axis the bars all start at the left; negative values only differ in color.
+                    double minLength = ext.MinLength is { } lo ? lo / 100 : rule.MinLength / 100, maxLength = ext.MaxLength is { } hi ? hi / 100 : rule.MaxLength / 100;
+                    double position = max - min <= 1e-12 ? 1 : Math.Clamp((value - min) / (max - min), 0, 1);
+                    bool below = value < 0;
+                    bar = new CellDataBar(0, minLength + position * (maxLength - minLength), below ? NegativeFill() : color, gradient, BorderColor: below ? NegativeEdge() : border);
+                }
+                else if (ext is not null && ((axisPosition == "middle" && max > min) || (min < 0 && max > min)))
+                {
+                    // Bars with negative values grow from an axis: in the middle of the cell, or (automatic) placed in proportion to the range.
+                    double axis = axisPosition == "middle" ? 0.5 : Math.Clamp(-min / (max - min), 0, 1);
+                    axisAt = axis;
                     if (value < 0)
                     {
-                        double length = Math.Clamp(value / min, 0, 1) * axis;
-                        outcome.Bar = new CellDataBar(axis - length, axis, ext.NegativeSameAsPositive ? color : ext.NegativeColor ?? new Color(0xFF, 0, 0), gradient, Negative: true,
-                            BorderColor: border is null ? null : ext.NegativeBorderSameAsPositive ? border : ext.NegativeBorderColor ?? new Color(0xFF, 0, 0));
+                        double length = min < 0 ? Math.Clamp(value / min, 0, 1) * axis : 0;
+                        bar = new CellDataBar(axis - length, axis, NegativeFill(), gradient, Negative: true, BorderColor: NegativeEdge());
                     }
                     else
                     {
                         double length = max > 0 ? Math.Clamp(value / max, 0, 1) * (1 - axis) : 0;
-                        outcome.Bar = new CellDataBar(axis, axis + length, color, gradient, BorderColor: border);
+                        bar = new CellDataBar(axis, axis + length, color, gradient, BorderColor: border);
                     }
                 }
                 else
                 {
                     double minLength = (ext?.MinLength ?? rule.MinLength) / 100, maxLength = (ext?.MaxLength ?? rule.MaxLength) / 100;
                     double position = max - min <= 1e-12 ? 1 : Math.Clamp((value - min) / (max - min), 0, 1);
-                    outcome.Bar = new CellDataBar(0, minLength + position * (maxLength - minLength), color, gradient, BorderColor: border);
+                    bar = new CellDataBar(0, minLength + position * (maxLength - minLength), color, gradient, BorderColor: border);
                 }
+                if (axisAt is not null) bar = bar with { Axis = axisAt, AxisColor = ext!.AxisColor ?? Color.Black };
+                if (ext is { RightToLeft: true })
+                    bar = bar with { Start = 1 - bar.End, End = 1 - bar.Start, Axis = bar.Axis is { } a1 ? 1 - a1 : null, Mirrored = true };
+                outcome.Bar = bar;
                 if (!rule.ShowValue) outcome.HideValue = true;
                 return;
             }
@@ -725,7 +810,8 @@ internal static class ConditionalFormatting
                     if (rule.Cfvos[i].GreaterOrEqual ? value >= limit : value > limit) index = i;
                 }
                 outcome.Any = true;
-                outcome.Icon = set[rule.Reverse ? set.Length - 1 - index : index];
+                int level = rule.Reverse ? set.Length - 1 - index : index;
+                outcome.Icon = rule.CustomIcons is { } custom ? custom[level] : set[level];
                 if (!rule.ShowValue) outcome.HideValue = true;
                 return;
             }

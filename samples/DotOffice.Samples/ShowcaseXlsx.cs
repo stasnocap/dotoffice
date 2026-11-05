@@ -42,10 +42,12 @@ internal static class ShowcaseXlsx
             ("More charts", MoreChartsSheet(), "visible"),
             ("Chart options", ChartOptionsSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
+            ("Conditional links", ConditionalLinksSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
+            ("Limits", Limits(), "hidden"),
         };
 
         using var stream = File.Create(path);
@@ -87,7 +89,7 @@ internal static class ShowcaseXlsx
         Entry(zip, "xl/_rels/workbook.xml.rels", $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>");
         Entry(zip, "xl/workbook.xml",
             $"<workbook xmlns=\"{Main}\" xmlns:r=\"{Rel}\"><sheets>{sheetEntries}</sheets>" +
-            "<definedNames><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName>" +
+            "<definedNames><definedName name=\"Limit\">Limits!$A$1</definedName><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName>" +
             $"<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Areas")}\">Areas!$A$1:$C$3,Areas!$E$5:$F$7,Areas!$A$10:$B$11</definedName></definedNames></workbook>");
         Entry(zip, "xl/styles.xml", Styles);
     }
@@ -749,6 +751,55 @@ internal static class ShowcaseXlsx
                     "<x14:dxf><font><b/><color rgb=\"FF7030A0\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></x14:dxf></x14:cfRule><xm:sqref>D31:D35</xm:sqref></x14:conditionalFormatting>" +
                     "</x14:conditionalFormattings></ext></extLst>");
         var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), tail.ToString());
+    }
+
+    private static string Limits() =>
+        Sheet("", Row(1, Num("A1", 50) + Num("B1", 18) + Num("C1", 63)) + Row(2, Num("B2", 100)), "<pageSetup paperSize=\"9\"/>" + HeaderFooter);
+
+    /// <summary>Rules that read other sheets and names, custom icons and data-bar axis options.</summary>
+    private static string ConditionalLinksSheet()
+    {
+        const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        const string Percents = "<cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/>";
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Conditional formatting that reads other sheets and names, custom icons and data-bar axes", Bold)));
+        rows.Append(Row(3, Str("A3", "> Limits!A1", Header) + Str("B3", "> Limit (name)", Header) + Str("C3", "In list", Header) + Str("D3", "Custom icons", Header) +
+                           Str("E3", "Axis middle", Header) + Str("F3", "No axis", Header) + Str("G3", "Right to left", Header)));
+        double[] values = [10, 18, 42, 50, 63, 77, 90];
+        double[] signed = [-80, -40, -10, 0, 20, 60, 100];
+        for (int i = 0; i < values.Length; i++)
+        {
+            int r = 4 + i;
+            rows.Append(Row(r, Num($"A{r}", values[i]) + Num($"B{r}", values[i]) + Num($"C{r}", values[i]) + Num($"D{r}", i * 15) + Num($"E{r}", signed[i]) + Num($"F{r}", signed[i]) + Num($"G{r}", values[i])));
+        }
+        rows.Append(Row(12, Str("A12", "Limits sheet (hidden): A1 = 50 (the name Limit), B1:C1 = 18, 63 (the list).")));
+
+        var tail = new StringBuilder();
+        tail.Append("<conditionalFormatting sqref=\"A4:A10\"><cfRule type=\"expression\" dxfId=\"0\" priority=\"1\"><formula>A4&gt;Limits!$A$1</formula></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"B4:B10\"><cfRule type=\"expression\" dxfId=\"1\" priority=\"2\"><formula>B4&gt;Limit</formula></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"C4:C10\"><cfRule type=\"expression\" dxfId=\"3\" priority=\"3\"><formula>COUNTIF(Limits!$B$1:$C$1,C4)&gt;0</formula></cfRule></conditionalFormatting>");
+        string Linked(string id, string type, string body) =>
+            $"<cfRule type=\"{type}\" priority=\"{id.Length}\">{body}<extLst><ext uri=\"{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}\" xmlns:x14=\"{X14}\"><x14:id>{{{id}}}</x14:id></ext></extLst></cfRule>";
+        tail.Append("<conditionalFormatting sqref=\"D4:D10\">" + Linked("BBBBBBBB-0000-0000-0000-000000000001", "iconSet", $"<iconSet iconSet=\"3Arrows\">{Percents}</iconSet>") + "</conditionalFormatting>");
+        int priority = 10;
+        string Bar(string column, string id) =>
+            $"<conditionalFormatting sqref=\"{column}4:{column}10\"><cfRule type=\"dataBar\" priority=\"{++priority}\"><dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FF5B9BD5\"/></dataBar>" +
+            $"<extLst><ext uri=\"{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}\" xmlns:x14=\"{X14}\"><x14:id>{{{id}}}</x14:id></ext></extLst></cfRule></conditionalFormatting>";
+        tail.Append(Bar("E", "BBBBBBBB-0000-0000-0000-000000000002") + Bar("F", "BBBBBBBB-0000-0000-0000-000000000003") + Bar("G", "BBBBBBBB-0000-0000-0000-000000000004"));
+        string DataBarExt(string id, string sqref, string attributes, string children) =>
+            $"<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" id=\"{{{id}}}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\" {attributes}><x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/>{children}</x14:dataBar></x14:cfRule><xm:sqref>{sqref}</xm:sqref></x14:conditionalFormatting>";
+        tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
+        tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
+                    // custom icons: a flag for the low level, no icon in the middle, a star for the top
+                    "<x14:conditionalFormatting><x14:cfRule type=\"iconSet\" id=\"{BBBBBBBB-0000-0000-0000-000000000001}\"><x14:iconSet iconSet=\"3Arrows\" custom=\"1\">" +
+                    "<x14:cfvo type=\"percent\"><xm:f>0</xm:f></x14:cfvo><x14:cfvo type=\"percent\"><xm:f>33</xm:f></x14:cfvo><x14:cfvo type=\"percent\"><xm:f>67</xm:f></x14:cfvo>" +
+                    "<x14:cfIcon iconSet=\"3Flags\" iconId=\"0\"/><x14:cfIcon iconSet=\"NoIcons\" iconId=\"0\"/><x14:cfIcon iconSet=\"3Stars\" iconId=\"2\"/></x14:iconSet></x14:cfRule><xm:sqref>D4:D10</xm:sqref></x14:conditionalFormatting>" +
+                    DataBarExt("BBBBBBBB-0000-0000-0000-000000000002", "E4:E10", "axisPosition=\"middle\"", "<x14:negativeFillColor rgb=\"FFC00000\"/><x14:axisColor rgb=\"FF7F0000\"/>") +
+                    DataBarExt("BBBBBBBB-0000-0000-0000-000000000003", "F4:F10", "axisPosition=\"none\"", "<x14:negativeFillColor rgb=\"FFC00000\"/>") +
+                    DataBarExt("BBBBBBBB-0000-0000-0000-000000000004", "G4:G10", "direction=\"rightToLeft\"", "") +
+                    "</x14:conditionalFormattings></ext></extLst>");
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"7\" width=\"16\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
     }
 

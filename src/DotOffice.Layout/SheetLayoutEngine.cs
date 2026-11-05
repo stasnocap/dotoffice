@@ -985,8 +985,10 @@ public sealed partial class SheetLayoutEngine
             {
                 // Gradient bars are solid at their base (next to the axis) and fade towards the free end.
                 var light = bar.Color.Blend(White, 0.8);
-                items.Add(new GradientItem(left, top, barWidth, barHeight, bar.Negative ? 180 : 0, [new GradientStop(0, bar.Color), new GradientStop(1, light)]));
+                items.Add(new GradientItem(left, top, barWidth, barHeight, bar.Negative != bar.Mirrored ? 180 : 0, [new GradientStop(0, bar.Color), new GradientStop(1, light)]));
             }
+            if (bar.Axis is { } axis)
+                items.Add(new RectItem(x + axis * width - 0.375, top, 0.75, barHeight, bar.AxisColor ?? Color.Black));
             if (bar.BorderColor is { } border)
             {
                 // A thin solid outline, drawn inside the bar.

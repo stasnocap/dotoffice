@@ -141,4 +141,16 @@ public class SheetConditionalLayoutTests
         var text = SheetLayoutTests.Text("aaa bbb ccc", style);
         Assert.True(Lines(text with { Icon = new CellIcon(IconShape.Circle, Blue) }) > Lines(text));
     }
+
+    [Fact]
+    public void A_data_bar_axis_is_a_thin_line_in_its_color_and_mirrored_gradients_fade_the_other_way()
+    {
+        var axis = Page(Numbered("5", new CellDataBar(0.5, 0.75, Blue, Gradient: false, Axis: 0.5, AxisColor: new Color(255, 0, 0)))).Items.OfType<RectItem>().Where(r => r.Fill == new Color(255, 0, 0)).ToList();
+        Assert.Single(axis);
+        Assert.Equal(0.75, axis[0].Width, 6);
+        var plain = Page(Numbered("5", new CellDataBar(0, 0.5, Blue, Gradient: true))).Items.OfType<GradientItem>().Single();
+        var mirrored = Page(Numbered("5", new CellDataBar(0.5, 1, Blue, Gradient: true, Mirrored: true))).Items.OfType<GradientItem>().Single();
+        var mirroredNegative = Page(Numbered("5", new CellDataBar(0, 0.5, Blue, Gradient: true, Negative: true, Mirrored: true))).Items.OfType<GradientItem>().Single();
+        Assert.Equal((0.0, 180.0, 0.0), (plain.Degree, mirrored.Degree, mirroredNegative.Degree));
+    }
 }
