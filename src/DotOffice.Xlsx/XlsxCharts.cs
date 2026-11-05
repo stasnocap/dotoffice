@@ -207,7 +207,8 @@ internal static class XlsxCharts
             double width = ln?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 ? emu / 12700 : 2.25;
             return new ChartTrendline(type, SolidFill(ln, theme) ?? seriesColor, width, dash is not null and not "solid",
                 (int)Math.Clamp(Number(Child(t, "order"), "val", 2), 2, 6), (int)Math.Clamp(Number(Child(t, "period"), "val", 2), 2, 100),
-                Number(Child(t, "forward"), "val"), Number(Child(t, "backward"), "val"));
+                Number(Child(t, "forward"), "val"), Number(Child(t, "backward"), "val"),
+                Flag(Child(t, "dispEq"), "val"), Flag(Child(t, "dispRSqr"), "val"), TextStyleOf(Path(t, "trendlineLbl", "txPr"), theme));
         }
 
         IReadOnlyList<ChartErrorBars>? ReadErrorBars(XElement ser, List<double?> values, List<double?>? xValues, ChartKind seriesKind)
@@ -346,6 +347,7 @@ internal static class XlsxCharts
         var xTicks = new List<ChartTick>();
         var secondaryTicks = new List<ChartTick>();
         string? secondaryTitle = null;
+        XElement? secondaryStyleAxis = null;
         var extraGroups = new List<ChartGroup>();
         if (xy)
         {
@@ -385,6 +387,7 @@ internal static class XlsxCharts
                 var secondaryGrouping = secondary.Any(g => g.Item1 == ChartGrouping.PercentStacked) ? ChartGrouping.PercentStacked : ChartGrouping.Clustered;
                 (secondaryMin, secondaryMax, secondaryTicks, secondaryLog, reverseSecondary) = ValueScale(secondaryAxis, slo, shi, sPositive, secondaryGrouping, sourceFormat);
                 secondaryShown = !Flag(Child(secondaryAxis, "delete"), "val");
+                secondaryStyleAxis = secondaryAxis;
                 secondaryTitle = TextOf(Path(secondaryAxis, "title", "tx", "rich"));
             }
         }
@@ -425,6 +428,22 @@ internal static class XlsxCharts
             "l" => LegendPosition.Left, "t" => LegendPosition.Top, "b" => LegendPosition.Bottom, _ => LegendPosition.Right,
         };
 
+        ChartBox? legendBox = ManualLayout(legendElement) is { } ll && ll.X is >= 0 and < 1 && ll.Y is >= 0 and < 1 ? new ChartBox(ll.X, ll.Y, ll.W, ll.H, false) : null;
+
+        // Text formatting: the chart's base style (color, font, weight; its size is the base size) under each part's own.
+        var baseStyle = TextStyleOf(Child(space, "txPr"), theme);
+        var baseWithoutSize = baseStyle is null ? null : baseStyle with { Size = null };
+        ChartTextStyle? Part(XElement? holder) => MergeStyles(baseWithoutSize, TextStyleOf(holder, theme));
+        var labelProperties = group.Descendants().Where(e => e.Name.LocalName == "dLbls").Select(d => Child(d, "txPr")).FirstOrDefault(x => x is not null);
+        var textStyles = new ChartTextStyles
+        {
+            Title = Part(Path(titleElement, "tx", "rich")),
+            ValueAxis = Part(Child(valueAxis, "txPr")), CategoryAxis = Part(Child(categoryAxis, "txPr")),
+            ValueAxisTitle = Part(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = Part(Path(categoryAxis, "title", "tx", "rich")),
+            SecondaryAxis = Part(Child(secondaryStyleAxis, "txPr")), SecondaryAxisTitle = Part(Path(secondaryStyleAxis, "title", "tx", "rich")),
+            Legend = Part(Child(legendElement, "txPr")), DataLabels = Part(labelProperties),
+        };
+
         Color? background = Color.White, border = new Color(0xD9, 0xD9, 0xD9);
         if (Child(space, "spPr") is { } chartProperties)
         {
@@ -458,9 +477,42 @@ internal static class XlsxCharts
             ReverseCategories = (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") == "maxMin" && !xy,
             ExtraGroups = extraGroups, SecondaryTicks = secondaryTicks, SecondaryMin = secondaryMin, SecondaryMax = secondaryMax,
             SecondaryAxisTitle = secondaryTitle, ShowSecondaryAxis = secondaryShown,
-            PlotArea = plotBox, TitlePosition = titlePosition,
+            PlotArea = plotBox, TitlePosition = titlePosition, LegendBox = legendBox, TextStyles = textStyles,
         };
     }
+
+    /// <summary>
+    /// The text formatting a <c>txPr</c> or rich text body asks for: the paragraph's default run properties, overridden by the first
+    /// run's. Null when it sets nothing.
+    /// </summary>
+    internal static ChartTextStyle? TextStyleOf(XElement? holder, XlsxTheme theme)
+    {
+        if (holder is null) return null;
+        ChartTextStyle? style = null;
+        foreach (var name in new[] { "defRPr", "rPr" })
+        {
+            if (Descendant(holder, name) is not { } e) continue;
+            double? size = e.Attribute("sz") is { } sz && double.TryParse(sz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0 ? v / 100 : null;
+            bool? bold = e.Attribute("b") is { } b ? b.Value is "1" or "true" : null;
+            bool? italic = e.Attribute("i") is { } i ? i.Value is "1" or "true" : null;
+            string? family = (string?)Child(e, "latin")?.Attribute("typeface");
+            if (family is { Length: 0 } or ['+', ..]) family = null; // theme font tokens such as +mn-lt keep the default
+            Color? color = Child(e, "solidFill") is not null ? SolidFill(e, theme) : null;
+            style = MergeStyles(style, new ChartTextStyle(size, color, bold, italic, family));
+        }
+        return style;
+    }
+
+    /// <summary>The style <paramref name="over"/> on top of <paramref name="under"/>: what the first sets wins; null when both set nothing.</summary>
+    internal static ChartTextStyle? MergeStyles(ChartTextStyle? under, ChartTextStyle? over)
+    {
+        if (under is null) return IsEmpty(over) ? null : over;
+        if (over is null) return under;
+        var merged = new ChartTextStyle(over.Size ?? under.Size, over.Color ?? under.Color, over.Bold ?? under.Bold, over.Italic ?? under.Italic, over.Family ?? under.Family);
+        return IsEmpty(merged) ? null : merged;
+    }
+
+    private static bool IsEmpty(ChartTextStyle? s) => s is null || (s.Size is null && s.Color is null && s.Bold is null && s.Italic is null && s.Family is null);
 
     private static XElement? Descendant(XElement? root, params string[] names) =>
         root?.Descendants().FirstOrDefault(e => names.Contains(e.Name.LocalName));

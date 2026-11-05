@@ -43,7 +43,24 @@ public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial,
 /// <paramref name="Period"/> the window of a moving average.
 /// </summary>
 public sealed record ChartTrendline(TrendlineKind Kind, Color Color, double Width = 2.25, bool Dashed = true, int Order = 2, int Period = 2,
-    double Forward = 0, double Backward = 0);
+    double Forward = 0, double Backward = 0, bool ShowEquation = false, bool ShowRSquared = false, ChartTextStyle? LabelStyle = null);
+
+/// <summary>Text formatting that differs from the chart's base: any part that is null keeps the default.</summary>
+public sealed record ChartTextStyle(double? Size = null, Color? Color = null, bool? Bold = null, bool? Italic = null, string? Family = null);
+
+/// <summary>The text styles of the parts of a chart (title, axis labels, axis titles, legend, data labels); null parts use the defaults.</summary>
+public sealed record ChartTextStyles
+{
+    public ChartTextStyle? Title { get; init; }
+    public ChartTextStyle? ValueAxis { get; init; }
+    public ChartTextStyle? CategoryAxis { get; init; }
+    public ChartTextStyle? SecondaryAxis { get; init; }
+    public ChartTextStyle? ValueAxisTitle { get; init; }
+    public ChartTextStyle? CategoryAxisTitle { get; init; }
+    public ChartTextStyle? SecondaryAxisTitle { get; init; }
+    public ChartTextStyle? Legend { get; init; }
+    public ChartTextStyle? DataLabels { get; init; }
+}
 
 /// <summary>
 /// Error bars of a series: per point the distance drawn above (<paramref name="Plus"/>) and below (<paramref name="Minus"/>) the value,
@@ -198,6 +215,12 @@ public sealed record SheetChart : SheetObject
 
     /// <summary>A manual position (top-left, in fractions of the chart) of the title; null means centered on top.</summary>
     public (double X, double Y)? TitlePosition { get; init; }
+
+    /// <summary>A manual position of the legend (top-left in fractions of the chart; the size, when given, is not used); null means automatic.</summary>
+    public ChartBox? LegendBox { get; init; }
+
+    /// <summary>Formatting of the text of the title, axes, legend and labels beyond the base size.</summary>
+    public ChartTextStyles TextStyles { get; init; } = new();
 
     /// <summary>The size of the text of axes, legend and labels.</summary>
     public double FontSize { get; init; } = 9;

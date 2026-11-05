@@ -10,19 +10,24 @@ public sealed partial class SheetLayoutEngine
     private void EmitScatter(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
     {
         double fontSize = chart.FontSize;
+        var styles = chart.TextStyles;
+        var yFont = Styled(font, styles.ValueAxis);
+        var xFont = Styled(font, styles.CategoryAxis);
         if (chart.CategoryAxisTitle is { Length: > 0 } xTitle)
         {
-            PlaceText(xTitle, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
-            bottom -= fontSize + 8;
+            var titleFont = Styled(font with { FontSize = fontSize + 1 }, styles.CategoryAxisTitle);
+            PlaceText(xTitle, titleFont, (left + right) / 2, bottom - titleFont.FontSize - 2, Anchor.Middle, false, 0, items);
+            bottom -= titleFont.FontSize + 7;
         }
         if (chart.ValueAxisTitle is { Length: > 0 } yTitle)
         {
-            PlaceText(yTitle, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
-            left += fontSize + 8;
+            var titleFont = Styled(font with { FontSize = fontSize + 1 }, styles.ValueAxisTitle);
+            PlaceText(yTitle, titleFont, left + titleFont.FontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
+            left += titleFont.FontSize + 7;
         }
-        double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
-        double lastWidth = chart.ShowCategoryAxis ? chart.XTicks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
-        double labelHeight = fontSize * 1.25;
+        double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, yFont)).DefaultIfEmpty(0).Max() : 0;
+        double lastWidth = chart.ShowCategoryAxis ? chart.XTicks.Select(t => MeasureChartText(t.Label, xFont)).DefaultIfEmpty(0).Max() : 0;
+        double labelHeight = xFont.FontSize * 1.25;
         double plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0) + 2, plotRight = right - Math.Max(4, lastWidth / 2);
         double plotTop = top + labelHeight / 2, plotBottom = bottom - (chart.ShowCategoryAxis ? labelHeight + 5 : 0);
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
@@ -36,18 +41,19 @@ public sealed partial class SheetLayoutEngine
         {
             double ty = Y(tick.Value);
             if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
-            if (chart.ShowValueAxis) PlaceText(tick.Label, font, plotLeft - 5, ty, Anchor.End, true, 0, items);
+            if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
         }
         foreach (var tick in chart.XTicks)
         {
             double tx = X(tick.Value);
             if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
-            if (chart.ShowCategoryAxis) PlaceText(tick.Label, font, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
+            if (chart.ShowCategoryAxis) PlaceText(tick.Label, xFont, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
         }
         if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), 0.75, ChartGrid));
         if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, 0.75, ChartGrid));
 
         var labels = new List<(string Text, double X, double Y, Color? Fill)>();
+        var trendLabels = new List<LayoutItem>();
         if (chart.Kind == ChartKind.Bubble)
         {
             // Bubble area follows the size; the largest bubble is a quarter of the plot's shorter side. Larger bubbles go underneath.
@@ -91,7 +97,11 @@ public sealed partial class SheetLayoutEngine
                     var known = new List<(double X, double Y)>();
                     for (int i = 0; i < s.Values.Count && i < trendX.Count; i++) if (s.Values[i] is { } y && trendX[i] is { } x) known.Add((x, y));
                     if (known.Count > 0)
-                        DrawTrendline(overlays, ChartTrendlines.Fit(trend, known, known.Min(k => k.X), known.Max(k => k.X)).Select(q => (X(q.X), Y(q.Y))).ToList(), trend);
+                    {
+                        var drawn = ChartTrendlines.Fit(trend, known, known.Min(k => k.X), known.Max(k => k.X)).Select(q => (X(q.X), Y(q.Y))).ToList();
+                        DrawTrendline(overlays, drawn, trend);
+                        if (drawn.Count > 0) AddTrendlineLabel(trendLabels, trend, known, drawn[^1], font, plotLeft, plotTop, plotRight, plotBottom);
+                    }
                 }
                 if (overlays.Count > 0) { items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight))); items.AddRange(overlays); items.Add(new PopItem()); }
                 if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
@@ -104,8 +114,9 @@ public sealed partial class SheetLayoutEngine
                         }
             }
         }
+        items.AddRange(trendLabels);
         foreach (var (text, lx, ly, fill) in labels)
-            PlaceText(text, font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, lx, ly, Anchor.Middle, true, 0, items);
+            PlaceText(text, Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), lx, ly, Anchor.Middle, true, 0, items);
     }
 
     // ------------------------------------------------------------------ radar
@@ -115,7 +126,9 @@ public sealed partial class SheetLayoutEngine
     {
         int n = Math.Max(chart.Categories.Count, 3);
         double labelHeight = chart.FontSize * 1.25;
-        double labelWidth = chart.Categories.Select(c => MeasureChartText(c, font)).DefaultIfEmpty(0).Max();
+        var categoryFont = Styled(font, chart.TextStyles.CategoryAxis);
+        var valueFont = Styled(font, chart.TextStyles.ValueAxis);
+        double labelWidth = chart.Categories.Select(c => MeasureChartText(c, categoryFont)).DefaultIfEmpty(0).Max();
         double radius = Math.Min((right - left) / 2 - labelWidth - 6, (bottom - top) / 2 - labelHeight - 4);
         if (radius < 15) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
@@ -141,7 +154,7 @@ public sealed partial class SheetLayoutEngine
                 }
             if (chart.ShowValueAxis && r - lastLabel >= labelHeight)
             {
-                PlaceText(tick.Label, font, cx - 4, cy - r, Anchor.End, true, 0, items);
+                PlaceText(tick.Label, valueFont, cx - 4, cy - r, Anchor.End, true, 0, items);
                 lastLabel = r;
             }
         }
@@ -153,7 +166,7 @@ public sealed partial class SheetLayoutEngine
             var at = Point(k, radius + 6);
             double cos = (at.X - cx) / (radius + 6), sin = (at.Y - cy) / (radius + 6);
             var anchor = cos > 0.3 ? Anchor.Start : cos < -0.3 ? Anchor.End : Anchor.Middle;
-            PlaceText(chart.Categories[k], font, at.X, at.Y + sin * labelHeight / 2, anchor, true, 0, items);
+            PlaceText(chart.Categories[k], categoryFont, at.X, at.Y + sin * labelHeight / 2, anchor, true, 0, items);
         }
 
         foreach (var s in chart.Series)

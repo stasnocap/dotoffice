@@ -293,4 +293,55 @@ public class XlsxChartTests
         Assert.Null(Read(Chart(Layout(""))).Sheet.Charts.Single().PlotArea);
         Assert.Null(Read(Chart("<c:layout/>")).Sheet.Charts.Single().PlotArea);
     }
+
+    [Fact]
+    public void Reads_trendline_labels_the_legend_position_and_text_formatting()
+    {
+        var trend = "<c:trendline><c:trendlineType val=\"linear\"/><c:dispRSqr val=\"1\"/><c:dispEq val=\"1\"/>" +
+                    "<c:trendlineLbl><c:txPr><a:p><a:pPr><a:defRPr sz=\"1100\" b=\"1\"/></a:pPr></a:p></c:txPr></c:trendlineLbl></c:trendline>";
+        string Rich(string props, string text, string inner = "") => $"<c:tx><c:rich><a:p><a:pPr><a:defRPr sz=\"1800\"/></a:pPr><a:r><a:rPr lang=\"en-US\" {props}>{inner}</a:rPr><a:t>{text}</a:t></a:r></a:p></c:rich></c:tx>";
+        string Tx(string props, string inner = "") => $"<c:txPr><a:p><a:pPr><a:defRPr {props}>{inner}</a:defRPr></a:pPr></a:p></c:txPr>";
+        string Fill(string hex) => $"<a:solidFill><a:srgbClr val=\"{hex}\"/></a:solidFill>";
+        var plot = $"<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>{Ser(0, null, null, "S!$B$2:$B$4", trend)}<c:dLbls>{Tx("sz=\"800\"", Fill("FF0000"))}<c:showVal val=\"1\"/></c:dLbls><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                   $"<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/><c:title>{Rich("sz=\"1200\" i=\"1\"", "Cat")}</c:title>{Tx("sz=\"1300\"")}</c:catAx>" +
+                   $"<c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/>{Tx("b=\"1\"", Fill("00FF00") + "<a:latin typeface=\"Arial\"/>")}</c:valAx>";
+        var legend = "<c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.7\"/><c:y val=\"0.1\"/><c:w val=\"0.2\"/><c:h val=\"0.3\"/></c:manualLayout></c:layout>" +
+                     Tx("sz=\"900\" i=\"1\"") + "</c:legend>";
+        var title = $"<c:title>{Rich("sz=\"2000\" b=\"1\"", "Big", Fill("0000FF"))}</c:title>";
+        var chart = Read(Space(plot, title + legend)).Sheet.Charts.Single();
+        var t = chart.Series[0].Trendline!;
+        Assert.True(t.ShowEquation && t.ShowRSquared);
+        Assert.Equal(new ChartTextStyle(11, null, true, null, null), t.LabelStyle);
+        Assert.Equal(new ChartBox(0.7, 0.1, 0.2, 0.3, false), chart.LegendBox);
+        Assert.Equal(new ChartTextStyle(9, null, null, true, null), chart.TextStyles.Legend);
+        Assert.Equal(new ChartTextStyle(13), chart.TextStyles.CategoryAxis);
+        Assert.Equal(new ChartTextStyle(12, null, null, true, null), chart.TextStyles.CategoryAxisTitle); // the run overrides the paragraph default
+        Assert.Equal(new ChartTextStyle(null, new Color(0, 255, 0), true, null, "Arial"), chart.TextStyles.ValueAxis);
+        Assert.Equal(new ChartTextStyle(8, new Color(255, 0, 0)), chart.TextStyles.DataLabels);
+        Assert.Equal(20, chart.TextStyles.Title!.Size);
+        Assert.Equal(new Color(0, 0, 255), chart.TextStyles.Title.Color);
+        Assert.Null(Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single().TextStyles.Legend);
+    }
+
+    [Fact]
+    public void The_charts_base_text_style_colors_every_part_but_not_the_size()
+    {
+        var plot = Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4"));
+        var space = $"<c:chartSpace {Ns}><c:chart><c:legend><c:legendPos val=\"r\"/></c:legend><c:plotArea><c:layout/>{plot}</c:plotArea></c:chart>" +
+                    "<c:txPr><a:p><a:pPr><a:defRPr sz=\"1200\"><a:solidFill><a:srgbClr val=\"336699\"/></a:solidFill></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>";
+        var chart = Read(space).Sheet.Charts.Single();
+        Assert.Equal(12, chart.FontSize);
+        Assert.Equal(new ChartTextStyle(Color: new Color(0x33, 0x66, 0x99)), chart.TextStyles.Legend);
+    }
+
+    [Fact]
+    public void Area_and_line_groups_on_the_secondary_axis_keep_their_transparency()
+    {
+        var area = Ser(1, null, null, "S!$B$2:$B$4", "<c:spPr><a:solidFill><a:srgbClr val=\"FF0000\"><a:alpha val=\"30000\"/></a:srgbClr></a:solidFill></c:spPr>");
+        var plot = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                   "<c:areaChart><c:grouping val=\"standard\"/>" + area + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:areaChart>" + SecondaryAxes;
+        var group = Read(Space(plot)).Sheet.Charts.Single().ExtraGroups.Single();
+        Assert.True(group.Secondary);
+        Assert.Equal(0.3, group.Series[0].Alpha, 6);
+    }
 }

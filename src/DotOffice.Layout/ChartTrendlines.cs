@@ -59,6 +59,19 @@ internal static class ChartTrendlines
     /// <summary>The least-squares polynomial of the given degree (normal equations on x centered at its mean, solved by Gaussian elimination).</summary>
     private static Func<double, double>? Polynomial(List<(double X, double Y)> points, int degree)
     {
+        if (PolyFit(points, degree) is not var (coefficients, mean, scale)) return null;
+        int n = degree + 1;
+        return x =>
+        {
+            double u = (x - mean) / scale, y = 0;
+            for (int i = n - 1; i >= 0; i--) y = y * u + coefficients[i];
+            return y;
+        };
+    }
+
+    /// <summary>The coefficients in u = (x − mean) / scale, lowest degree first, with the mean and the scale.</summary>
+    private static (double[] Coefficients, double Mean, double Scale)? PolyFit(List<(double X, double Y)> points, int degree)
+    {
         if (points.Count <= degree || degree < 1) return null;
         double mean = points.Average(p => p.X), scale = Math.Max(points.Max(p => Math.Abs(p.X - mean)), 1e-12);
         int n = degree + 1;
@@ -85,12 +98,100 @@ internal static class ChartTrendlines
                 for (int c = col; c <= n; c++) m[r, c] -= factor * m[col, c];
             }
         }
-        var coefficients = Enumerable.Range(0, n).Select(r => m[r, n] / m[r, r]).ToArray();
-        return x =>
+        return (Enumerable.Range(0, n).Select(r => m[r, n] / m[r, r]).ToArray(), mean, scale);
+    }
+
+    /// <summary>The same polynomial in x itself (lowest degree first), expanded from the centered form.</summary>
+    private static double[]? RawPolynomial(List<(double X, double Y)> points, int degree)
+    {
+        if (PolyFit(points, degree) is not var (a, mean, scale)) return null;
+        int n = degree + 1;
+        var raw = new double[n];
+        // a_k u^k = a_k / s^k (x − m)^k, and (x − m)^k = Σ C(k, j) x^j (−m)^(k−j).
+        for (int k = 0; k < n; k++)
         {
-            double u = (x - mean) / scale, y = 0;
-            for (int i = n - 1; i >= 0; i--) y = y * u + coefficients[i];
-            return y;
+            double factor = a[k] / Math.Pow(scale, k), binomial = 1;
+            for (int j = 0; j <= k; j++)
+            {
+                raw[j] += factor * binomial * Math.Pow(-mean, k - j);
+                binomial = binomial * (k - j) / (j + 1);
+            }
+        }
+        return raw;
+    }
+
+    /// <summary>
+    /// The label Excel prints for a trendline: its equation and R², fitted like the line itself (R² of the exponential, logarithmic and
+    /// power fits is that of the transformed data). Null for a moving average or when the data does not allow the fit.
+    /// </summary>
+    public static (string Equation, double RSquared)? Describe(ChartTrendline trend, IReadOnlyList<(double X, double Y)> data)
+    {
+        var points = data.OrderBy(p => p.X).ToList();
+        if (trend.Kind == TrendlineKind.MovingAverage || points.Count < 2) return null;
+        double[]? coefficients;
+        List<(double X, double Y)> fitted;       // the data in the space where the fit is a polynomial
+        switch (trend.Kind)
+        {
+            case TrendlineKind.Linear or TrendlineKind.Polynomial:
+                fitted = points;
+                break;
+            case TrendlineKind.Exponential:
+                fitted = points.Where(p => p.Y > 0).Select(p => (p.X, Math.Log(p.Y))).ToList();
+                break;
+            case TrendlineKind.Logarithmic:
+                fitted = points.Where(p => p.X > 0).Select(p => (Math.Log(p.X), p.Y)).ToList();
+                break;
+            default:
+                fitted = points.Where(p => p.X > 0 && p.Y > 0).Select(p => (Math.Log(p.X), Math.Log(p.Y))).ToList();
+                break;
+        }
+        int degree = trend.Kind == TrendlineKind.Polynomial ? Math.Min(trend.Order, fitted.Count - 1) : 1;
+        if (fitted.Count < 2 || degree < 1 || (coefficients = RawPolynomial(fitted, degree)) is null) return null;
+        double Predict(double x) { double y = 0; for (int i = coefficients.Length - 1; i >= 0; i--) y = y * x + coefficients[i]; return y; }
+        double mean = fitted.Average(p => p.Y), total = fitted.Sum(p => (p.Y - mean) * (p.Y - mean)), residual = fitted.Sum(p => (p.Y - Predict(p.X)) * (p.Y - Predict(p.X)));
+        double r2 = total < 1e-300 ? 1 : Math.Clamp(1 - residual / total, 0, 1);
+
+        string equation = trend.Kind switch
+        {
+            TrendlineKind.Exponential => $"y = {Number(Math.Exp(coefficients[0]))}e^{Number(coefficients[1])}x",
+            TrendlineKind.Logarithmic => $"y = {Term(coefficients[1], "ln(x)", first: true)}{Sign(coefficients[0])}",
+            TrendlineKind.Power => $"y = {Number(Math.Exp(coefficients[0]))}x^{Number(coefficients[1])}",
+            _ => "y = " + Polynomial(coefficients),
         };
+        return (equation, r2);
+    }
+
+    private static string Polynomial(double[] c)
+    {
+        var text = new System.Text.StringBuilder();
+        double largest = c.Max(Math.Abs);
+        for (int k = c.Length - 1; k >= 0; k--)
+        {
+            if (Math.Abs(c[k]) < largest * 1e-9 && k > 0) continue; // rounding noise of the fit, not a term
+            string variable = k switch { 0 => "", 1 => "x", 2 => "x²", 3 => "x³", _ => $"x^{k}" };
+            if (text.Length == 0) text.Append(Term(c[k], variable, first: true));
+            else text.Append(Term(c[k], variable, first: false));
+        }
+        return text.Length == 0 ? "0" : text.ToString();
+    }
+
+    private static string Term(double value, string variable, bool first)
+    {
+        if (variable.Length == 0) return first ? Number(value) : Sign(value);
+        string magnitude = Math.Abs(Math.Abs(value) - 1) < 5e-5 ? "" : Number(Math.Abs(value));
+        string sign = value < 0 ? (first ? "-" : " - ") : first ? "" : " + ";
+        return sign + magnitude + variable;
+    }
+
+    private static string Sign(double value) => value < 0 ? " - " + Number(-value) : " + " + Number(value);
+
+    /// <summary>Five significant digits, without a trailing zero and without an exponent unless the number is tiny or huge.</summary>
+    internal static string Number(double value)
+    {
+        if (value == 0 || !double.IsFinite(value)) return "0";
+        double magnitude = Math.Abs(value);
+        if (magnitude < 1e-4 || magnitude >= 1e10) return value.ToString("0.####E+00", System.Globalization.CultureInfo.InvariantCulture);
+        int digits = Math.Clamp(4 - (int)Math.Floor(Math.Log10(magnitude)), 0, 15);
+        return Math.Round(value, digits).ToString("0.###############", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

@@ -10,6 +10,13 @@ public sealed partial class SheetLayoutEngine
 
     private enum Anchor { Start, Middle, End }
 
+    /// <summary>The font with the parts that a chart text style sets replaced.</summary>
+    private static RunProperties Styled(RunProperties font, ChartTextStyle? style) => style is null ? font : font with
+    {
+        FontSize = style.Size ?? font.FontSize, Color = style.Color ?? font.Color, Bold = style.Bold ?? font.Bold,
+        Italic = style.Italic ?? font.Italic, FontFamily = style.Family ?? font.FontFamily,
+    };
+
     /// <summary>The plot rectangle of the chart being drawn when its layout is manual and inner (set by <see cref="EmitChart"/>).</summary>
     private (double X, double Y, double Width, double Height)? _manualPlot;
 
@@ -37,7 +44,7 @@ public sealed partial class SheetLayoutEngine
         // ---- title
         if (!string.IsNullOrEmpty(chart.Title))
         {
-            var titleFont = font with { FontSize = chart.TitleSize };
+            var titleFont = Styled(font with { FontSize = chart.TitleSize }, chart.TextStyles.Title);
             if (chart.TitlePosition is { } at) PlaceText(chart.Title, titleFont, x + at.X * w, y + at.Y * h, Anchor.Start, false, 0, items);
             else top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
         }
@@ -49,15 +56,35 @@ public sealed partial class SheetLayoutEngine
                 .Concat(chart.ExtraGroups.SelectMany(g => g.Series.Select(s => (Name: s.Name, Color: s.Color, Series: (ChartSeries?)s, Kind: g.Kind)))).ToList();
         if (chart.Legend != LegendPosition.None && legendEntries.Count > 0 && right > left && bottom > top)
         {
-            double entryHeight = chart.FontSize * 1.25 + 3, swatch = chart.FontSize * 0.8;
-            var widths = legendEntries.Select(e => MeasureChartText(e.Name, font)).ToList();
-            if (chart.Legend is LegendPosition.Right or LegendPosition.Left)
+            var legendFont = Styled(font, chart.TextStyles.Legend);
+            double entryHeight = legendFont.FontSize * 1.25 + 3, swatch = legendFont.FontSize * 0.8;
+            var widths = legendEntries.Select(e => MeasureChartText(e.Name, legendFont)).ToList();
+            bool vertical = chart.Legend is LegendPosition.Right or LegendPosition.Left;
+            if (chart.LegendBox is { } legendBox)
+            {
+                // A manual legend sits where the layout puts it, keeps the plot's automatic room (as if it were not there) and runs along its position's direction.
+                double lx = x + legendBox.X * w, ly = y + legendBox.Y * h;
+                if (vertical)
+                {
+                    for (int i = 0; i < legendEntries.Count; i++)
+                        DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * entryHeight, swatch, entryHeight, legendFont, items);
+                }
+                else
+                {
+                    for (int i = 0; i < legendEntries.Count; i++)
+                    {
+                        DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly, swatch, entryHeight, legendFont, items);
+                        lx += widths[i] + swatch + 14;
+                    }
+                }
+            }
+            else if (vertical)
             {
                 double boxWidth = widths.Max() + swatch + 12;
                 double lx = chart.Legend == LegendPosition.Right ? right - boxWidth : left;
                 double ly = (top + bottom) / 2 - legendEntries.Count * entryHeight / 2;
                 for (int i = 0; i < legendEntries.Count; i++)
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * entryHeight, swatch, entryHeight, font, items);
+                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * entryHeight, swatch, entryHeight, legendFont, items);
                 if (chart.Legend == LegendPosition.Right) right -= boxWidth + 6; else left += boxWidth + 6;
             }
             else
@@ -66,7 +93,7 @@ public sealed partial class SheetLayoutEngine
                 double lx = (left + right) / 2 - total / 2, ly = chart.Legend == LegendPosition.Top ? top : bottom - entryHeight;
                 for (int i = 0; i < legendEntries.Count; i++)
                 {
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly, swatch, entryHeight, font, items);
+                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly, swatch, entryHeight, legendFont, items);
                     lx += widths[i] + swatch + 14;
                 }
                 if (chart.Legend == LegendPosition.Top) top += entryHeight + 4; else bottom -= entryHeight + 4;
@@ -155,29 +182,37 @@ public sealed partial class SheetLayoutEngine
         int categories = Math.Max(chart.Categories.Count, 1);
         double fontSize = chart.FontSize;
         bool secondary = chart.ShowSecondaryAxis && chart.ExtraGroups.Any(g => g.Secondary);
+        var styles = chart.TextStyles;
+        var valueFont = Styled(font, styles.ValueAxis);
+        var categoryFont = Styled(font, styles.CategoryAxis);
+        var secondaryFont = Styled(font, styles.SecondaryAxis);
 
         // ---- room for axis titles and labels
+        var horizontalTitleFont = Styled(font with { FontSize = fontSize + 1 }, horizontalBars ? styles.ValueAxisTitle : styles.CategoryAxisTitle);
+        var verticalTitleFont = Styled(font with { FontSize = fontSize + 1 }, horizontalBars ? styles.CategoryAxisTitle : styles.ValueAxisTitle);
+        var secondaryTitleFont = Styled(font with { FontSize = fontSize + 1 }, styles.SecondaryAxisTitle);
         string? horizontalTitle = horizontalBars ? chart.ValueAxisTitle : chart.CategoryAxisTitle, verticalTitle = horizontalBars ? chart.CategoryAxisTitle : chart.ValueAxisTitle;
         if (horizontalTitle is { Length: > 0 })
         {
-            PlaceText(horizontalTitle, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
-            bottom -= fontSize + 8;
+            PlaceText(horizontalTitle, horizontalTitleFont, (left + right) / 2, bottom - horizontalTitleFont.FontSize - 2, Anchor.Middle, false, 0, items);
+            bottom -= horizontalTitleFont.FontSize + 7;
         }
         if (verticalTitle is { Length: > 0 })
         {
-            PlaceText(verticalTitle, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
-            left += fontSize + 8;
+            PlaceText(verticalTitle, verticalTitleFont, left + verticalTitleFont.FontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
+            left += verticalTitleFont.FontSize + 7;
         }
         if (secondary && chart.SecondaryAxisTitle is { Length: > 0 } secondaryTitle)
         {
-            PlaceText(secondaryTitle, font with { FontSize = fontSize + 1 }, right - fontSize / 2 - 1, (top + bottom) / 2, Anchor.Middle, true, -90, items);
-            right -= fontSize + 8;
+            PlaceText(secondaryTitle, secondaryTitleFont, right - secondaryTitleFont.FontSize / 2 - 1, (top + bottom) / 2, Anchor.Middle, true, -90, items);
+            right -= secondaryTitleFont.FontSize + 7;
         }
 
-        double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
-        double secondaryWidth = secondary ? chart.SecondaryTicks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() + 6 : 0;
-        double categoryWidth = chart.ShowCategoryAxis ? chart.Categories.Select(c => MeasureChartText(c, font)).DefaultIfEmpty(0).Max() : 0;
-        double labelHeight = fontSize * 1.25;
+        double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, valueFont)).DefaultIfEmpty(0).Max() : 0;
+        double secondaryWidth = secondary ? chart.SecondaryTicks.Select(t => MeasureChartText(t.Label, secondaryFont)).DefaultIfEmpty(0).Max() + 6 : 0;
+        double categoryWidth = chart.ShowCategoryAxis ? chart.Categories.Select(c => MeasureChartText(c, categoryFont)).DefaultIfEmpty(0).Max() : 0;
+        // Room for one line of the axis labels along the bottom (categories, or the values of horizontal bars) and of those along the side.
+        double labelHeight = (horizontalBars ? valueFont : categoryFont).FontSize * 1.25;
 
         // With a reversed value axis the category axis crosses at the value axis' minimum, which now lies at the top (or, for bars, right).
         bool labelsAtFar = chart.ReverseValues && chart.ShowCategoryAxis;
@@ -230,18 +265,18 @@ public sealed partial class SheetLayoutEngine
             {
                 double tx = ValueX(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
-                if (chart.ShowValueAxis) PlaceText(tick.Label, font, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
+                if (chart.ShowValueAxis) PlaceText(tick.Label, valueFont, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
             }
             else
             {
                 double ty = ValueY(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
-                if (chart.ShowValueAxis) PlaceText(tick.Label, font, plotLeft - 5, ty, Anchor.End, true, 0, items);
+                if (chart.ShowValueAxis) PlaceText(tick.Label, valueFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
             }
         }
         if (secondary && !horizontalBars)
             foreach (var tick in chart.SecondaryTicks)
-                PlaceText(tick.Label, font, plotRight + 5, ValueY(secondaryScale, tick.Value), Anchor.Start, true, 0, items);
+                PlaceText(tick.Label, secondaryFont, plotRight + 5, ValueY(secondaryScale, tick.Value), Anchor.Start, true, 0, items);
 
         // ---- series: the first chart type, then the further types of a combination chart
         var labels = new List<(string Text, double X, double Y, bool Inside, Color Fill)>();
@@ -367,23 +402,29 @@ public sealed partial class SheetLayoutEngine
                 double a = ValuePosition(scale, value - bars.Minus[i]), b = ValuePosition(scale, value + bars.Plus[i]);
                 DrawErrorBar(overlays, horizontalBars, across, a, b, bars);
             }
-        if (!horizontalBars)
-            foreach (var group in groups)
-                foreach (var s in group.Series)
-                    if (s.Trendline is { } trend && group.Grouping == ChartGrouping.Clustered)
-                    {
-                        var scale = group.Secondary ? secondaryScale : primary;
-                        var known = new List<(double X, double Y)>();
-                        for (int i = 0; i < s.Values.Count && i < categories; i++) if (s.Values[i] is { } v) known.Add((i + 1, v));
-                        var curve = ChartTrendlines.Fit(trend, known, known.Count > 0 ? known.Min(k => k.X) : 1, known.Count > 0 ? known.Max(k => k.X) : categories);
-                        DrawTrendline(overlays, curve.Select(q => (CategoryAt(q.X - 1), ValueY(scale, q.Y))).ToList(), trend);
-                    }
+        // A trendline follows what is plotted: the stacked totals of stacked groups, the values themselves otherwise. Horizontal bars
+        // run it along the value axis with the categories up the side.
+        double BarCategoryAt(double t) => plotBottom - (SlotAt(t) + 0.5) * plotHeight / categories;
+        var trendLabels = new List<LayoutItem>();
+        foreach (var group in groups)
+            foreach (var s in group.Series)
+                if (s.Trendline is { } trend)
+                {
+                    var scale = group.Secondary ? secondaryScale : primary;
+                    var known = errorBars.Where(e => ReferenceEquals(e.Series, s)).OrderBy(e => e.Index).Select(e => ((double)e.Index + 1, e.Value)).ToList();
+                    if (known.Count == 0) continue;
+                    var curve = ChartTrendlines.Fit(trend, known, known.Min(k => k.Item1), known.Max(k => k.Item1));
+                    var drawn = curve.Select(q => horizontalBars ? (ValueX(scale, q.Y), BarCategoryAt(q.X - 1)) : (CategoryAt(q.X - 1), ValueY(scale, q.Y))).ToList();
+                    DrawTrendline(overlays, drawn, trend);
+                    if (drawn.Count > 0) AddTrendlineLabel(trendLabels, trend, known, drawn[^1], font, plotLeft, plotTop, plotRight, plotBottom);
+                }
         if (overlays.Count > 0)
         {
             items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight)));
             items.AddRange(overlays);
             items.Add(new PopItem());
         }
+        items.AddRange(trendLabels);
 
         // ---- category axis line and labels
         if (chart.ShowCategoryAxis)
@@ -395,8 +436,8 @@ public sealed partial class SheetLayoutEngine
                 items.Add(new LineItem(ax, plotTop, ax, plotBottom, 0.75, ChartGrid));
                 double band = plotHeight / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i++)
-                    if (labelsAtFar) PlaceText(chart.Categories[i], font, plotRight + 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.Start, true, 0, items);
-                    else PlaceText(chart.Categories[i], font, plotLeft - 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.End, true, 0, items);
+                    if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, plotRight + 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.Start, true, 0, items);
+                    else PlaceText(chart.Categories[i], categoryFont, plotLeft - 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.End, true, 0, items);
             }
             else
             {
@@ -405,10 +446,10 @@ public sealed partial class SheetLayoutEngine
                 for (int i = 0; i < categories && i < chart.Categories.Count; i += (int)stride)
                 {
                     double cx = CategoryX(i);
-                    if (labelsAtFar && rotateLabels) PlaceText(chart.Categories[i], font, cx - 3, plotTop - 6, Anchor.Start, true, 45, items);
-                    else if (labelsAtFar) PlaceText(chart.Categories[i], font, cx, plotTop - 4 - labelHeight, Anchor.Middle, false, 0, items);
-                    else if (rotateLabels) PlaceText(chart.Categories[i], font, cx + 3, plotBottom + 5, Anchor.End, false, 45, items);
-                    else PlaceText(chart.Categories[i], font, cx, plotBottom + 4, Anchor.Middle, false, 0, items);
+                    if (labelsAtFar && rotateLabels) PlaceText(chart.Categories[i], categoryFont, cx - 3, plotTop - 6, Anchor.Start, true, 45, items);
+                    else if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, cx, plotTop - 4 - labelHeight, Anchor.Middle, false, 0, items);
+                    else if (rotateLabels) PlaceText(chart.Categories[i], categoryFont, cx + 3, plotBottom + 5, Anchor.End, false, 45, items);
+                    else PlaceText(chart.Categories[i], categoryFont, cx, plotBottom + 4, Anchor.Middle, false, 0, items);
                 }
             }
         }
@@ -416,9 +457,9 @@ public sealed partial class SheetLayoutEngine
         // ---- data labels last, on top of the series
         foreach (var (text, lx, ly, inside, fill) in labels)
         {
-            var color = inside ? ContrastColor(fill) : ChartText;
-            if (horizontalBars && !inside) PlaceText(text, font with { Color = color }, lx, ly, Anchor.Start, true, 0, items);
-            else PlaceText(text, font with { Color = color }, lx, inside ? ly : ly - font.FontSize * 1.25, Anchor.Middle, inside, 0, items);
+            var labelFont = Styled(font with { Color = inside ? ContrastColor(fill) : ChartText }, styles.DataLabels);
+            if (horizontalBars && !inside) PlaceText(text, labelFont, lx, ly, Anchor.Start, true, 0, items);
+            else PlaceText(text, labelFont, lx, inside ? ly : ly - labelFont.FontSize * 1.25, Anchor.Middle, inside, 0, items);
         }
     }
 
@@ -449,6 +490,25 @@ public sealed partial class SheetLayoutEngine
             items.Add(new LineItem(across, from, across, to, bars.Width, color));
             if (bars.EndCap) { items.Add(new LineItem(across - cap, from, across + cap, from, bars.Width, color)); items.Add(new LineItem(across - cap, to, across + cap, to, bars.Width, color)); }
         }
+    }
+
+    /// <summary>
+    /// Prints the equation and R² of a trendline (when it asks for them) just above its far end, kept inside the plot, right-aligned to the end.
+    /// </summary>
+    private void AddTrendlineLabel(List<LayoutItem> items, ChartTrendline trend, IReadOnlyList<(double X, double Y)> data, (double X, double Y) end,
+        RunProperties font, double plotLeft, double plotTop, double plotRight, double plotBottom)
+    {
+        if (!trend.ShowEquation && !trend.ShowRSquared) return;
+        if (ChartTrendlines.Describe(trend, data) is not var (equation, r2)) return;
+        var lines = new List<string>();
+        if (trend.ShowEquation) lines.Add(equation);
+        if (trend.ShowRSquared) lines.Add("R² = " + ChartTrendlines.Number(Math.Round(r2, 4)));
+        var labelFont = Styled(font, trend.LabelStyle);
+        double pitch = labelFont.FontSize * 1.25;
+        double width = lines.Max(l => MeasureChartText(l, labelFont));
+        double x1 = Math.Clamp(end.X, plotLeft + width, Math.Max(plotRight, plotLeft + width));
+        double y0 = Math.Clamp(end.Y - 4 - lines.Count * pitch, plotTop, Math.Max(plotBottom - lines.Count * pitch, plotTop));
+        for (int i = 0; i < lines.Count; i++) PlaceText(lines[i], labelFont, x1, y0 + i * pitch, Anchor.End, false, 0, items);
     }
 
     private static void DrawTrendline(List<LayoutItem> items, List<(double X, double Y)> points, ChartTrendline trend)
@@ -516,7 +576,7 @@ public sealed partial class SheetLayoutEngine
                 DrawSlices(chart, chart.Series[k], cx, cy, hole + k * ring, hole + (k + 1) * ring, labels, items);
         }
         foreach (var (text, lx, ly, fill) in labels)
-            PlaceText(text, font with { Color = ContrastColor(fill) }, lx, ly, Anchor.Middle, true, 0, items);
+            PlaceText(text, Styled(font with { Color = ContrastColor(fill) }, chart.TextStyles.DataLabels), lx, ly, Anchor.Middle, true, 0, items);
     }
 
     /// <summary>Draws the slices of one series between two radii (the inner one is 0 for a pie).</summary>

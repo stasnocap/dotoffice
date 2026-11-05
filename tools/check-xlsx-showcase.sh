@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -269,6 +269,20 @@ grep -aq "^/GSa55 gs$" extras-qdf.pdf || fail "the areas should be 55 % opaque"
 grep -aq "^/GSa50 gs$" extras-qdf.pdf || fail "the bubbles should be 50 % opaque"
 # The trendline (dashed, C00000) is drawn in dark red.
 grep -aq "^0.7529 0 0 RG$" extras-qdf.pdf || fail "no dark red trendline stroke"
+
+# Chart text: trendlines on bars and stacks with their equations and R², formatted text and a manual legend, all without a warning.
+text_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Chart text" ] && text_page=$p; done
+[ "$text_page" -gt 0 ] || fail "no chart text sheet"
+text_text=$(page_text "$text_page")
+for text in "Columns: equation and R" "Bars with a trendline" "Stacked columns: trend of the totals" "Polynomial: equation and R" "Formatted text" "y = " "R² = "; do
+  [[ $text_text == *"$text"* ]] || fail "missing chart text: $text"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart text"; then fail "the chart text sheet should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" text-qdf.pdf
+grep -aq "^0.1216 0.2196 0.3922 rg$" text-qdf.pdf || fail "the title should be dark blue (1F3864)"
+grep -aq "^0.4392 0.1882 0.6275 rg$" text-qdf.pdf || fail "the legend should be purple (7030A0)"
+grep -aq "^0.7529 0 0 RG$" text-qdf.pdf || fail "no dark red trendline stroke"
 
 # Print titles outside the print area: row 1 sits above the area (A5:B124) and is repeated on every page of it; rows 2-4 are not printed.
 title_pages=0

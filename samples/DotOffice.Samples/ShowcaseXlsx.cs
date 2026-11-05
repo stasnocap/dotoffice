@@ -43,6 +43,7 @@ internal static class ShowcaseXlsx
             ("More charts", MoreChartsSheet(), "visible"),
             ("Chart options", ChartOptionsSheet(), "visible"),
             ("Chart extras", ChartExtrasSheet(), "visible"),
+            ("Chart text", ChartTextSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Conditional links", ConditionalLinksSheet(), "visible"),
             ("Conditional lookups", ConditionalLookupsSheet(), "visible"),
@@ -89,6 +90,7 @@ internal static class ShowcaseXlsx
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
         WriteChartOptions(zip, sheets.FindIndex(x => x.Name == "Chart options") + 1);
         WriteChartExtras(zip, sheets.FindIndex(x => x.Name == "Chart extras") + 1);
+        WriteChartText(zip, sheets.FindIndex(x => x.Name == "Chart text") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
@@ -616,8 +618,8 @@ internal static class ShowcaseXlsx
     private const string FixedBars = "<c:errBars><c:errDir val=\"y\"/><c:errBarType val=\"both\"/><c:errValType val=\"fixedVal\"/><c:noEndCap val=\"0\"/><c:val val=\"4\"/>" +
                                      "<c:spPr><a:ln w=\"12700\"><a:solidFill><a:srgbClr val=\"404040\"/></a:solidFill></a:ln></c:spPr></c:errBars>";
 
-    private static string Trend(string type, string extra = "") =>
-        $"<c:trendline><c:spPr><a:ln w=\"22225\"><a:solidFill><a:srgbClr val=\"C00000\"/></a:solidFill><a:prstDash val=\"sysDash\"/></a:ln></c:spPr><c:trendlineType val=\"{type}\"/>{extra}<c:dispRSqr val=\"0\"/><c:dispEq val=\"0\"/></c:trendline>";
+    private static string Trend(string type, string extra = "", bool labels = false) =>
+        $"<c:trendline><c:spPr><a:ln w=\"22225\"><a:solidFill><a:srgbClr val=\"C00000\"/></a:solidFill><a:prstDash val=\"sysDash\"/></a:ln></c:spPr><c:trendlineType val=\"{type}\"/>{extra}<c:dispRSqr val=\"{(labels ? 1 : 0)}\"/><c:dispEq val=\"{(labels ? 1 : 0)}\"/></c:trendline>";
 
     private static void WriteChartExtras(ZipArchive zip, int sheetNumber)
     {
@@ -641,6 +643,42 @@ internal static class ShowcaseXlsx
         (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43)];
         WriteChartParts(zip, sheetNumber, charts, places, "extra");
     }
+
+    private static void WriteChartText(ZipArchive zip, int sheetNumber)
+    {
+        string Series(int i, string tail = "") => ChartSeries(i, true).Replace("<c:cat>", tail + "<c:cat>");
+        string Fill(string hex) => $"<a:solidFill><a:srgbClr val=\"{hex}\"/></a:solidFill>";
+        string TextProperties(string attributes, string hex = "", string face = "") =>
+            $"<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr {attributes}>{(hex.Length == 0 ? "" : Fill(hex))}{(face.Length == 0 ? "" : $"<a:latin typeface=\"{face}\"/>")}</a:defRPr></a:pPr><a:endParaRPr lang=\"en-US\"/></a:p></c:txPr>";
+        var columns = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" + Series(0, Trend("linear", "", labels: true)) +
+                      "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" + Axes();
+        var bars = "<c:barChart><c:barDir val=\"bar\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" + Series(1, Trend("linear")) +
+                   "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" + Axes();
+        var stacked = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"stacked\"/><c:varyColors val=\"0\"/>" + Series(0) + Series(1, Trend("linear", "", labels: true)) +
+                      "<c:gapWidth val=\"80\"/><c:overlap val=\"100\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" + Axes();
+        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>" +
+                      XySeries(0, "Charts!$B$4:$B$9", "Charts!$C$4:$C$9", "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>" + Trend("poly", "<c:order val=\"2\"/>", labels: true)) + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>" + XyAxes;
+        // Text formatting: a colored bold title, axis labels in other sizes, colors and fonts, and a legend placed by hand.
+        var styled = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" + Series(0, "<c:dLbls>" + TextProperties("sz=\"900\" b=\"1\"", "C00000") + "<c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"0\"/></c:dLbls>") + Series(1) +
+                     "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                     Axes("Quarter", "Units").Replace("<c:crossAx val=\"2\"/></c:catAx>", TextProperties("sz=\"1100\" i=\"1\"", "548235", "Georgia") + "<c:crossAx val=\"2\"/></c:catAx>")
+                                             .Replace("<c:crossAx val=\"1\"/></c:valAx>", TextProperties("sz=\"800\"", "2F5597") + "<c:crossAx val=\"1\"/></c:valAx>");
+        var styledSpace = ChartSpace("Formatted text", styled, "")
+            .Replace("<a:rPr lang=\"en-US\" sz=\"1400\"/><a:t>Formatted text", "<a:rPr lang=\"en-US\" sz=\"1800\" b=\"1\">" + Fill("1F3864") + "<a:latin typeface=\"Georgia\"/></a:rPr><a:t>Formatted text")
+            .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.62\"/><c:y val=\"0.2\"/><c:w val=\"0.2\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout><c:overlay val=\"1\"/>" +
+                     TextProperties("sz=\"1000\" b=\"1\"", "7030A0") + "</c:legend>");
+        string[] charts =
+        [
+            ChartSpace("Columns: equation and R²", columns, ""), ChartSpace("Bars with a trendline", bars, ""), ChartSpace("Stacked columns: trend of the totals", stacked, "b"),
+            ChartSpace("Polynomial: equation and R²", scatter, ""), styledSpace,
+        ];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43)];
+        WriteChartParts(zip, sheetNumber, charts, places, "text");
+    }
+
+    private static string ChartTextSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "Chart text: trendlines on bars and stacks, equations, text styles and a manual legend (data on the Charts sheet)", Bold)),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     private static string ChartExtrasSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>",
         Row(1, Str("A1", "Chart extras: transparency, trendlines, error bars and manual layout (data on the Charts sheet)", Bold)),

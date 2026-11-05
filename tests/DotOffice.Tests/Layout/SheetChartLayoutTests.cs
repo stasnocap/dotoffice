@@ -322,4 +322,120 @@ public class SheetChartLayoutTests
         Assert.True(LabelY(false) > OriginY + 150);
         Assert.True(LabelY(true) < OriginY + 40);
     }
+
+    // ------------------------------------------------------------------ trendlines on bars and stacks, labels, legend, text styles
+
+    private static IEnumerable<LineItem> TrendLines(LayoutPage page) => page.Items.OfType<LineItem>().Where(l => l.Color == Blue);
+
+    [Fact]
+    public void Trendlines_are_drawn_on_horizontal_bars_along_the_value_axis()
+    {
+        var series = Series(Red, 5, 10, 20) with { Trendline = new ChartTrendline(TrendlineKind.Linear, Blue, 2, true) };
+        var line = Assert.Single(TrendLines(Page(Chart(ChartKind.Bar, series))));
+        // The first category is at the bottom, so values grow to the right while the line climbs up the page.
+        Assert.True(line.X2 > line.X1);
+        Assert.True(line.Y2 < line.Y1);
+    }
+
+    [Fact]
+    public void Trendlines_on_stacked_groups_follow_the_stacked_totals()
+    {
+        var first = Series(Red, 5, 5, 5);
+        var second = Series(Color.White, 5, 10, 15) with { Trendline = new ChartTrendline(TrendlineKind.Linear, Blue, 2, true) };
+        var stacked = Chart(ChartKind.Column, first, second) with { Grouping = ChartGrouping.Stacked };
+        var line = Assert.Single(TrendLines(Page(stacked)));
+        var alone = Assert.Single(TrendLines(Page(Chart(ChartKind.Column, second))));
+        // Totals are 10, 15, 20: the fitted line starts at 10 (the second tick) rather than at 5.
+        Assert.True(line.Y1 > line.Y2);
+        Assert.True(line.Y1 < alone.Y1);
+    }
+
+    [Fact]
+    public void The_equation_and_r_squared_of_a_trendline_are_printed_when_asked_for()
+    {
+        var trend = new ChartTrendline(TrendlineKind.Linear, Blue, 2, true, ShowEquation: true, ShowRSquared: true);
+        var withLabel = Text(Page(Chart(ChartKind.Line, Series(Red, 10, 20, 30) with { Trendline = trend })));
+        Assert.Contains("y = 10x", withLabel);
+        Assert.Contains("R² = 1", withLabel);
+        var without = Text(Page(Chart(ChartKind.Line, Series(Red, 10, 20, 30) with { Trendline = trend with { ShowEquation = false, ShowRSquared = false } })));
+        Assert.DoesNotContain("R²", without);
+        var onlyR = Text(Page(Chart(ChartKind.Line, Series(Red, 10, 20, 30) with { Trendline = trend with { ShowEquation = false } })));
+        Assert.DoesNotContain("y =", onlyR);
+        Assert.Contains("R²", onlyR);
+    }
+
+    [Theory]
+    [InlineData(TrendlineKind.Linear, "y = 2x + 1")]
+    [InlineData(TrendlineKind.Polynomial, "y = x² + 1")]
+    [InlineData(TrendlineKind.Exponential, "y = 2e^0.69315x")]
+    [InlineData(TrendlineKind.Power, "y = 3x^2")]
+    [InlineData(TrendlineKind.Logarithmic, "y = 2ln(x) + 1")]
+    public void Equations_are_fitted_and_written_like_excel(TrendlineKind kind, string expected)
+    {
+        Func<double, double> f = kind switch
+        {
+            TrendlineKind.Linear => x => 2 * x + 1,
+            TrendlineKind.Polynomial => x => x * x + 1,
+            TrendlineKind.Exponential => x => 2 * Math.Exp(Math.Log(2) * x),
+            TrendlineKind.Power => x => 3 * x * x,
+            _ => x => 2 * Math.Log(x) + 1,
+        };
+        var data = Enumerable.Range(1, 6).Select(x => ((double)x, f(x))).ToList();
+        var (equation, r2) = ChartTrendlines.Describe(new ChartTrendline(kind, Red, Order: 2), data)!.Value;
+        Assert.Equal(expected, equation);
+        Assert.Equal(1, r2, 6);
+    }
+
+    [Fact]
+    public void R_squared_measures_the_scatter_around_the_fit_and_a_moving_average_has_no_equation()
+    {
+        var noisy = new List<(double X, double Y)> { (1, 1), (2, 3), (3, 2), (4, 5), (5, 4) };
+        var (equation, r2) = ChartTrendlines.Describe(new ChartTrendline(TrendlineKind.Linear, Red), noisy)!.Value;
+        Assert.Equal("y = 0.8x + 0.6", equation);
+        Assert.Equal(0.64, r2, 4);
+        Assert.Null(ChartTrendlines.Describe(new ChartTrendline(TrendlineKind.MovingAverage, Red), noisy));
+        Assert.Null(ChartTrendlines.Describe(new ChartTrendline(TrendlineKind.Linear, Red), [(1, 1)]));
+        Assert.Equal("y = -0.5x - 2", ChartTrendlines.Describe(new ChartTrendline(TrendlineKind.Linear, Red), [(0, -2), (2, -3), (4, -4)])!.Value.Equation);
+    }
+
+    [Fact]
+    public void A_manual_legend_sits_at_its_position_and_leaves_the_plot_alone()
+    {
+        var chart = Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with { Legend = LegendPosition.Right, Border = null, Background = null };
+        var automatic = Page(chart);
+        var manual = Page(chart with { LegendBox = new ChartBox(0.1, 0.8, 0.3, 0.1, false) });
+        var swatch = manual.Items.OfType<RectItem>().Where(r => r.Fill == Red && r.Width < 10).Single();
+        Assert.Equal(OriginX + 30, swatch.X, 3);
+        Assert.InRange(swatch.Y, OriginY + 160, OriginY + 175);
+        // The automatic legend takes room on the right; the manual one does not, so the columns are wider.
+        double Width(LayoutPage page) => page.Items.OfType<RectItem>().Where(r => r.Fill == Red && r.Height > 10).Max(r => r.X + r.Width);
+        Assert.True(Width(manual) > Width(automatic));
+    }
+
+    [Fact]
+    public void Text_styles_change_size_color_and_weight_of_the_title_axes_legend_and_labels()
+    {
+        var green = new Color(0, 160, 0);
+        var chart = Chart(ChartKind.Column, Series(Red, 5, 10, 20) with { Labels = ["a1", "a2", "a3"] }) with
+        {
+            Title = "Title", Legend = LegendPosition.Right, ValueAxisTitle = "Vertical", CategoryAxisTitle = "Horizontal",
+            TextStyles = new ChartTextStyles
+            {
+                Title = new ChartTextStyle(20, green, Bold: true), ValueAxis = new ChartTextStyle(Color: Blue), CategoryAxis = new ChartTextStyle(Size: 13),
+                ValueAxisTitle = new ChartTextStyle(Color: green), Legend = new ChartTextStyle(Italic: true, Size: 12), DataLabels = new ChartTextStyle(Color: Red),
+            },
+        };
+        var texts = Page(chart).Items.OfType<TextItem>().ToList();
+        var title = texts.First(t => t.Text == "Title");
+        Assert.Equal((20, green), (title.FontSize, title.Color));
+        Assert.True(title.SyntheticBold || title.Font.PostScriptName.Contains("Bold", StringComparison.OrdinalIgnoreCase));
+        Assert.All(texts.Where(t => t.Text is "0" or "10" or "20"), t => Assert.Equal(Blue, t.Color));
+        Assert.Equal(13, texts.First(t => t.Text == "a").FontSize);
+        Assert.Equal(green, texts.First(t => t.Text == "Vertical").Color);
+        Assert.NotEqual(green, texts.First(t => t.Text == "Horizontal").Color);
+        var legend = texts.First(t => t.Text == "S");
+        Assert.Equal(12, legend.FontSize);
+        Assert.True(legend.SyntheticItalic || legend.Font.PostScriptName.Contains("Italic", StringComparison.OrdinalIgnoreCase));
+        Assert.All(texts.Where(t => t.Text is "a1" or "a2" or "a3"), t => Assert.Equal(Red, t.Color));
+    }
 }
