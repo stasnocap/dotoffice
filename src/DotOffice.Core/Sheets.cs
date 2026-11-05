@@ -73,6 +73,12 @@ public sealed record SheetImage
     public bool FlipV { get; init; }
 }
 
+/// <summary>A comment attached to a cell: <paramref name="Reference"/> is its A1 address, <paramref name="Text"/> the plain text.</summary>
+public sealed record SheetComment(int Row, int Column, string Reference, string? Author, string Text);
+
+/// <summary>Where cell comments are printed (the "Comments" option of the page setup).</summary>
+public enum CommentPrinting { None, AtEnd, AsDisplayed }
+
 public sealed class Worksheet(string name)
 {
     public string Name { get; } = name;
@@ -100,6 +106,9 @@ public sealed class Worksheet(string name)
 
     /// <summary>Pictures in drawing order (later ones are on top).</summary>
     public List<SheetImage> Images { get; } = [];
+
+    /// <summary>Cell comments (notes); printed after the sheet when <see cref="SheetPageSetup.Comments"/> asks for it.</summary>
+    public List<SheetComment> Comments { get; } = [];
 
     public SheetPageSetup PageSetup { get; set; } = new();
 
@@ -321,6 +330,12 @@ public sealed class SheetPageSetup
     public bool CenterVertically { get; set; }
 
     public bool PrintGridLines { get; set; }
+
+    /// <summary>
+    /// Whether and where comments are printed. The layout lists them on pages after the sheet for <see cref="CommentPrinting.AtEnd"/> and
+    /// <see cref="CommentPrinting.AsDisplayed"/> alike (floating notes are not drawn).
+    /// </summary>
+    public CommentPrinting Comments { get; set; }
 
     /// <summary>When true pages run left to right before moving down.</summary>
     public bool PageOrderOverThenDown { get; set; }

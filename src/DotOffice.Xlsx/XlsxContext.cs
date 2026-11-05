@@ -78,6 +78,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             using (var r = Package.OpenXml(rel.Target))
                 ReadWorksheet(r, sheet);
             ReadDrawing(sheet, rel.Target);
+            ReadComments(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
             ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette, (Options.Today ?? DateTime.Today).Date),
@@ -223,6 +224,34 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     }
 
     /// <summary>Reads the pictures of the sheet's drawing; charts, shapes and anything else in it are reported once.</summary>
+    /// <summary>Reads the legacy comments part (<c>comments</c>) of a sheet; the text of each comment is its runs joined.</summary>
+    private void ReadComments(Worksheet sheet, string sheetPart)
+    {
+        var rel = Package.FindRelationship(sheetPart, "comments");
+        if (rel is null || rel.IsExternal || !Package.Exists(rel.Target)) return;
+        try
+        {
+            System.Xml.Linq.XDocument doc;
+            using (var reader = Package.OpenXml(rel.Target)) doc = System.Xml.Linq.XDocument.Load(reader);
+            var authors = doc.Descendants().Where(e => e.Name.LocalName == "author").Select(e => e.Value).ToList();
+            foreach (var comment in doc.Descendants().Where(e => e.Name.LocalName == "comment"))
+            {
+                var reference = (string?)comment.Attribute("ref") ?? "";
+                if (!CellReference.TryParse(reference, out var row, out var column)) continue;
+                var text = comment.Elements().FirstOrDefault(e => e.Name.LocalName == "text");
+                if (text is null) continue;
+                var content = string.Concat(text.Descendants().Where(e => e.Name.LocalName == "t" && e.Parent?.Name.LocalName != "rPh").Select(e => e.Value));
+                string? author = int.TryParse((string?)comment.Attribute("authorId"), out var id) && id >= 0 && id < authors.Count ? authors[id] : null;
+                sheet.Comments.Add(new SheetComment(row, column, reference.Replace("$", ""), string.IsNullOrWhiteSpace(author) ? null : author, content));
+            }
+            sheet.Comments.Sort((a, b) => a.Row != b.Row ? a.Row.CompareTo(b.Row) : a.Column.CompareTo(b.Column));
+        }
+        catch (System.Xml.XmlException)
+        {
+            WarnOnce(sheet, "xlsx.comments", "has a comments part that could not be read; its comments are not printed.");
+        }
+    }
+
     private void ReadDrawing(Worksheet sheet, string sheetPart)
     {
         var id = _drawingRelationship;
@@ -266,9 +295,6 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             {
                 case "pivotTable":
                     WarnOnce(sheet, "xlsx.pivot", "contains a pivot table; its cached cell values are printed but it is not refreshed or styled.");
-                    break;
-                case "comments":
-                    WarnOnce(sheet, "xlsx.comments", "contains comments, which are not printed.");
                     break;
             }
         }
@@ -395,6 +421,9 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             setup.FitToHeight = Math.Max(r.IntAttr("fitToHeight") ?? 1, 0);
         }
         setup.PageOrderOverThenDown = r.GetAttribute("pageOrder") == "overThenDown";
+        setup.Comments = r.GetAttribute("cellComments") switch { "atEnd" => CommentPrinting.AtEnd, "asDisplayed" => CommentPrinting.AsDisplayed, _ => CommentPrinting.None };
+        if (setup.Comments == CommentPrinting.AsDisplayed)
+            Options.Warnings.Warn("xlsx.comments", $"Sheet '{sheet.Name}' prints its comments as displayed on the sheet; they are listed at the end instead.");
     }
 
     private static void ReadHeaderFooter(XmlReader r, SheetPageSetup setup)

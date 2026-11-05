@@ -39,6 +39,7 @@ internal static class ShowcaseXlsx
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
+            ("Comments", CommentsSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -62,6 +63,7 @@ internal static class ShowcaseXlsx
         }
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
+        WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
         Entry(zip, "[Content_Types].xml", content.ToString());
@@ -289,6 +291,28 @@ internal static class ShowcaseXlsx
         rows.Append(Row(4, Str("A4", "Rows grow to fit rotated headings; the text is clipped at the cell edges.")));
         var cols = "<cols><col min=\"1\" max=\"4\" width=\"12\" customWidth=\"1\"/><col min=\"5\" max=\"5\" width=\"22\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    // ------------------------------------------------------------------ comments
+
+    private static void WriteComments(ZipArchive zip, int sheetNumber, StringBuilder content)
+    {
+        var longText = string.Join(" ", Enumerable.Repeat("This note is deliberately long so that it wraps over several lines of the list.", 4));
+        Entry(zip, $"xl/comments{sheetNumber}.xml",
+            "<comments xmlns=\"" + Main + "\"><authors><author>Ada</author><author>Grace</author></authors><commentList>" +
+            "<comment ref=\"B4\" authorId=\"1\"><text><r><rPr><b/><sz val=\"9\"/></rPr><t>Grace:</t></r><r><t xml:space=\"preserve\">\nCheck this figure against the ledger.</t></r></text></comment>" +
+            "<comment ref=\"A3\" authorId=\"0\"><text><t>Starting balance, carried over.</t></text></comment>" +
+            $"<comment ref=\"C6\" authorId=\"0\"><text><t>{longText}</t></text></comment></commentList></comments>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}comments\" Target=\"../comments{sheetNumber}.xml\"/></Relationships>");
+        content.Append($"<Override PartName=\"/xl/comments{sheetNumber}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml\"/>");
+    }
+
+    private static string CommentsSheet()
+    {
+        var rows = Row(1, Str("A1", "Cell comments", Bold)) + Row(3, Str("A3", "Opening") + Num("B3", 1200)) + Row(4, Str("A4", "Adjustment") + Num("B4", -75.5)) +
+                   Row(6, Str("A6", "Total") + Num("B6", 1124.5) + Str("C6", "see note"));
+        return Sheet("", rows, "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" cellComments=\"atEnd\"/>" + HeaderFooter);
     }
 
     private static string AreasSheet()

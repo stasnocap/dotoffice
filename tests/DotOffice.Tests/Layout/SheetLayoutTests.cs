@@ -269,6 +269,31 @@ public class SheetLayoutTests
     }
 
     [Fact]
+    public void Comments_are_listed_on_pages_after_the_sheet_when_asked()
+    {
+        var sheet = Sheet((0, 0, Text("cell")));
+        sheet.Comments.Add(new SheetComment(0, 0, "A1", "Ann", "remember this"));
+        Assert.Single(Layout(sheet).Pages);
+        sheet.PageSetup.Comments = CommentPrinting.AtEnd;
+        var pages = Layout(sheet).Pages;
+        Assert.Equal(2, pages.Count);
+        Assert.Contains("cell", PageText(pages[0]));
+        Assert.Contains("CellA1(Ann)", PageText(pages[1]).Replace(" ", ""));
+        Assert.Contains("remember", PageText(pages[1]));
+    }
+
+    [Fact]
+    public void A_long_comment_list_flows_onto_further_pages()
+    {
+        var sheet = Sheet((0, 0, Text("cell")));
+        for (int i = 0; i < 120; i++) sheet.Comments.Add(new SheetComment(i, 0, $"A{i + 1}", null, $"note {i}"));
+        sheet.PageSetup.Comments = CommentPrinting.AtEnd;
+        var pages = Layout(sheet).Pages;
+        Assert.True(pages.Count >= 3);
+        Assert.All(pages.Skip(1), p => Assert.NotEmpty(PageText(p)));
+    }
+
+    [Fact]
     public void Each_print_area_is_its_own_page_set()
     {
         var sheet = Sheet((0, 0, Text("one")), (3, 3, Text("two")), (6, 0, Text("skipped")), (8, 8, Text("three")));

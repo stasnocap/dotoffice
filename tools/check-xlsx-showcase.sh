@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -129,6 +129,18 @@ done
 [ "$area_pages" = 3 ] || fail "expected three pages for the three print areas, found $area_pages"
 if grep -q "never printed" all.txt; then fail "text outside the print areas was printed"; fi
 if grep -E "warning xlsx\.print-area" "$log"; then fail "multiple print areas should not warn any more"; fi
+
+# Comments: printed at the end of the sheet as a list in cell order, on their own page after the cells.
+comment_pages=()
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Comments" ] && comment_pages+=("$p"); done
+[ "${#comment_pages[@]}" = 2 ] || fail "the comments sheet should be a page of cells and a page of comments, found ${#comment_pages[@]} pages"
+cells_page=$(page_text "${comment_pages[0]}"); list_page=$(page_text "${comment_pages[1]}")
+[[ $cells_page == *"Opening"* && $cells_page != *"Starting balance"* ]] || fail "the comment text must not be on the page of cells"
+for text in "Cell A3 (Ada)" "Starting balance, carried over." "Cell B4 (Grace)" "Check this figure against the ledger." "Cell C6 (Ada)" "deliberately long"; do
+  [[ $list_page == *"$text"* ]] || fail "the comment list is missing: $text"
+done
+[[ ${list_page%%Cell B4*} == *"Cell A3"* && ${list_page%%Cell C6*} == *"Cell B4"* ]] || fail "comments should be listed in cell order"
+if grep -E "warning xlsx\.comments" "$log"; then fail "comments should not warn any more"; fi
 
 # Paper sizes: the "Paper" sheet is A3 (842 x 1191 pt), every other sheet is A4 or Letter.
 for p in $(seq 1 "$pages"); do

@@ -58,10 +58,9 @@ public class XlsxWarningTests
     }
 
     [Fact]
-    public void Pivot_and_comments_relationships_warn()
+    public void A_pivot_table_relationship_warns()
     {
         Assert.Equal(["xlsx.pivot"], Codes(WithRelationship("pivotTable")));
-        Assert.Equal(["xlsx.comments"], Codes(WithRelationship("comments")));
     }
 
     [Fact]

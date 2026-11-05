@@ -437,6 +437,50 @@ public sealed class SheetLayoutEngine
             // Each print area is printed as its own page set (Excel starts a new page for every area).
             if (_setup.PrintAreas.Count == 0) RunRange(null);
             else foreach (var area in _setup.PrintAreas) RunRange(area);
+            if (_setup.Comments != CommentPrinting.None && _sheet.Comments.Count > 0) EmitCommentPages();
+        }
+
+        /// <summary>
+        /// Lists the comments on pages after the sheet, in cell order, as "Cell A1 (Author)" followed by the text. The list is laid out at
+        /// 100 % on the sheet's paper and margins and flows from page to page.
+        /// </summary>
+        private void EmitCommentPages()
+        {
+            double left = _setup.Margins.Left, width = Math.Max(_setup.PageWidth - _setup.Margins.Left - _setup.Margins.Right, 1);
+            double top = _setup.Margins.Top, bottom = _setup.PageHeight - _setup.Margins.Bottom;
+            var items = new List<LayoutItem>();
+            double y = top;
+            void FinishPage()
+            {
+                var page = new LayoutPage(_setup.PageWidth, _setup.PageHeight);
+                foreach (var item in items) page.Items.Add(item);
+                _document.Pages.Add(page);
+                _records.Add(new PageRecord(page, _sheet, _sheetPages++));
+                items.Clear();
+                y = top;
+            }
+            void Write(Cell cell)
+            {
+                var block = _engine.BuildBlock(cell, cell.Text, width);
+                for (int i = 0; i < block.Lines.Count; i++)
+                {
+                    var (pitch, ascent, descent) = block.Metrics[i];
+                    if (y + pitch > bottom + Epsilon && y > top + Epsilon) FinishPage();
+                    if (block.Lines[i].Atoms.Count > 0)
+                        _engine.EmitLine(block.Lines[i], left, y + (pitch - (ascent + descent)) / 2 + ascent, left, left + width, items);
+                    y += pitch;
+                }
+            }
+            var normal = CellStyle.Default with { Wrap = true };
+            var bold = normal with { Font = normal.Font with { Bold = true } };
+            foreach (var comment in _sheet.Comments)
+            {
+                _ct.ThrowIfCancellationRequested();
+                Write(new Cell { Text = comment.Author is null ? $"Cell {comment.Reference}" : $"Cell {comment.Reference} ({comment.Author})", Kind = CellValueKind.Text, Style = bold });
+                if (comment.Text.Trim().Length > 0) Write(new Cell { Text = comment.Text.Trim(), Kind = CellValueKind.Text, Style = normal });
+                y += 8;
+            }
+            if (items.Count > 0) FinishPage();
         }
 
         private void RunRange(CellRange? area)
