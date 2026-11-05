@@ -209,12 +209,98 @@ public class XlsxShapeTests
         Assert.Equal((0.5, 1.0), path.Points[^1]);
     }
 
+    private static string Xfrm(int cx, int cy) => $"<a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>";
+
     [Fact]
-    public void Custom_geometry_with_guide_formulas_is_still_reported_as_not_drawn()
+    public void Custom_geometry_evaluates_guide_formulas_and_adjust_values()
     {
-        var geometry = "<a:custGeom><a:avLst/><a:pathLst><a:path w=\"100\" h=\"100\"><a:moveTo><a:pt x=\"l\" y=\"t\"/></a:moveTo><a:lnTo><a:pt x=\"r\" y=\"b\"/></a:lnTo></a:path></a:pathLst></a:custGeom>";
+        var geometry = Xfrm(2000, 1000) + "<a:custGeom><a:avLst><a:gd name=\"adj\" fmla=\"val 25000\"/></a:avLst><a:gdLst>" +
+                       "<a:gd name=\"x1\" fmla=\"*/ w adj 100000\"/><a:gd name=\"y1\" fmla=\"+- vc 0 hd4\"/><a:gd name=\"x2\" fmla=\"pin 0 x1 wd2\"/>" +
+                       "<a:gd name=\"d\" fmla=\"sin h 5400000\"/><a:gd name=\"m\" fmla=\"max x1 d\"/><a:gd name=\"c\" fmla=\"?: adj x1 w\"/></a:gdLst>" +
+                       "<a:pathLst><a:path><a:moveTo><a:pt x=\"l\" y=\"t\"/></a:moveTo><a:lnTo><a:pt x=\"x1\" y=\"y1\"/></a:lnTo><a:lnTo><a:pt x=\"m\" y=\"b\"/></a:lnTo><a:lnTo><a:pt x=\"c\" y=\"vc\"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>";
         var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp(geometry + SolidRed)));
+        Assert.Empty(warnings.Warnings);
+        var points = Assert.Single(Assert.Single(sheet.Shapes).Paths!).Points;
+        Assert.Equal(4, points.Count);
+        Assert.Equal((0.0, 0.0), points[0]);
+        Assert.Equal((0.25, 0.25), (Math.Round(points[1].X, 6), Math.Round(points[1].Y, 6))); // x1 = w/4, y1 = vc - hd4
+        Assert.Equal((0.5, 1.0), (Math.Round(points[2].X, 6), Math.Round(points[2].Y, 6)));   // max(x1 = 500, d = 1000 sin 90°) = 1000
+        Assert.Equal((0.25, 0.5), (Math.Round(points[3].X, 6), Math.Round(points[3].Y, 6)));  // adj > 0 picks x1
+    }
+
+    [Fact]
+    public void Custom_geometry_arcs_may_use_guides_and_formulas_that_cannot_be_evaluated_are_reported()
+    {
+        var arc = Xfrm(1000, 1000) + "<a:custGeom><a:avLst/><a:gdLst/><a:pathLst><a:path><a:moveTo><a:pt x=\"l\" y=\"vc\"/></a:moveTo>" +
+                  "<a:arcTo wR=\"wd2\" hR=\"hd2\" stAng=\"cd2\" swAng=\"cd2\"/><a:close/></a:path></a:pathLst></a:custGeom>";
+        var shape = ReadOne(Sp(arc + SolidRed));
+        Assert.Equal(1.0, shape.Paths![0].Points.Max(p => p.X), 6); // a half ellipse from the left edge to the right
+        var bad = Xfrm(1000, 1000) + "<a:custGeom><a:avLst/><a:gdLst><a:gd name=\"x\" fmla=\"bogus w\"/></a:gdLst><a:pathLst><a:path><a:moveTo><a:pt x=\"x\" y=\"0\"/></a:moveTo></a:path></a:pathLst></a:custGeom>";
+        var (sheet, warnings) = Read(OneCellAnchor(0, 0, 10, 10, Sp(bad + SolidRed)));
         Assert.Empty(sheet.Shapes);
         Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing" && w.Message.Contains("custom geometry"));
+    }
+
+    [Theory]
+    [InlineData("ltUpDiag", HatchKind.UpDiagonal, 0.5)]
+    [InlineData("dkHorz", HatchKind.Horizontal, 2)]
+    [InlineData("narVert", HatchKind.Vertical, 0.75)]
+    [InlineData("wdDnDiag", HatchKind.DownDiagonal, 3)]
+    [InlineData("cross", HatchKind.Cross, 1)]
+    [InlineData("diagCross", HatchKind.DiagonalCross, 0.75)]
+    public void Pattern_fills_become_hatches_of_the_foreground_over_the_background(string preset, HatchKind kind, double weight)
+    {
+        var fill = $"<a:pattFill prst=\"{preset}\"><a:fgClr><a:srgbClr val=\"0000FF\"/></a:fgClr><a:bgClr><a:srgbClr val=\"FFFF00\"/></a:bgClr></a:pattFill>";
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + fill));
+        var pattern = Assert.IsType<ShapePattern>(shape.FillPattern);
+        Assert.Equal((kind, weight, new Color(0, 0, 255), new Color(255, 255, 0)), (pattern.Kind, pattern.Weight, pattern.Foreground, pattern.Background));
+    }
+
+    [Fact]
+    public void Percent_patterns_are_a_tint_and_other_fills_have_no_pattern()
+    {
+        var fill = "<a:pattFill prst=\"pct25\"><a:fgClr><a:srgbClr val=\"000000\"/></a:fgClr><a:bgClr><a:srgbClr val=\"FFFFFF\"/></a:bgClr></a:pattFill>";
+        var pattern = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + fill)).FillPattern!;
+        Assert.Equal((HatchKind.Tint, 0.25), (pattern.Kind, pattern.Coverage));
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed)).FillPattern);
+    }
+
+    private const string Accent1Style = "<xdr:style><a:lnRef idx=\"0\"><a:schemeClr val=\"accent1\"/></a:lnRef><a:fillRef idx=\"{0}\"><a:schemeClr val=\"accent1\"/></a:fillRef>" +
+                                        "<a:effectRef idx=\"{1}\"><a:schemeClr val=\"accent1\"/></a:effectRef></xdr:style>";
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Gradient_style_references_take_the_theme_gradient_in_the_style_color(int idx)
+    {
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>", string.Format(Accent1Style, idx, 0)));
+        var gradient = Assert.IsType<GradientFill>(shape.FillGradient);
+        Assert.Equal((GradientKind.Linear, 90.0, 3), (gradient.Kind, gradient.Degree, gradient.Stops.Count));
+        Assert.Equal(shape.Fill, gradient.Stops[0].Color);
+        // The gradient is a variation of accent 1 (4472C4): all stops stay bluish and they differ from each other.
+        Assert.All(gradient.Stops, g => Assert.True(g.Color.B > g.Color.R));
+        Assert.NotEqual(gradient.Stops[0].Color, gradient.Stops[2].Color);
+    }
+
+    [Fact]
+    public void A_solid_style_reference_and_an_explicit_fill_do_not_become_gradients()
+    {
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>", string.Format(Accent1Style, 1, 0))).FillGradient);
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed, string.Format(Accent1Style, 3, 0))).FillGradient);
+    }
+
+    [Fact]
+    public void Shadows_come_from_the_shape_or_from_the_themes_effect_style()
+    {
+        var own = "<a:effectLst><a:outerShdw blurRad=\"50800\" dist=\"38100\" dir=\"2700000\"><a:srgbClr val=\"000000\"><a:alpha val=\"40000\"/></a:srgbClr></a:outerShdw></a:effectLst>";
+        var shape = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + own));
+        var shadow = Assert.IsType<ShapeShadow>(shape.Shadow);
+        Assert.Equal((2.12132, 2.12132, 0.4, Color.Black), (Math.Round(shadow.Dx, 5), Math.Round(shadow.Dy, 5), shadow.Opacity, shadow.Color)); // 3 pt at 45°
+        // Default theme: effect style 3 is a shadow that falls straight down (dir 90°).
+        var themed = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed, string.Format(Accent1Style, 1, 3))).Shadow!;
+        Assert.Equal((0.0, 1.5, 0.63), (Math.Round(themed.Dx, 6), Math.Round(themed.Dy, 6), themed.Opacity));
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed, string.Format(Accent1Style, 1, 1))).Shadow);
+        // An empty effect list on the shape switches the style's shadow off.
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst/>", string.Format(Accent1Style, 1, 3))).Shadow);
     }
 }

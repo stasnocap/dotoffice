@@ -218,4 +218,52 @@ public class SheetShapeLayoutTests
         var noFill = Page(shape with { Paths = [new ShapePath([(0, 0), (1, 0), (0.5, 1)], true, Fill: false)] });
         Assert.Empty(noFill.Items.OfType<PolygonItem>());
     }
+
+    [Fact]
+    public void A_pattern_fill_draws_the_background_and_clipped_hatch_lines()
+    {
+        var pattern = new ShapePattern(HatchKind.Horizontal, Blue, Red, Spacing: 10, Weight: 1);
+        var page = Page(Shape() with { FillPattern = pattern, Fill = Blue });
+        Assert.Equal(Red, page.Items.OfType<PolygonItem>().Single().Fill);
+        var lines = page.Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        Assert.Equal(4, lines.Count); // frame 100 x 40: lines every 10 pt, anchored at the top edge
+        Assert.All(lines, l => Assert.Equal(l.Y1, l.Y2, 6));
+        Assert.All(lines, l => Assert.Equal(100, Math.Abs(l.X2 - l.X1), 3));
+        Assert.Equal(new[] { 0.0, 10, 20, 30 }, lines.Select(l => Math.Round(l.Y1 - 54 - 20)).Order());
+    }
+
+    [Fact]
+    public void Diagonal_hatches_stay_inside_a_triangle_and_tints_are_one_color()
+    {
+        var page = Page(Shape(ShapeGeometry.Triangle) with { FillPattern = new ShapePattern(HatchKind.UpDiagonal, Blue, Red, 8, 1), Fill = Blue });
+        var (left, top) = (50.4 + 50, 54 + 20);
+        foreach (var l in page.Items.OfType<LineItem>().Where(l => l.Color == Blue))
+        {
+            Assert.InRange(l.X1, left - 0.01, left + 100.01);
+            Assert.InRange(l.X2, left - 0.01, left + 100.01);
+            Assert.InRange(l.Y1, top - 0.01, top + 40.01);
+            Assert.True(l.Y2 < l.Y1 && l.X2 > l.X1); // running up to the right
+        }
+        Assert.Contains(page.Items, i => i is LineItem l && l.Color == Blue);
+        var tint = Page(Shape() with { FillPattern = new ShapePattern(HatchKind.Tint, Color.Black, Color.White, Coverage: 0.5), Fill = Color.Black });
+        Assert.Equal(new Color(128, 128, 128), tint.Items.OfType<PolygonItem>().Single().Fill);
+        Assert.Empty(tint.Items.OfType<LineItem>());
+    }
+
+    [Fact]
+    public void A_shadow_is_a_translucent_darker_copy_moved_by_its_offset()
+    {
+        var page = Page(Shape(fill: Red, line: Blue) with { Shadow = new ShapeShadow(Color.Black, 0.4, 3, 5) });
+        var items = page.Items.ToList();
+        int push = items.FindIndex(i => i is PushItem { Opacity: 0.4 });
+        Assert.True(push > 0);
+        var shadowPolygon = Assert.IsType<PolygonItem>(items[push + 1]);
+        Assert.Equal(Color.Black, shadowPolygon.Fill);
+        var body = items.OfType<PolygonItem>().Single(p => p.Fill == Red);
+        Assert.Equal(body.Points[0].X + 3, shadowPolygon.Points[0].X, 6);
+        Assert.Equal(body.Points[0].Y + 5, shadowPolygon.Points[0].Y, 6);
+        Assert.True(items.IndexOf(body) > push); // the shadow lies underneath
+        Assert.DoesNotContain(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Blue);
+        Assert.Contains(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Color.Black);
+    }
 }

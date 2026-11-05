@@ -47,15 +47,44 @@ internal sealed class XlsxTheme
     public XlsxTheme()
     {
         for (int i = 0; i < _colors.Length; i++) _colors[i] = Color.TryParseHex(DefaultColors[i]);
+        ReadFormats(XElement.Parse(DefaultFormats));
     }
 
     public Color? this[int index] => index >= 0 && index < _colors.Length ? _colors[index] : null;
+
+    // Office 2013+ format scheme: the fills and effects that a shape's style references (fillRef/effectRef idx 1-3) stand for.
+    private const string DefaultFormats =
+        "<fmtScheme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><fillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>" +
+        "<a:gradFill rotWithShape=\"1\"><a:gsLst><a:gs pos=\"0\"><a:schemeClr val=\"phClr\"><a:lumMod val=\"110000\"/><a:satMod val=\"105000\"/><a:tint val=\"67000\"/></a:schemeClr></a:gs>" +
+        "<a:gs pos=\"50000\"><a:schemeClr val=\"phClr\"><a:lumMod val=\"105000\"/><a:satMod val=\"103000\"/><a:tint val=\"73000\"/></a:schemeClr></a:gs>" +
+        "<a:gs pos=\"100000\"><a:schemeClr val=\"phClr\"><a:lumMod val=\"105000\"/><a:satMod val=\"109000\"/><a:tint val=\"81000\"/></a:schemeClr></a:gs></a:gsLst><a:lin ang=\"5400000\" scaled=\"0\"/></a:gradFill>" +
+        "<a:gradFill rotWithShape=\"1\"><a:gsLst><a:gs pos=\"0\"><a:schemeClr val=\"phClr\"><a:satMod val=\"103000\"/><a:lumMod val=\"102000\"/><a:tint val=\"94000\"/></a:schemeClr></a:gs>" +
+        "<a:gs pos=\"50000\"><a:schemeClr val=\"phClr\"><a:satMod val=\"110000\"/><a:lumMod val=\"100000\"/><a:shade val=\"100000\"/></a:schemeClr></a:gs>" +
+        "<a:gs pos=\"100000\"><a:schemeClr val=\"phClr\"><a:lumMod val=\"99000\"/><a:satMod val=\"120000\"/><a:shade val=\"78000\"/></a:schemeClr></a:gs></a:gsLst><a:lin ang=\"5400000\" scaled=\"0\"/></a:gradFill></fillStyleLst>" +
+        "<effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle>" +
+        "<a:effectStyle><a:effectLst><a:outerShdw blurRad=\"57150\" dist=\"19050\" dir=\"5400000\" algn=\"ctr\" rotWithShape=\"0\"><a:srgbClr val=\"000000\"><a:alpha val=\"63000\"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle></effectStyleLst></fmtScheme>";
+
+    private List<XElement> _fillStyles = [], _effectStyles = [];
+
+    /// <summary>The fill of style reference <paramref name="index"/> (1-3), or null when the theme has none.</summary>
+    public XElement? FillStyle(int index) => index >= 1 && index <= _fillStyles.Count ? _fillStyles[index - 1] : null;
+
+    /// <summary>The <c>effectLst</c> of effect style reference <paramref name="index"/> (1-3), or null when the theme has none.</summary>
+    public XElement? EffectStyle(int index) => index >= 1 && index <= _effectStyles.Count ? _effectStyles[index - 1] : null;
+
+    private void ReadFormats(XElement? scheme)
+    {
+        _fillStyles = scheme?.Elements().FirstOrDefault(e => e.Name.LocalName == "fillStyleLst")?.Elements().ToList() ?? [];
+        _effectStyles = scheme?.Elements().FirstOrDefault(e => e.Name.LocalName == "effectStyleLst")?.Elements()
+            .Select(style => style.Elements().FirstOrDefault(e => e.Name.LocalName == "effectLst") ?? new XElement("effectLst")).ToList() ?? [];
+    }
 
     public static XlsxTheme Read(XmlReader reader)
     {
         var theme = new XlsxTheme();
         var doc = XDocument.Load(reader);
         var scheme = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "clrScheme");
+        if (doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "fmtScheme") is { } formats) theme.ReadFormats(formats);
         if (scheme is null) return theme;
         for (int i = 0; i < SchemeOrder.Length; i++)
         {

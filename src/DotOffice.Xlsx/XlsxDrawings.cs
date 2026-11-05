@@ -240,7 +240,7 @@ internal static class XlsxDrawings
             paths = ReadCustomGeometry(custom, Number(Child(xfrm, "ext"), "cx"), Number(Child(xfrm, "ext"), "cy"));
             if (paths is null)
             {
-                state.Shapes++; // paths that use guide formulas are not evaluated
+                state.Shapes++; // a guide formula this reader cannot evaluate
                 return;
             }
             geometry = ShapeGeometry.Custom;
@@ -270,7 +270,20 @@ internal static class XlsxDrawings
         var lineRef = Child(style, "lnRef");
         bool lineOnly = geometry == ShapeGeometry.Line;
         Color? fill = lineOnly ? null : SolidFill(spPr, theme, Number(fillRef, "idx") > 0 ? StyleColor("fillRef") : null);
-        GradientFill? gradient = lineOnly ? null : ReadGradientFill(spPr, theme, state);
+        GradientFill? gradient = null;
+        ShapePattern? pattern = null;
+        if (!lineOnly)
+        {
+            var explicitFill = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
+            if (explicitFill is not null) { gradient = ReadGradientFill(explicitFill, theme, state, null); pattern = ReadPattern(explicitFill, theme); }
+            else if (theme.FillStyle((int)Number(fillRef, "idx")) is { } themed && StyleColor("fillRef") is { } phColor)
+            {
+                // The shape takes the theme's fill style: a gradient (or tint) of the style's color.
+                gradient = ReadGradientFill(themed, theme, state, phColor);
+                if (gradient is not null) fill = gradient.Stops[0].Color;
+            }
+        }
+        var shadow = lineOnly ? null : ReadShadow(Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } effectRef ? theme.EffectStyle((int)Number(effectRef, "idx")) : null), theme, Resolve(Child(style, "effectRef"), theme));
 
         var ln = Child(spPr, "ln");
         Color? lineColor;
@@ -309,6 +322,8 @@ internal static class XlsxDrawings
             Geometry = geometry.Value,
             Fill = fill,
             FillGradient = gradient,
+            FillPattern = pattern,
+            Shadow = shadow,
             Paths = paths,
             HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
             LineColor = lineColor,
@@ -325,13 +340,12 @@ internal static class XlsxDrawings
     /// A gradient fill of a shape: the stops, and either the angle of a linear gradient or the focus of a path gradient (which is drawn
     /// radially). Null when the fill is not a gradient.
     /// </summary>
-    private static GradientFill? ReadGradientFill(XElement? spPr, XlsxTheme theme, State state)
+    private static GradientFill? ReadGradientFill(XElement? first, XlsxTheme theme, State state, Color? placeholder)
     {
-        var first = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
         if (first is null || first.Name.LocalName != "gradFill") return null;
         var stops = new List<GradientStop>();
         foreach (var gs in Child(first, "gsLst")?.Elements().Where(e => e.Name.LocalName == "gs") ?? [])
-            if (Resolve(gs, theme) is { } color) stops.Add(new GradientStop(Math.Clamp(Number(gs, "pos") / 100_000.0, 0, 1), color));
+            if (Resolve(gs, theme, placeholder) is { } color) stops.Add(new GradientStop(Math.Clamp(Number(gs, "pos") / 100_000.0, 0, 1), color));
         if (stops.Count < 2) return null;
         stops = stops.OrderBy(g => g.Position).ToList();
         var path = Child(first, "path");
@@ -345,6 +359,39 @@ internal static class XlsxDrawings
         }
         double degree = Child(first, "lin")?.Attribute("ang") is not null ? Number(Child(first, "lin"), "ang") / 60_000.0 : 0;
         return new GradientFill { Kind = GradientKind.Linear, Degree = degree, Stops = stops };
+    }
+
+    /// <summary>The hatching of a <c>pattFill</c> (null for any other fill): the preset's lines, their spacing and weight, or a tint for dot patterns.</summary>
+    private static ShapePattern? ReadPattern(XElement? fill, XlsxTheme theme)
+    {
+        if (fill is null || fill.Name.LocalName != "pattFill") return null;
+        var foreground = Resolve(Child(fill, "fgClr"), theme) ?? Color.Black;
+        var background = Resolve(Child(fill, "bgClr"), theme) ?? Color.White;
+        string preset = (string?)fill.Attribute("prst") ?? "pct50";
+        ShapePattern Lines(HatchKind kind, double spacing, double weight) => new(kind, foreground, background, spacing, weight);
+        if (preset.StartsWith("pct", StringComparison.Ordinal) && double.TryParse(preset.AsSpan(3), NumberStyles.Float, CultureInfo.InvariantCulture, out var percent))
+            return new ShapePattern(HatchKind.Tint, foreground, background, Coverage: percent / 100);
+        return preset switch
+        {
+            "horz" or "dashHorz" => Lines(HatchKind.Horizontal, 6, 1), "ltHorz" => Lines(HatchKind.Horizontal, 6, 0.5), "dkHorz" => Lines(HatchKind.Horizontal, 6, 2), "narHorz" => Lines(HatchKind.Horizontal, 3, 0.75),
+            "vert" or "dashVert" => Lines(HatchKind.Vertical, 6, 1), "ltVert" => Lines(HatchKind.Vertical, 6, 0.5), "dkVert" => Lines(HatchKind.Vertical, 6, 2), "narVert" => Lines(HatchKind.Vertical, 3, 0.75),
+            "upDiag" or "dashUpDiag" => Lines(HatchKind.UpDiagonal, 6, 1), "ltUpDiag" => Lines(HatchKind.UpDiagonal, 6, 0.5), "dkUpDiag" => Lines(HatchKind.UpDiagonal, 6, 2), "wdUpDiag" => Lines(HatchKind.UpDiagonal, 6, 3),
+            "dnDiag" or "dashDnDiag" => Lines(HatchKind.DownDiagonal, 6, 1), "ltDnDiag" => Lines(HatchKind.DownDiagonal, 6, 0.5), "dkDnDiag" => Lines(HatchKind.DownDiagonal, 6, 2), "wdDnDiag" => Lines(HatchKind.DownDiagonal, 6, 3),
+            "cross" or "lgGrid" => Lines(HatchKind.Cross, 8, 1), "smGrid" => Lines(HatchKind.Cross, 4, 0.5), "diagCross" => Lines(HatchKind.DiagonalCross, 6, 0.75),
+            "smCheck" or "lgCheck" or "plaid" or "weave" or "trellis" or "zigZag" or "wave" or "horzBrick" or "diagBrick" or "shingle" or "divot" or "sphere" => new ShapePattern(HatchKind.Tint, foreground, background, Coverage: 0.5),
+            _ => new ShapePattern(HatchKind.Tint, foreground, background, Coverage: 0.25), // dots, confetti, diamonds
+        };
+    }
+
+    /// <summary>An outer shadow from an <c>effectLst</c>: how far and in which direction it falls, in what color and how opaque. Blur is ignored.</summary>
+    private static ShapeShadow? ReadShadow(XElement? effects, XlsxTheme theme, Color? placeholder)
+    {
+        var shadow = Child(effects, "outerShdw");
+        if (shadow is null) return null;
+        double distance = Number(shadow, "dist") / EmuPerPoint, direction = Number(shadow, "dir") / 60_000.0 * Math.PI / 180;
+        if (distance <= 0) return null;
+        var color = Resolve(shadow, theme, placeholder) ?? Color.Black;
+        return new ShapeShadow(color, ColorOpacity(shadow), distance * Math.Cos(direction), distance * Math.Sin(direction));
     }
 
     /// <summary>The route of a bent or curved connector as points in fractions of its frame; null for any other geometry.</summary>
@@ -401,11 +448,73 @@ internal static class XlsxDrawings
     }
 
     /// <summary>
-    /// The paths of a custom geometry as polylines in fractions of the shape's frame. Null when the geometry uses guide formulas rather
-    /// than plain numbers, or has nothing to draw.
+    /// The values a custom geometry's coordinates may name: the built-in guides (<c>w</c>, <c>hd2</c>, <c>ss</c>, <c>cd4</c>…), its
+    /// adjust values and the results of its guide formulas (<c>*/</c>, <c>+-</c>, <c>sin</c>, <c>at2</c>, <c>pin</c>…), evaluated in order.
+    /// Returns false when a formula cannot be evaluated.
+    /// </summary>
+    private static bool EvaluateGuides(XElement custGeom, double w, double h, Dictionary<string, double> guides)
+    {
+        double ss = Math.Min(w, h), ls = Math.Max(w, h);
+        guides["w"] = w; guides["h"] = h; guides["l"] = 0; guides["t"] = 0; guides["r"] = w; guides["b"] = h; guides["hc"] = w / 2; guides["vc"] = h / 2;
+        foreach (int d in new[] { 2, 3, 4, 5, 6, 8, 10, 12, 16, 32 }) { guides[$"wd{d}"] = w / d; guides[$"hd{d}"] = h / d; guides[$"ssd{d}"] = ss / d; }
+        guides["ss"] = ss; guides["ls"] = ls;
+        guides["cd2"] = 10_800_000; guides["cd4"] = 5_400_000; guides["cd8"] = 2_700_000; guides["3cd4"] = 16_200_000; guides["3cd8"] = 8_100_000;
+        guides["5cd8"] = 13_500_000; guides["7cd8"] = 18_900_000;
+
+        double? Operand(string token) =>
+            double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : guides.TryGetValue(token, out var known) ? known : null;
+        bool Define(XElement gd)
+        {
+            var name = (string?)gd.Attribute("name");
+            var parts = ((string?)gd.Attribute("fmla"))?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (name is null || parts is null || parts.Length == 0) return false;
+            var a = new double[3];
+            for (int i = 1; i < parts.Length && i <= 3; i++)
+                if (Operand(parts[i]) is { } v) a[i - 1] = v; else return false;
+            static double Angle(double sixtieths) => sixtieths / 60_000.0 * Math.PI / 180;
+            double? value = parts[0] switch
+            {
+                "val" => a[0],
+                "*/" => a[2] == 0 ? 0 : a[0] * a[1] / a[2],
+                "+-" => a[0] + a[1] - a[2],
+                "+/" => a[2] == 0 ? 0 : (a[0] + a[1]) / a[2],
+                "?:" => a[0] > 0 ? a[1] : a[2],
+                "abs" => Math.Abs(a[0]),
+                "at2" => Math.Atan2(a[1], a[0]) * 180 / Math.PI * 60_000,
+                "cat2" => a[0] * Math.Cos(Math.Atan2(a[2], a[1])),
+                "sat2" => a[0] * Math.Sin(Math.Atan2(a[2], a[1])),
+                "cos" => a[0] * Math.Cos(Angle(a[1])),
+                "sin" => a[0] * Math.Sin(Angle(a[1])),
+                "tan" => a[0] * Math.Tan(Angle(a[1])),
+                "max" => Math.Max(a[0], a[1]),
+                "min" => Math.Min(a[0], a[1]),
+                "mod" => Math.Sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]),
+                "pin" => Math.Max(a[0], Math.Min(a[1], a[2])),
+                "sqrt" => Math.Sqrt(Math.Max(a[0], 0)),
+                _ => null,
+            };
+            if (value is not { } result || !double.IsFinite(result)) return false;
+            guides[name] = result;
+            return true;
+        }
+        // Adjust values come first (formulas read them), then the formulas in order.
+        foreach (var gd in Child(custGeom, "avLst")?.Elements().Where(e => e.Name.LocalName == "gd") ?? [])
+            if (!Define(gd)) return false;
+        foreach (var gd in Child(custGeom, "gdLst")?.Elements().Where(e => e.Name.LocalName == "gd") ?? [])
+            if (!Define(gd)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// The paths of a custom geometry as polylines in fractions of the shape's frame, with coordinates that are numbers or the names of
+    /// guides. Null when a guide formula cannot be evaluated, or when there is nothing to draw.
     /// </summary>
     private static List<ShapePath>? ReadCustomGeometry(XElement custGeom, double widthEmu, double heightEmu)
     {
+        var guides = new Dictionary<string, double>();
+        if (!EvaluateGuides(custGeom, widthEmu, heightEmu, guides)) return null;
+        double? Value(string? text) =>
+            text is null ? null : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : guides.TryGetValue(text, out var known) ? known : null;
         var result = new List<ShapePath>();
         foreach (var path in Child(custGeom, "pathLst")?.Elements().Where(e => e.Name.LocalName == "path") ?? [])
         {
@@ -416,8 +525,7 @@ internal static class XlsxDrawings
             bool valid = true;
             (double X, double Y) Pt(XElement? pt)
             {
-                if (!double.TryParse((string?)pt?.Attribute("x"), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
-                    !double.TryParse((string?)pt?.Attribute("y"), NumberStyles.Float, CultureInfo.InvariantCulture, out var y)) { valid = false; return (0, 0); }
+                if (Value((string?)pt?.Attribute("x")) is not { } x || Value((string?)pt?.Attribute("y")) is not { } y) { valid = false; return (0, 0); }
                 return (x / w, y / h);
             }
             bool fill = (string?)path.Attribute("fill") != "none", stroke = (string?)path.Attribute("stroke") is not ("0" or "false");
@@ -457,8 +565,9 @@ internal static class XlsxDrawings
                     case "arcTo" when points.Count > 0:
                     {
                         // An arc of an ellipse with radii wR and hR from the current point, starting at stAng and sweeping swAng.
-                        double wr = Number(command, "wR") / w, hr = Number(command, "hR") / h, start = Number(command, "stAng") / 60_000.0 * Math.PI / 180, sweep = Number(command, "swAng") / 60_000.0 * Math.PI / 180;
-                        if (command.Attribute("wR") is null || command.Attribute("hR") is null || command.Attribute("stAng") is null || command.Attribute("swAng") is null) { valid = false; break; }
+                        if (Value((string?)command.Attribute("wR")) is not { } wR || Value((string?)command.Attribute("hR")) is not { } hR ||
+                            Value((string?)command.Attribute("stAng")) is not { } stAng || Value((string?)command.Attribute("swAng")) is not { } swAng) { valid = false; break; }
+                        double wr = wR / w, hr = hR / h, start = stAng / 60_000.0 * Math.PI / 180, sweep = swAng / 60_000.0 * Math.PI / 180;
                         var current = points[^1];
                         double cx = current.X - wr * Math.Cos(start), cy = current.Y - hr * Math.Sin(start);
                         int steps = Math.Max(4, (int)Math.Ceiling(Math.Abs(sweep) * 180 / Math.PI / 6));

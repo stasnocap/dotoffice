@@ -80,6 +80,18 @@ public enum ShapeTextAnchor { Top, Middle, Bottom }
 /// <summary>A paragraph of the text inside a shape.</summary>
 public sealed record ShapeParagraph(HorizontalAlignment Alignment, IReadOnlyList<CellTextRun> Runs, double FontSize);
 
+public enum HatchKind { Horizontal, Vertical, UpDiagonal, DownDiagonal, Cross, DiagonalCross, Tint }
+
+/// <summary>
+/// A pattern fill: a <paramref name="Background"/> hatched with lines of the <paramref name="Foreground"/> color every
+/// <paramref name="Spacing"/> points, <paramref name="Weight"/> points thick. <see cref="HatchKind.Tint"/> patterns (dots and the like)
+/// are drawn as the foreground blended into the background by <paramref name="Coverage"/>.
+/// </summary>
+public sealed record ShapePattern(HatchKind Kind, Color Foreground, Color Background, double Spacing = 6, double Weight = 1, double Coverage = 0.5);
+
+/// <summary>A shadow drawn as a copy of the shape moved by (<paramref name="Dx"/>, <paramref name="Dy"/>) points, painted with <paramref name="Opacity"/>.</summary>
+public sealed record ShapeShadow(Color Color, double Opacity, double Dx, double Dy);
+
 /// <summary>A shape, text box or line of a drawing.</summary>
 public sealed record SheetShape : SheetObject
 {
@@ -93,6 +105,12 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>A gradient fill; <see cref="Fill"/> then holds the color of its first stop.</summary>
     public GradientFill? FillGradient { get; init; }
+
+    /// <summary>A pattern fill (hatching); drawn instead of <see cref="Fill"/>, which holds its foreground color.</summary>
+    public ShapePattern? FillPattern { get; init; }
+
+    /// <summary>An outer shadow; null means none.</summary>
+    public ShapeShadow? Shadow { get; init; }
 
     /// <summary>
     /// Paths that replace the preset geometry: custom geometry and bent or curved connectors. Open paths of a line are the connector's route.

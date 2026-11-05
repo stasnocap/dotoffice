@@ -20,6 +20,19 @@ public sealed partial class SheetLayoutEngine
             pushed++;
         }
         bool flipped = shape.FlipH || shape.FlipV;
+        if (shape.Shadow is { } shadow)
+        {
+            // The shadow is the shape's outline in the shadow color, moved and translucent (blur is not drawn).
+            bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null;
+            var dark = shape with
+            {
+                Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, Shadow = null,
+                LineColor = shape.LineColor is null ? null : shadow.Color, Paragraphs = [],
+            };
+            items.Add(new PushItem(null, 0, cx + shadow.Dx, cy + shadow.Dy, shape.FlipH, shape.FlipV, shadow.Opacity));
+            EmitOutline(dark, x + shadow.Dx, y + shadow.Dy, width, height, items);
+            items.Add(new PopItem());
+        }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
         EmitOutline(shape, x, y, width, height, items);
         if (flipped) items.Add(new PopItem());
@@ -136,10 +149,50 @@ public sealed partial class SheetLayoutEngine
                 FocusX = (gradient.Left + gradient.Right) / 2, FocusY = (gradient.Top + gradient.Bottom) / 2,
             });
         }
+        else if (shape.FillPattern is { } pattern)
+            EmitPattern(pattern, points, x, y, w, h, ellipse, items);
         else if (shape.Fill is { } fill)
         {
             if (ellipse) items.Add(new EllipseItem(x, y, w, h, fill));
             else items.Add(new PolygonItem(points, fill));
+        }
+    }
+
+    /// <summary>
+    /// A pattern fill: the background, then the hatch lines of the pattern cut at the outline (anchored at the shape's top-left corner), or
+    /// for tint patterns the colors blended by their coverage.
+    /// </summary>
+    private static void EmitPattern(ShapePattern pattern, List<(double X, double Y)> outline, double x, double y, double w, double h, bool ellipse, List<LayoutItem> items)
+    {
+        var back = pattern.Kind == HatchKind.Tint ? pattern.Background.Blend(pattern.Foreground, pattern.Coverage) : pattern.Background;
+        if (ellipse) items.Add(new EllipseItem(x, y, w, h, back));
+        else items.Add(new PolygonItem(outline, back));
+        double[] angles = pattern.Kind switch
+        {
+            HatchKind.Horizontal => [0], HatchKind.Vertical => [90], HatchKind.UpDiagonal => [-45], HatchKind.DownDiagonal => [45],
+            HatchKind.Cross => [0, 90], HatchKind.DiagonalCross => [-45, 45], _ => [],
+        };
+        foreach (double degrees in angles)
+        {
+            double radians = degrees * Math.PI / 180, dx = Math.Cos(radians), dy = Math.Sin(radians), nx = -dy, ny = dx; // direction and normal
+            double lo = outline.Min(p => p.X * nx + p.Y * ny), hi = outline.Max(p => p.X * nx + p.Y * ny);
+            double spacing = Math.Max(pattern.Spacing, (hi - lo) / 400), origin = x * nx + y * ny;
+            for (double t = origin + Math.Ceiling((lo - origin) / spacing) * spacing; t <= hi; t += spacing)
+            {
+                var crossings = new List<double>();
+                double probe = t + 1e-6; // keeps a line through a vertex from being counted twice
+                for (int i = 0; i < outline.Count; i++)
+                {
+                    var (a, b) = (outline[i], outline[(i + 1) % outline.Count]);
+                    double ta = a.X * nx + a.Y * ny, tb = b.X * nx + b.Y * ny;
+                    if ((ta - probe) * (tb - probe) >= 0) continue;
+                    double u = (probe - ta) / (tb - ta);
+                    crossings.Add((a.X + (b.X - a.X) * u) * dx + (a.Y + (b.Y - a.Y) * u) * dy);
+                }
+                crossings.Sort();
+                for (int k = 0; k + 1 < crossings.Count; k += 2)
+                    items.Add(new LineItem(nx * t + dx * crossings[k], ny * t + dy * crossings[k], nx * t + dx * crossings[k + 1], ny * t + dy * crossings[k + 1], pattern.Weight, pattern.Foreground));
+            }
         }
     }
 

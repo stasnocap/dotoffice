@@ -38,6 +38,7 @@ internal static class ShowcaseXlsx
             ("Pictures", PicturesSheet(), "visible"),
             ("Shapes", ShapesSheet(), "visible"),
             ("Shape paths", ShapePathsSheet(), "visible"),
+            ("Shape fills", ShapeFillsSheet(), "visible"),
             ("Charts", ChartsSheet(), "visible"),
             ("More charts", MoreChartsSheet(), "visible"),
             ("Chart options", ChartOptionsSheet(), "visible"),
@@ -79,6 +80,7 @@ internal static class ShowcaseXlsx
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot") + 1, "");
         WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16");
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
+        WriteShapeFills(zip, sheets.FindIndex(x => x.Name == "Shape fills") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
         WriteChartOptions(zip, sheets.FindIndex(x => x.Name == "Chart options") + 1);
@@ -413,6 +415,45 @@ internal static class ShowcaseXlsx
 
     private static string ShapePathsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
         Row(1, Str("A1", "Shape paths: gradients, arrowheads, bent connectors, custom geometry", Bold)) + Row(3, Str("A3", "Gradient fills:")) + Row(9, Str("A9", "Arrowheads:")) + Row(13, Str("A13", "Connectors:")) + Row(19, Str("A19", "Custom geometry:")),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+
+    private static string Pattern(string preset, string foreground, string background) =>
+        $"<a:pattFill prst=\"{preset}\"><a:fgClr><a:srgbClr val=\"{foreground}\"/></a:fgClr><a:bgClr><a:srgbClr val=\"{background}\"/></a:bgClr></a:pattFill>";
+
+    private static void WriteShapeFills(ZipArchive zip, int sheetNumber)
+    {
+        string Style(int fill, int effect, string color = "accent1") =>
+            $"<xdr:style><a:lnRef idx=\"0\"><a:schemeClr val=\"{color}\"/></a:lnRef><a:fillRef idx=\"{fill}\"><a:schemeClr val=\"{color}\"/></a:fillRef><a:effectRef idx=\"{effect}\"><a:schemeClr val=\"{color}\"/></a:effectRef>" +
+            "<a:fontRef idx=\"minor\"><a:schemeClr val=\"lt1\"/></a:fontRef></xdr:style>";
+        string Styled(string name, string preset, string style, string text) =>
+            $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"{name}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:prstGeom prst=\"{preset}\"><a:avLst/></a:prstGeom></xdr:spPr>{style}{text}</xdr:sp>";
+        string Hatched(string preset, string name, string shape = "rect") =>
+            Shape(shape, name, "", Line("C55A11", 1)).Replace("<a:noFill/>", Pattern(preset, "C55A11", "FFF2CC")).Replace("</xdr:sp>", Text(preset, "000000", 900) + "</xdr:sp>");
+        string Shadowed(string name, string preset, string fill, string effects) =>
+            Shape(preset, name, fill, Line("404040", 1) + effects, Text(name, "FFFFFF", bold: true));
+        const string Drop = "<a:effectLst><a:outerShdw blurRad=\"50800\" dist=\"50800\" dir=\"2700000\" algn=\"tl\" rotWithShape=\"0\"><a:srgbClr val=\"000000\"><a:alpha val=\"40000\"/></a:srgbClr></a:outerShdw></a:effectLst>";
+        // A chevron whose point is a guide formula: the notch depth is a fraction (adj) of the shorter side.
+        var chevron = "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"Chevron\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1270000\" cy=\"635000\"/></a:xfrm>" +
+                      "<a:custGeom><a:avLst><a:gd name=\"adj\" fmla=\"val 50000\"/></a:avLst><a:gdLst><a:gd name=\"maxAdj\" fmla=\"*/ 100000 w ss\"/><a:gd name=\"a\" fmla=\"pin 0 adj maxAdj\"/>" +
+                      "<a:gd name=\"x1\" fmla=\"*/ ss a 100000\"/><a:gd name=\"x2\" fmla=\"+- r 0 x1\"/><a:gd name=\"x3\" fmla=\"*/ x2 1 2\"/></a:gdLst>" +
+                      "<a:pathLst><a:path><a:moveTo><a:pt x=\"l\" y=\"t\"/></a:moveTo><a:lnTo><a:pt x=\"x2\" y=\"t\"/></a:lnTo><a:lnTo><a:pt x=\"r\" y=\"vc\"/></a:lnTo><a:lnTo><a:pt x=\"x2\" y=\"b\"/></a:lnTo><a:lnTo><a:pt x=\"l\" y=\"b\"/></a:lnTo><a:lnTo><a:pt x=\"x1\" y=\"vc\"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>" +
+                      Fill("70AD47") + Line("375623", 1.5) + "</xdr:spPr>" + Text("Guides", "FFFFFF", bold: true) + "</xdr:sp>";
+        string[] presets = ["ltUpDiag", "dkHorz", "narVert", "wdDnDiag", "cross", "diagCross", "pct25", "smGrid"];
+        var anchors = new StringBuilder();
+        for (int i = 0; i < presets.Length; i++)
+            anchors.Append(OneCell(1 + i % 4 * 2, 3 + i / 4 * 5, 0, 0, 100, 55, Hatched(presets[i], presets[i], i == 3 ? "ellipse" : i == 5 ? "hexagon" : "rect")));
+        anchors.Append(OneCell(1, 14, 0, 0, 110, 55, Styled("Gradient 2", "rect", Style(2, 0), Text("Style gradient 2", "FFFFFF", bold: true))));
+        anchors.Append(OneCell(3, 14, 0, 0, 110, 55, Styled("Gradient 3", "roundRect", Style(3, 0, "accent2"), Text("Style gradient 3", "FFFFFF", bold: true))));
+        anchors.Append(OneCell(5, 14, 0, 0, 110, 55, Styled("Themed shadow", "rect", Style(1, 3, "accent6"), Text("Theme shadow", "FFFFFF", bold: true))));
+        anchors.Append(OneCell(7, 14, 0, 0, 100, 55, Shadowed("Drop shadow", "ellipse", "7030A0", Drop)));
+        anchors.Append(OneCell(1, 20, 0, 0, 100, 50, chevron));
+        Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+    }
+
+    private static string ShapeFillsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides:")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ charts

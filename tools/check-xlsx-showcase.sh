@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -215,6 +215,21 @@ for text in "Columns and a line on a second axis" "Smoothed and straight lines" 
   [[ $opt_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "the chart options sheet should not warn"; fi
+
+# Shape fills: the pattern hatches are lines in the pattern's color, the gradient styles are shadings, shadows are translucent, the
+# custom geometry with guide formulas is drawn, and nothing is reported.
+fills_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape fills" ] && fills_page=$p; done
+fills_text=$(page_text "$fills_page")
+for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides"; do
+  [[ $fills_text == *"$text"* ]] || fail "missing shape text: $text"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape fills"; then fail "the shape fills sheet should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" fills-qdf.pdf
+hatches=$(grep -ac "^0.7725 0.3529 0.0667 RG$" fills-qdf.pdf || true)
+[ "$hatches" -ge 1 ] || fail "pattern fills should stroke hatch lines in the pattern color"
+[ "$(grep -ac '^/GSa40 gs$' fills-qdf.pdf || true)" -ge 1 ] || fail "the drop shadow should be 40 % opaque"
+[ "$(grep -ac '^/GSa63 gs$' fills-qdf.pdf || true)" -ge 1 ] || fail "the theme shadow should be 63 % opaque"
 
 # Chart extras: translucent areas and bubbles use graphics states, and the trendlines and error bars are drawn without a warning.
 extra_page=0

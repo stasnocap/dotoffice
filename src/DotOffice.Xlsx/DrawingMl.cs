@@ -52,13 +52,22 @@ internal static class DrawingMl
             double value = Number(modifier, "val") / 100_000.0;
             switch (modifier.Name.LocalName)
             {
-                case "lumMod": c = WithLuminance(c, l => l * value); break;
-                case "lumOff": c = WithLuminance(c, l => l + value); break;
+                case "lumMod": c = WithHsl(c, (h, sat, l) => (h, sat, l * value)); break;
+                case "lumOff": c = WithHsl(c, (h, sat, l) => (h, sat, l + value)); break;
+                case "satMod": c = WithHsl(c, (h, sat, l) => (h, sat * value, l)); break;
+                case "satOff": c = WithHsl(c, (h, sat, l) => (h, sat + value, l)); break;
                 case "tint": c = c.Blend(Color.White, 1 - value); break;
                 case "shade": c = c.Blend(Color.Black, 1 - value); break;
             }
         }
         return c;
+    }
+
+    /// <summary>The opacity (0–1) of the color element inside <paramref name="holder"/> (a <c>solidFill</c>, shadow or similar): its <c>alpha</c> modifier, 1 when absent.</summary>
+    public static double ColorOpacity(XElement? holder)
+    {
+        var color = holder?.Elements().FirstOrDefault(e => e.Name.LocalName is "srgbClr" or "schemeClr" or "sysClr" or "prstClr" or "scrgbClr");
+        return color is not null && Child(color, "alpha") is { } alpha ? Math.Clamp(Number(alpha, "val", 100_000) / 100_000.0, 0, 1) : 1;
     }
 
     /// <summary>The opacity (0–1) of the first solid fill under <paramref name="holder"/>: its color's <c>alpha</c> modifier, 1 when absent.</summary>
@@ -74,7 +83,7 @@ internal static class DrawingMl
         "yellow" => new Color(255, 255, 0), "gray" or "grey" => new Color(128, 128, 128), "orange" => new Color(255, 165, 0), _ => null,
     };
 
-    private static Color WithLuminance(Color color, Func<double, double> change)
+    private static Color WithHsl(Color color, Func<double, double, double, (double H, double S, double L)> change)
     {
         double r = color.R / 255.0, g = color.G / 255.0, b = color.B / 255.0;
         double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), l = (max + min) / 2, h = 0, s = 0;
@@ -85,7 +94,9 @@ internal static class DrawingMl
             h = max == r ? (g - b) / d + (g < b ? 6 : 0) : max == g ? (b - r) / d + 2 : (r - g) / d + 4;
             h /= 6;
         }
-        l = Math.Clamp(change(l), 0, 1);
+        (h, s, l) = change(h, s, l);
+        l = Math.Clamp(l, 0, 1);
+        s = Math.Clamp(s, 0, 1);
         if (s < 1e-9) return new Color((byte)Math.Round(l * 255), (byte)Math.Round(l * 255), (byte)Math.Round(l * 255));
         double q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
         static double Channel(double p, double q, double t)
