@@ -43,6 +43,8 @@ internal static class ShowcaseXlsx
             ("Chart options", ChartOptionsSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Conditional links", ConditionalLinksSheet(), "visible"),
+            ("Pivot", PivotSheet("Pivot table cached cells (no pivot style: nothing to warn about)"), "visible"),
+            ("Pivot styled", PivotSheet("Pivot table with a pivot style (reported)"), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
@@ -71,6 +73,8 @@ internal static class ShowcaseXlsx
         rels.Append($"<Relationship Id=\"rId{sheets.Count + 1}\" Type=\"{RelType}styles\" Target=\"styles.xml\"/>");
         WritePictures(zip, sheets.FindIndex(x => x.Name == "Pictures") + 1, content);
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot") + 1, "");
+        WritePivot(zip, sheets.FindIndex(x => x.Name == "Pivot styled") + 1, "PivotStyleLight16");
         WriteShapePaths(zip, sheets.FindIndex(x => x.Name == "Shape paths") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
@@ -752,6 +756,26 @@ internal static class ShowcaseXlsx
                     "</x14:conditionalFormattings></ext></extLst>");
         var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
+    }
+
+    private static string PivotSheet(string title)
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", title, Bold)));
+        rows.Append(Row(3, Str("A3", "Row Labels", Bold) + Str("B3", "Sum of Sales", Bold)));
+        (string Region, double Sales)[] data = [("North", 1250), ("South", 980.5), ("East", 1610), ("West", 745)];
+        for (int i = 0; i < data.Length; i++) rows.Append(Row(4 + i, Str($"A{4 + i}", data[i].Region) + Num($"B{4 + i}", data[i].Sales, Money)));
+        rows.Append(Row(8, Str("A8", "Grand Total", Bold) + Num("B8", data.Sum(d => d.Sales), Money)));
+        return Sheet("<cols><col min=\"1\" max=\"2\" width=\"20\" customWidth=\"1\"/></cols>", rows.ToString(), "<pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static void WritePivot(ZipArchive zip, int sheetNumber, string style)
+    {
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable{sheetNumber}.xml\"/></Relationships>");
+        Entry(zip, $"xl/pivotTables/pivotTable{sheetNumber}.xml",
+            $"<pivotTableDefinition xmlns=\"{Main}\" name=\"PivotTable{sheetNumber}\" cacheId=\"1\"><location ref=\"A3:B8\"/>" +
+            (style.Length == 0 ? "" : $"<pivotTableStyleInfo name=\"{style}\" showRowHeaders=\"1\"/>") + "</pivotTableDefinition>");
     }
 
     private static string Limits() =>

@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -141,6 +141,11 @@ for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.4392 0.1882 0.6275
 done
 grep -aq '^\[[0-9.]* [0-9.]*\] 0 d$' shapes-qdf.pdf || fail "the dashed outline is missing"
 if grep -E "warning xlsx\.drawing-approximated" "$log"; then fail "the supported shapes should not be reported as approximated"; fi
+
+# Pivot tables: the cached cells print; only the table with a pivot style is reported, and the warning names the style.
+for needle in "North" "Grand Total" "4,585.50"; do grep -qF -- "$needle" all.txt || fail "missing pivot text: $needle"; done
+grep -E "warning xlsx\.pivot" "$log" | grep -q "Sheet 'Pivot styled'.*PivotStyleLight16" || fail "the styled pivot table should be reported with its style"
+[ "$(grep -cE "warning xlsx\.pivot" "$log")" = 1 ] || fail "only the styled pivot table should be reported"
 
 # Shape paths: gradients are real shadings (axial and radial), arrowheads are filled, custom geometry is filled, nothing is reported.
 path_page=0

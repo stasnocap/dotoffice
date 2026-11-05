@@ -335,10 +335,49 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             switch (rel.Kind)
             {
                 case "pivotTable":
-                    WarnOnce(sheet, "xlsx.pivot", "contains a pivot table; its cached cell values are printed but it is not refreshed or styled.");
+                    ReadPivotTable(sheet, rel.Target);
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// A pivot table's cells are ordinary cells of the sheet, holding the values Excel last calculated, so they print as they are. That is
+    /// faithful unless the table gets its look from a pivot style or pivot-area formats (neither is applied) or is set to refresh when the
+    /// file opens (Excel then shows other values); only those cases warn, and the warning says which.
+    /// </summary>
+    private void ReadPivotTable(Worksheet sheet, string part)
+    {
+        System.Xml.Linq.XElement? root = null;
+        try
+        {
+            using var r = Package.OpenXml(part);
+            root = System.Xml.Linq.XDocument.Load(r).Root;
+        }
+        catch (XmlException) { }
+        if (root is null || root.Name.LocalName != "pivotTableDefinition")
+        {
+            WarnOnce(sheet, "xlsx.pivot", "contains a pivot table that could not be read; its cells are printed as they are, without pivot formatting.");
+            return;
+        }
+        var reasons = new List<string>();
+        if ((string?)root.Elements().FirstOrDefault(e => e.Name.LocalName == "pivotTableStyleInfo")?.Attribute("name") is { Length: > 0 } style)
+            reasons.Add($"its table style '{style}' is not applied");
+        if (root.Elements().FirstOrDefault(e => e.Name.LocalName == "formats")?.HasElements == true)
+            reasons.Add("its pivot-area formats are not applied");
+        var cache = Package.FindRelationship(part, "pivotCacheDefinition");
+        if (cache is not null && !cache.IsExternal && Package.Exists(cache.Target))
+        {
+            try
+            {
+                using var r = Package.OpenXml(cache.Target);
+                if ((string?)System.Xml.Linq.XDocument.Load(r).Root?.Attribute("refreshOnLoad") is "1" or "true")
+                    reasons.Add("it is set to refresh when the file opens, so Excel may show other values");
+            }
+            catch (XmlException) { }
+        }
+        if (reasons.Count > 0)
+            WarnOnce(sheet, "xlsx.pivot", $"contains the pivot table '{(string?)root.Attribute("name")}', which is printed from its cached cells; {string.Join(" and ", reasons)}.");
     }
 
     private void ReadWorksheet(XmlReader r, Worksheet sheet)

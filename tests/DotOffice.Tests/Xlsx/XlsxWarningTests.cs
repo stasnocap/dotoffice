@@ -57,10 +57,58 @@ public class XlsxWarningTests
         Assert.Equal(["xlsx.drawing"], Codes(builder));
     }
 
+    private static XlsxBuilder WithPivot(string definition, string? cache = null)
+    {
+        var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")));
+        builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotTable\" Target=\"../pivotTables/pivotTable1.xml\"/></Relationships>");
+        builder.AddPart("xl/pivotTables/pivotTable1.xml", definition);
+        if (cache is not null)
+        {
+            builder.AddPart("xl/pivotTables/_rels/pivotTable1.xml.rels",
+                $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}pivotCacheDefinition\" Target=\"../pivotCache/pivotCacheDefinition1.xml\"/></Relationships>");
+            builder.AddPart("xl/pivotCache/pivotCacheDefinition1.xml", cache);
+        }
+        return builder;
+    }
+
+    private const string PivotNs = "xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"";
+
+    private static string Messages(XlsxBuilder builder)
+    {
+        var warnings = new ConversionWarningList();
+        XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings });
+        return string.Join("|", warnings.Warnings.Where(w => w.Code == "xlsx.pivot").Select(w => w.Message));
+    }
+
     [Fact]
-    public void A_pivot_table_relationship_warns()
+    public void A_pivot_table_without_style_formats_or_refresh_prints_its_cells_without_a_warning()
+    {
+        Assert.Empty(Codes(WithPivot($"<pivotTableDefinition {PivotNs} name=\"Sales\"><pivotTableStyleInfo showRowStripes=\"1\"/></pivotTableDefinition>",
+            $"<pivotCacheDefinition {PivotNs} refreshOnLoad=\"0\"/>")));
+        Assert.Empty(Codes(WithPivot($"<pivotTableDefinition {PivotNs} name=\"Sales\"/>")));
+    }
+
+    [Fact]
+    public void A_pivot_style_pivot_area_formats_and_refresh_on_load_are_named_in_the_warning()
+    {
+        var styled = Messages(WithPivot($"<pivotTableDefinition {PivotNs} name=\"Sales\"><pivotTableStyleInfo name=\"PivotStyleLight16\"/></pivotTableDefinition>"));
+        Assert.Contains("'Sales'", styled);
+        Assert.Contains("PivotStyleLight16", styled);
+        Assert.DoesNotContain("refresh", styled);
+        var all = Messages(WithPivot($"<pivotTableDefinition {PivotNs} name=\"P\"><formats count=\"1\"><format dxfId=\"0\"/></formats><pivotTableStyleInfo name=\"PivotStyleMedium9\"/></pivotTableDefinition>",
+            $"<pivotCacheDefinition {PivotNs} refreshOnLoad=\"1\"/>"));
+        Assert.Contains("PivotStyleMedium9", all);
+        Assert.Contains("pivot-area formats", all);
+        Assert.Contains("refresh when the file opens", all);
+        Assert.Equal(["xlsx.pivot"], Codes(WithPivot($"<pivotTableDefinition {PivotNs} name=\"P\"/>", $"<pivotCacheDefinition {PivotNs} refreshOnLoad=\"true\"/>")));
+    }
+
+    [Fact]
+    public void A_pivot_part_that_cannot_be_read_still_warns()
     {
         Assert.Equal(["xlsx.pivot"], Codes(WithRelationship("pivotTable")));
+        Assert.Equal(["xlsx.pivot"], Codes(WithPivot("<pivotTableDefinition")));
     }
 
     [Fact]
