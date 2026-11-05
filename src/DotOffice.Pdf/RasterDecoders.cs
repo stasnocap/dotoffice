@@ -318,8 +318,8 @@ internal static class RasterDecoders
 
     // ---------------------------------------------------------------- TIFF
 
-    /// <summary>Decodes a baseline TIFF: 1/2/4/8-bit gray or palette and 8-bit RGB(A), stored or PackBits strips.</summary>
-    public static RasterImage DecodeTiff(byte[] d)
+    /// <summary>The tags of a TIFF's first directory (byte, short, long and undefined values), each as its list of values.</summary>
+    private static Dictionary<int, uint[]> ReadTiffTags(byte[] d)
     {
         if (d.Length < 8) throw new InvalidDataException("Not a TIFF file.");
         bool le = d[0] == 'I';
@@ -337,13 +337,43 @@ internal static class RasterDecoders
             long e = ifd + 2 + i * 12L;
             int tag = U16(e), type = U16(e + 2);
             uint n = U32(e + 4);
-            int size = type switch { 3 => 2, 4 => 4, 1 => 1, _ => 0 };
+            int size = type switch { 3 => 2, 4 => 4, 1 or 7 => 1, _ => 0 };
             if (size == 0 || n > 1_000_000) continue;
             long at = size * n <= 4 ? e + 8 : U32(e + 8);
             var values = new uint[n];
             for (int k = 0; k < n; k++) values[k] = size switch { 1 => d[at + k], 2 => U16(at + 2L * k), _ => U32(at + 4L * k) };
             tags[tag] = values;
         }
+        return tags;
+    }
+
+    /// <summary>
+    /// A TIFF whose single strip or tile is a JPEG stream (compression 7): the JPEG as a complete file, with the shared tables of
+    /// <c>JPEGTables</c> put in front of the strip's own data. Null for any other TIFF, and for a JPEG split over several strips (that
+    /// would need a JPEG decoder to stitch).
+    /// </summary>
+    public static byte[]? TiffJpeg(byte[] d)
+    {
+        var tags = ReadTiffTags(d);
+        if (!tags.TryGetValue(259, out var c) || c.Length == 0 || c[0] != 7) return null;
+        uint[]? offsets = tags.GetValueOrDefault(273) ?? tags.GetValueOrDefault(324), counts = tags.GetValueOrDefault(279) ?? tags.GetValueOrDefault(325);
+        if (offsets is not { Length: 1 } || counts is not { Length: 1 } || (long)offsets[0] + counts[0] > d.Length || counts[0] < 4) return null;
+        var data = d.AsSpan((int)offsets[0], (int)counts[0]);
+        if (data[0] != 0xFF || data[1] != 0xD8) return null;
+        if (!tags.TryGetValue(347, out var tables) || tables.Length < 4) return data.ToArray();
+        // JPEGTables is itself a stream (SOI, tables, EOI); the strip is a stream without them (SOI, frame, scan, EOI).
+        var head = tables.Select(v => (byte)v).ToArray();
+        int headLength = head.Length >= 2 && head[^2] == 0xFF && head[^1] == 0xD9 ? head.Length - 2 : head.Length;
+        var jpeg = new byte[headLength + data.Length - 2];
+        head.AsSpan(0, headLength).CopyTo(jpeg);
+        data[2..].CopyTo(jpeg.AsSpan(headLength));
+        return jpeg;
+    }
+
+    /// <summary>Decodes a baseline TIFF: 1/2/4/8-bit gray or palette and 8-bit RGB(A), stored, PackBits or LZW strips.</summary>
+    public static RasterImage DecodeTiff(byte[] d)
+    {
+        var tags = ReadTiffTags(d);
         uint One(int tag, uint def) => tags.TryGetValue(tag, out var v) && v.Length > 0 ? v[0] : def;
 
         int width = (int)One(256, 0), height = (int)One(257, 0);

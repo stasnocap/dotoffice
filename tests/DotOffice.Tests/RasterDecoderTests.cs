@@ -179,6 +179,44 @@ public class RasterDecoderTests
         return ms.ToArray();
     }
 
+    /// <summary>A little-endian TIFF with one JPEG strip (compression 7) and, when given, the JPEGTables tag.</summary>
+    private static byte[] TiffWithJpeg(byte[] strip, byte[]? tables, int strips = 1)
+    {
+        var entries = new List<(int Tag, int Type, int Count, long Value)> { (256, 3, 1, 1), (257, 3, 1, 1), (258, 3, 1, 8), (259, 3, 1, 7), (262, 3, 1, 6), (273, 4, strips, 8), (277, 3, 1, 3), (279, 4, strips, strip.Length) };
+        int ifdAt = 8 + strip.Length;
+        int tablesAt = ifdAt + 2 + (entries.Count + (tables is null ? 0 : 1)) * 12 + 4;
+        if (tables is not null) entries.Add((347, 7, tables.Length, tablesAt));
+        var ms = new MemoryStream();
+        void W16(int v) { ms.WriteByte((byte)v); ms.WriteByte((byte)(v >> 8)); }
+        void W32(long v) { W16((int)(v & 0xFFFF)); W16((int)(v >> 16)); }
+        ms.Write(Encoding.ASCII.GetBytes("II")); W16(42); W32(ifdAt);
+        ms.Write(strip);
+        W16(entries.Count);
+        foreach (var e in entries.OrderBy(e => e.Tag))
+        {
+            W16(e.Tag); W16(e.Type); W32(e.Count);
+            if (e.Type == 3) { W16((int)e.Value); W16(0); } else W32(e.Value);
+        }
+        W32(0);
+        if (tables is not null) ms.Write(tables);
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void A_tiff_holding_one_jpeg_strip_gives_that_jpeg_with_its_shared_tables()
+    {
+        var jpeg = TestAssets.Bytes("gradient.jpg");
+        int frame = Enumerable.Range(2, jpeg.Length - 3).First(i => jpeg[i] == 0xFF && jpeg[i + 1] is 0xC0 or 0xC2);
+        byte[] tables = [.. jpeg[..frame], 0xFF, 0xD9];                 // SOI, the quantization and Huffman tables, EOI
+        byte[] strip = [0xFF, 0xD8, .. jpeg[frame..]];                   // SOI, frame, scan
+        Assert.Equal(jpeg, RasterDecoders.TiffJpeg(TiffWithJpeg(strip, tables)));
+        Assert.Equal(jpeg, RasterDecoders.TiffJpeg(TiffWithJpeg(jpeg, null)));       // a complete JPEG needs no tables
+        Assert.Null(RasterDecoders.TiffJpeg(TiffWithJpeg(strip, tables, strips: 2))); // several strips need a JPEG decoder
+        Assert.Null(RasterDecoders.TiffJpeg(Tiff(1, 1, 2, 3, [1, 2, 3])));            // not a JPEG TIFF
+        var image = PdfImage.FromTiff(TiffWithJpeg(strip, tables));
+        Assert.True(image.Width > 1);                                                 // the JPEG's own size, not the tag's
+    }
+
     [Fact]
     public void Tiff_rgb_gray_and_palette()
     {

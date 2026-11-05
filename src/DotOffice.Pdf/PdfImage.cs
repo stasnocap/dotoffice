@@ -82,8 +82,8 @@ public sealed class PdfImage
     /// <summary>Decodes the first frame of a GIF, with its transparency.</summary>
     public static PdfImage FromGif(byte[] data) => From(RasterDecoders.DecodeGif(data));
 
-    /// <summary>Decodes a baseline TIFF (stored or PackBits).</summary>
-    public static PdfImage FromTiff(byte[] data) => From(RasterDecoders.DecodeTiff(data));
+    /// <summary>Decodes a baseline TIFF (stored, PackBits or LZW); a TIFF holding one JPEG stream is embedded as that JPEG.</summary>
+    public static PdfImage FromTiff(byte[] data) => RasterDecoders.TiffJpeg(data) is { } jpeg ? FromJpeg(jpeg) : From(RasterDecoders.DecodeTiff(data));
 
     private static PdfImage From(RasterImage r) => new(r.Rgb, r.Width, r.Height, "/DeviceRGB", isJpeg: false, alpha: r.Alpha);
 
