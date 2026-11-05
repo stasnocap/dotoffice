@@ -86,6 +86,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
             finally { CfParser.NameResolver = null; }
             ReadDrawing(sheet, rel.Target);
+            ReadHeaderFooterPictures(sheet, rel.Target);
             ReadComments(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
@@ -248,6 +249,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     private readonly HashSet<string> _sheetWarnings = [];
     private string? _drawingRelationship;
+    private string? _headerFooterDrawingRelationship;
     private readonly Dictionary<string, ImageData> _images = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Loads an image part once per package.</summary>
@@ -284,6 +286,64 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         {
             WarnOnce(sheet, "xlsx.comments", "has a comments part that could not be read; its comments are not printed.");
         }
+    }
+
+    /// <summary>
+    /// The pictures of the <c>&amp;G</c> codes live in a legacy VML part: one shape per section (ids <c>LH</c>, <c>CH</c>, <c>RH</c>, <c>LF</c>, <c>CF</c>, <c>RF</c>,
+    /// possibly with a suffix for the first-page and even-page variants) whose <c>imagedata</c> names an image relationship and whose style gives the size.
+    /// </summary>
+    private void ReadHeaderFooterPictures(Worksheet sheet, string sheetPart)
+    {
+        var id = _headerFooterDrawingRelationship;
+        _headerFooterDrawingRelationship = null;
+        if (id is null) return;
+        if (!Package.GetRelationships(sheetPart).TryGetValue(id, out var rel) || rel.IsExternal || !Package.Exists(rel.Target))
+        {
+            WarnOnce(sheet, "xlsx.header-footer-picture", "has header or footer pictures whose drawing part is missing, so they are not printed.");
+            return;
+        }
+        try
+        {
+            var vmlRels = Package.GetRelationships(rel.Target);
+            System.Xml.Linq.XDocument doc;
+            using (var reader = Package.OpenXml(rel.Target)) doc = System.Xml.Linq.XDocument.Load(reader);
+            foreach (var shape in doc.Descendants().Where(e => e.Name.LocalName == "shape"))
+            {
+                var key = ((string?)shape.Attribute("id") ?? "").ToUpperInvariant();
+                if (key.Length < 2 || key[0] is not ('L' or 'C' or 'R') || key[1] is not ('H' or 'F')) continue;
+                key = key[..2];
+                var data = shape.Elements().FirstOrDefault(e => e.Name.LocalName == "imagedata");
+                var relId = data?.Attributes().FirstOrDefault(a => a.Name.LocalName == "relid")?.Value;
+                if (relId is null || !vmlRels.TryGetValue(relId, out var image) || image.IsExternal || !Package.Exists(image.Target)) continue;
+                var style = ((string?)shape.Attribute("style") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Split(':', 2)).Where(x => x.Length == 2).ToDictionary(x => x[0].Trim().ToLowerInvariant(), x => x[1].Trim());
+                double width = VmlLength(style.GetValueOrDefault("width")), height = VmlLength(style.GetValueOrDefault("height"));
+                if (width <= 0 || height <= 0) continue;
+                sheet.PageSetup.HeaderFooterPictures[key] = new HeaderFooterPicture(GetImage(image.Target), width, height);
+            }
+        }
+        catch (XmlException)
+        {
+            WarnOnce(sheet, "xlsx.header-footer-picture", "has header or footer pictures whose drawing could not be read, so they are not printed.");
+        }
+    }
+
+    /// <summary>A CSS length from a VML style (<c>pt</c>, <c>px</c>, <c>in</c>, <c>cm</c>, <c>mm</c>) in points; 0 when missing or malformed.</summary>
+    private static double VmlLength(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return 0;
+        int i = 0;
+        while (i < value.Length && (char.IsAsciiDigit(value[i]) || value[i] is '.' or '-')) i++;
+        if (!double.TryParse(value.AsSpan(0, i), NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) return 0;
+        return value[i..].Trim().ToLowerInvariant() switch
+        {
+            "" or "pt" => number,
+            "px" => number * 0.75,
+            "in" => number * 72,
+            "cm" => number * 72 / 2.54,
+            "mm" => number * 72 / 25.4,
+            _ => 0,
+        };
     }
 
     private void ReadDrawing(Worksheet sheet, string sheetPart)
@@ -409,6 +469,10 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     break;
                 case "drawing":
                     _drawingRelationship = r.RelationshipId();
+                    r.Read();
+                    break;
+                case "legacyDrawingHF":
+                    _headerFooterDrawingRelationship = r.RelationshipId();
                     r.Read();
                     break;
                 case "conditionalFormatting" when IsMainNamespace(r.NamespaceURI):

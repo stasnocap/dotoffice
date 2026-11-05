@@ -10,6 +10,30 @@ public class XlsxPageSetupTests
         XlsxReader.Read(new XlsxBuilder { DefinedNames = definedNames }.AddSheet("S", rows, head, tail).BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0];
 
     [Fact]
+    public void Header_footer_pictures_are_read_from_the_legacy_drawing_with_their_sizes()
+    {
+        var png = PngTestEncoder.Encode(1, 1, 2, 8, [0, 0, 255]);
+        var builder = new XlsxBuilder().AddSheet("S", "", "", "<headerFooter><oddHeader>&amp;L&amp;G</oddHeader></headerFooter>" + XlsxBuilder.HeaderFooterPicturesElement)
+            .AddHeaderFooterPictures(1, png, ("LH", "margin-left:0;width:72pt;height:0.5in"), ("RF", "width:48px;height:2cm"), ("CH", "width:10pt"), ("XX", "width:1pt;height:1pt"));
+        var pictures = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions()).Sheets[0].PageSetup.HeaderFooterPictures;
+        Assert.Equal(["LH", "RF"], pictures.Keys.Order());
+        Assert.Equal((72, 36), (pictures["LH"].Width, pictures["LH"].Height));
+        Assert.Equal(36, pictures["RF"].Width, 3);
+        Assert.Equal(56.693, pictures["RF"].Height, 2);
+        Assert.Equal(ImageFormat.Png, pictures["LH"].Image.Format);
+    }
+
+    [Fact]
+    public void Header_footer_pictures_with_a_missing_part_warn_once()
+    {
+        var warnings = new ConversionWarningList();
+        var builder = new XlsxBuilder().AddSheet("S", "", "", XlsxBuilder.HeaderFooterPicturesElement);
+        builder.AddPart("xl/worksheets/_rels/sheet1.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>");
+        XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings });
+        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.header-footer-picture");
+    }
+
+    [Fact]
     public void Defaults_to_letter_portrait_with_excel_margins()
     {
         var setup = Read().PageSetup;

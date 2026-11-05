@@ -717,6 +717,34 @@ public class SheetHeaderFooterTests
     }
 
     [Fact]
+    public void Header_and_footer_pictures_sit_in_their_section_above_the_text_and_scale_with_the_sheet()
+    {
+        var logo = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [255, 0, 0]), "logo");
+        var setup = new SheetPageSetup();
+        List<ImageItem> Draw(double scale, bool scaleWithDoc = true)
+        {
+            var sheet = WithText("S");
+            sheet.PageSetup.Scale = scale;
+            sheet.PageSetup.HeaderFooterScaleWithDocument = scaleWithDoc;
+            sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("&G", "", "") };
+            sheet.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("", "", "&Gcap") };
+            sheet.PageSetup.HeaderFooterPictures["LH"] = new HeaderFooterPicture(logo, 60, 30);
+            sheet.PageSetup.HeaderFooterPictures["RF"] = new HeaderFooterPicture(logo, 40, 20);
+            return SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<ImageItem>().ToList();
+        }
+        var pictures = Draw(1);
+        Assert.Equal(2, pictures.Count);
+        var head = pictures.First(p => p.Width == 60);
+        Assert.Equal(setup.Margins.Left, head.X, 3);
+        Assert.Equal(setup.HeaderDistance, head.Y, 3);
+        var foot = pictures.First(p => p.Width == 40);
+        Assert.Equal(612 - setup.Margins.Right, foot.X + foot.Width, 3);
+        Assert.True(foot.Y + foot.Height < 792 - setup.FooterDistance); // the caption sits below it
+        Assert.Equal(15, Draw(0.5).First(p => p.Width == 30).Height, 3);   // scaled with the sheet
+        Assert.Contains(Draw(0.5, scaleWithDoc: false), p => p.Width == 60);
+    }
+
+    [Fact]
     public void Font_codes_change_size_and_weight_and_double_ampersand_is_literal()
     {
         var sheet = WithText("S");

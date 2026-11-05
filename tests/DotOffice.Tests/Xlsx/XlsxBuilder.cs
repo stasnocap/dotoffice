@@ -87,6 +87,27 @@ internal sealed class XlsxBuilder
         return this;
     }
 
+    /// <summary>The element a worksheet needs (in its tail) to use the pictures added by <see cref="AddHeaderFooterPictures"/>.</summary>
+    public const string HeaderFooterPicturesElement = "<legacyDrawingHF r:id=\"rId2\"/>";
+
+    /// <summary>
+    /// Adds a legacy VML drawing for the header/footer pictures (<c>&amp;G</c>) of sheet <paramref name="sheetNumber"/>: one shape per
+    /// (section id such as <c>LH</c>, style such as <c>width:54pt;height:30pt</c>), all showing <paramref name="image"/>.
+    /// The sheet must contain <see cref="HeaderFooterPicturesElement"/>.
+    /// </summary>
+    public XlsxBuilder AddHeaderFooterPictures(int sheetNumber, byte[] image, params (string Id, string Style)[] shapes)
+    {
+        AddPart($"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId2\" Type=\"{RelType}vmlDrawing\" Target=\"../drawings/vmlDrawing{sheetNumber}.vml\"/></Relationships>");
+        AddPart($"xl/drawings/vmlDrawing{sheetNumber}.vml",
+            "<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\">" +
+            string.Concat(shapes.Select(x => $"<v:shape id=\"{x.Id}\" style=\"position:absolute;{x.Style}\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/></v:shape>")) + "</xml>");
+        AddPart($"xl/drawings/_rels/vmlDrawing{sheetNumber}.vml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/hf{sheetNumber}.png\"/></Relationships>");
+        AddBinaryPart($"xl/media/hf{sheetNumber}.png", image);
+        return this;
+    }
+
     /// <summary>Like <see cref="AddDrawing"/>, with chart parts (<c>c:chartSpace</c> documents) referred to as rId1, rId2… in order.</summary>
     public XlsxBuilder AddChartDrawing(int sheetNumber, string anchors, params string[] charts)
     {

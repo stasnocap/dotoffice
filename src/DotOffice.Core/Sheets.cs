@@ -233,6 +233,9 @@ public readonly record struct HeaderFooterParts(string Left, string Center, stri
     public bool IsEmpty => string.IsNullOrEmpty(Left) && string.IsNullOrEmpty(Center) && string.IsNullOrEmpty(Right);
 }
 
+/// <summary>A picture placed in a header or footer section with <c>&amp;G</c>; the size is in points.</summary>
+public sealed record HeaderFooterPicture(ImageData Image, double Width, double Height);
+
 /// <summary>A header or footer with its optional first-page and even-page variants.</summary>
 public sealed record HeaderFooterText
 {
@@ -260,6 +263,9 @@ public sealed class SheetPageSetup
 
     /// <summary>Headers and footers are scaled with the page scale (<c>scaleWithDoc</c>, on by default).</summary>
     public bool HeaderFooterScaleWithDocument { get; set; } = true;
+
+    /// <summary>Pictures for the <c>&amp;G</c> codes, keyed by section: <c>LH</c>, <c>CH</c>, <c>RH</c> (header left/center/right) and <c>LF</c>, <c>CF</c>, <c>RF</c> (footer).</summary>
+    public Dictionary<string, HeaderFooterPicture> HeaderFooterPictures { get; } = new(StringComparer.Ordinal);
 
     public double HeaderDistance { get; set; } = 21.6;
 

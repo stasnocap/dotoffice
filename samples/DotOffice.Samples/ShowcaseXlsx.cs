@@ -756,7 +756,15 @@ internal static class ShowcaseXlsx
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/><Relationship Id=\"rId4\" Type=\"{RelType}image\" Target=\"../media/image4.bmp\"/><Relationship Id=\"rId5\" Type=\"{RelType}image\" Target=\"../media/image5.tif\"/></Relationships>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
-            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/><Relationship Id=\"rId2\" Type=\"{RelType}vmlDrawing\" Target=\"../drawings/vmlDrawing1.vml\"/></Relationships>");
+        // The pictures of the header and footer (&G) come from a legacy VML part.
+        Entry(zip, "xl/drawings/vmlDrawing1.vml",
+            "<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\">" +
+            "<v:shape id=\"LH\" o:spid=\"_x0000_s1025\" type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;width:54pt;height:30pt;z-index:1\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/><o:lock v:ext=\"edit\" rotation=\"t\"/></v:shape>" +
+            "<v:shape id=\"RF\" o:spid=\"_x0000_s1026\" type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;width:36pt;height:36pt;z-index:2\"><v:imagedata o:relid=\"rId1\" o:title=\"logo\"/></v:shape></xml>");
+        Entry(zip, "xl/drawings/_rels/vmlDrawing1.vml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/></Relationships>");
+        content.Append("<Default Extension=\"vml\" ContentType=\"application/vnd.openxmlformats-officedocument.vmlDrawing\"/>");
         using (var media = zip.CreateEntry("xl/media/image1.png").Open()) media.Write(ShowcaseDocx.GradientPng(160, 100));
         using (var media = zip.CreateEntry("xl/media/image2.bmp").Open()) media.Write(GradientBmp(90, 56));
         using (var media = zip.CreateEntry("xl/media/image3.gif").Open()) media.Write(CheckerGif(48, 32));
@@ -909,8 +917,9 @@ internal static class ShowcaseXlsx
         rows.Append(Row(33, Str("A33", "RLE BMP, LZW TIFF:", Default)));
         var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(),
-            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +
-            "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"20\" max=\"16383\" man=\"1\"/></rowBreaks><drawing r:id=\"rId1\"/>");
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" +
+            "<headerFooter><oddHeader>&amp;L&amp;G&amp;C&amp;A</oddHeader><oddFooter>&amp;CPage &amp;P of &amp;N&amp;R&amp;G</oddFooter></headerFooter>" +
+            "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"20\" max=\"16383\" man=\"1\"/></rowBreaks><drawing r:id=\"rId1\"/><legacyDrawingHF r:id=\"rId2\"/>");
     }
 
     // ------------------------------------------------------------------ conditional formatting

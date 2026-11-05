@@ -85,11 +85,30 @@ public sealed partial class SheetLayoutEngine
         void Part(string text, double anchorLeft, double anchorRight, int alignment, bool isHeader)
         {
             if (string.IsNullOrEmpty(text)) return;
+            // A picture (&G) sits above the section's text, as wide and high as its drawing says (scaled with the sheet).
+            HeaderFooterPicture? picture = null;
+            if (text.Contains("&G", StringComparison.Ordinal))
+            {
+                setup.HeaderFooterPictures.TryGetValue(string.Concat("LCR"[alignment], isHeader ? 'H' : 'F'), out picture);
+                text = text.Replace("&G", "", StringComparison.Ordinal);
+            }
             var lines = text.Replace("\r\n", "\n").Split('\n').Select(l => BuildHeaderLine(l, context)).Where(l => l is not null).Select(l => l!).ToList();
-            if (lines.Count == 0) return;
+            if (lines.Count == 0 && picture is null) return;
             double pitch(HeaderLine l) => l.Size * 1.2;
-            double height = lines.Sum(pitch);
+            double pictureWidth = (picture?.Width ?? 0) * context.Scale, pictureHeight = (picture?.Height ?? 0) * context.Scale;
+            double height = lines.Sum(pitch) + pictureHeight;
             double top = isHeader ? setup.HeaderDistance : page.Height - setup.FooterDistance - height;
+            if (picture is not null)
+            {
+                double px = alignment switch
+                {
+                    0 => anchorLeft,
+                    1 => (anchorLeft + anchorRight) / 2 - pictureWidth / 2,
+                    _ => anchorRight - pictureWidth,
+                };
+                page.Items.Add(new ImageItem(px, top, pictureWidth, pictureHeight, picture.Image));
+                top += pictureHeight;
+            }
             foreach (var line in lines)
             {
                 double x0 = alignment switch

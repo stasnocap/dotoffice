@@ -107,6 +107,9 @@ if grep -q "pdf.image" "$log"; then fail "a BMP, GIF or TIFF picture was not dec
 last_n=$(pdfimages -list -f "${pic_pages[-1]}" -l "${pic_pages[-1]}" "$pdf" | awk 'NR > 2' | wc -l)
 [ "$last_n" -ge 5 ] || fail "the last page of the pictures sheet should hold the continued, BMP, GIF, RLE BMP and LZW TIFF pictures, found $last_n"
 [ "$(pdftotext -layout "$pdf" - | grep -c "purple, not red")" -ge 1 ] || fail "missing the indexed-color note"
+# Header and footer pictures (&G, from the legacy VML drawing): 54x30 pt at the left margin below the header distance, 36x36 pt at the right margin above the footer distance.
+grep -aqE "^q 54 0 0 30 50.4 [0-9.]+ cm /Im[0-9]+ Do Q$" pictures-qdf.pdf || fail "no header picture (&G) at the left margin"
+grep -aqE "^q 36 0 0 36 [0-9.]+ 21.6 cm /Im[0-9]+ Do Q$" pictures-qdf.pdf || fail "no footer picture (&G) at the right margin"
 grep -aq "^0.4392 0.1882 0.6275 rg$" pictures-qdf.pdf || fail "[Color3] should use the workbook palette (purple)"
 grep -aqE "^-1 0 0 1 [0-9.]+ 0 cm$" pictures-qdf.pdf || fail "no horizontally mirrored picture (matrix -1 0 0 1)"
 grep -aqE "^1 0 0 -1 0 [0-9.]+ cm$" pictures-qdf.pdf || fail "no vertically mirrored picture (matrix 1 0 0 -1)"
