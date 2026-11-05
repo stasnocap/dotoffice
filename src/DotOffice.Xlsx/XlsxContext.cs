@@ -20,6 +20,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private Func<System.Xml.Linq.XElement?, Color?> _resolveColor = _ => null;
     private List<Dxf> _dxfs = [];
     private IReadOnlyList<Color?>? _palette;
+    private Func<System.Xml.Linq.XElement, Dxf> _readInlineDxf = _ => new Dxf();
     private CfSheet _conditional = new();
     private long _cellCount;
 
@@ -182,6 +183,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         _resolveColor = table.Resolve;
         _dxfs = table.Dxfs;
         _palette = table.Palette;
+        _readInlineDxf = table.ReadInlineDxf;
     }
 
     private CellFormat FormatOf(string? styleAttribute) =>
@@ -306,7 +308,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     ConditionalFormatting.ReadBlock((System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r), _conditional, _resolveColor);
                     break;
                 case "extLst" when IsMainNamespace(r.NamespaceURI):
-                    ConditionalFormatting.ReadExtensions((System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r), _conditional, _resolveColor);
+                    ConditionalFormatting.ReadExtensions((System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r), _conditional, _resolveColor,
+                        dxf => { _dxfs.Add(_readInlineDxf(dxf)); return _dxfs.Count - 1; });
                     break;
                 case "pageSetUpPr":
                     fitToPage = r.BoolAttr("fitToPage");

@@ -378,6 +378,12 @@ internal static class ShowcaseXlsx
 
     // ------------------------------------------------------------------ conditional formatting
 
+    /// <summary>An icon set that only exists in the Excel 2010 extension list, with percent thresholds written as <c>xm:f</c> formulas.</summary>
+    private static string X14IconRule(string sqref, string set, int count, int priority) =>
+        "<x14:conditionalFormatting><x14:cfRule type=\"iconSet\" priority=\"" + priority + "\" id=\"{AAAAAAAA-0000-0000-0000-0000000001" + priority + "}\"><x14:iconSet iconSet=\"" + set + "\">" +
+        string.Concat(Enumerable.Range(0, count).Select(k => $"<x14:cfvo type=\"percent\"><xm:f>{k * 100 / count}</xm:f></x14:cfvo>")) +
+        $"</x14:iconSet></x14:cfRule><xm:sqref>{sqref}</xm:sqref></x14:conditionalFormatting>";
+
     private static string ConditionalSheet()
     {
         var rows = new StringBuilder();
@@ -419,6 +425,12 @@ internal static class ShowcaseXlsx
             rows.Append(Row(22 + i, line.ToString()));
         }
 
+        // Rules that exist only in the Excel 2010 extension list: the 3Stars / 3Triangles / 5Boxes icon sets and a rule with an inline dxf.
+        rows.Append(Row(29, Str("A29", "Excel 2010 extension rules", Bold)));
+        rows.Append(Row(30, Str("A30", "3Stars", Header) + Str("B30", "3Triangles", Header) + Str("C30", "5Boxes", Header) + Str("D30", "x14 cellIs > 50", Header)));
+        for (int i = 0; i < 5; i++)
+            rows.Append(Row(31 + i, Num($"A{31 + i}", i * 20) + Num($"B{31 + i}", i * 20) + Num($"C{31 + i}", i * 20) + Num($"D{31 + i}", i * 20)));
+
         const string Percents = "<cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/>";
         const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
         var tail = new StringBuilder();
@@ -449,6 +461,9 @@ internal static class ShowcaseXlsx
         tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
                     "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" id=\"{AAAAAAAA-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\">" +
                     "<x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/><x14:negativeFillColor rgb=\"FFC00000\"/></x14:dataBar></x14:cfRule><xm:sqref>H4:H13</xm:sqref></x14:conditionalFormatting>" +
+                    X14IconRule("A31:A35", "3Stars", 3, 30) + X14IconRule("B31:B35", "3Triangles", 3, 31) + X14IconRule("C31:C35", "5Boxes", 5, 32) +
+                    "<x14:conditionalFormatting><x14:cfRule type=\"cellIs\" priority=\"33\" operator=\"greaterThan\" id=\"{AAAAAAAA-0000-0000-0000-000000000005}\"><xm:f>50</xm:f>" +
+                    "<x14:dxf><font><b/><color rgb=\"FF7030A0\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></x14:dxf></x14:cfRule><xm:sqref>D31:D35</xm:sqref></x14:conditionalFormatting>" +
                     "</x14:conditionalFormattings></ext></extLst>");
         var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());

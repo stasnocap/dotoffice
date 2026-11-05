@@ -115,23 +115,27 @@ internal static class ConditionalFormatting
     {
         var ranges = ParseRanges((string?)block.Attribute("sqref"));
         foreach (var rule in block.Elements().Where(e => e.Name.LocalName == "cfRule"))
+            AddRule(rule, ranges, sheet, resolve);
+    }
+
+    private static void AddRule(XElement rule, List<CellRange> ranges, CfSheet sheet, Func<XElement?, Color?> resolve)
+    {
+        var type = (string?)rule.Attribute("type") ?? "";
+        try
         {
-            var type = (string?)rule.Attribute("type") ?? "";
-            try
-            {
-                if (ranges.Count == 0) throw new NotSupportedException("no valid cell range");
-                sheet.Rules.Add(ReadRule(rule, type, ranges, resolve));
-            }
-            catch (NotSupportedException e)
-            {
-                sheet.Unsupported.Add(type.Length == 0 ? $"a rule without a type ({e.Message})" : $"{type} ({e.Message})");
-            }
+            if (ranges.Count == 0) throw new NotSupportedException("no valid cell range");
+            sheet.Rules.Add(ReadRule(rule, type, ranges, resolve));
+        }
+        catch (NotSupportedException e)
+        {
+            sheet.Unsupported.Add(type.Length == 0 ? $"a rule without a type ({e.Message})" : $"{type} ({e.Message})");
         }
     }
 
     /// <summary>Reads the Excel 2010 data-bar extensions of a worksheet <c>extLst</c> (the x14 elements are not part of the main namespace).</summary>
-    public static void ReadExtensions(XElement extList, CfSheet sheet, Func<XElement?, Color?> resolve)
+    public static void ReadExtensions(XElement extList, CfSheet sheet, Func<XElement?, Color?> resolve, Func<XElement, int> addDxf)
     {
+        ReadX14Rules(extList, sheet, resolve, addDxf);
         foreach (var rule in extList.Descendants().Where(e => e.Name.LocalName == "cfRule" && (string?)e.Attribute("type") == "dataBar"))
         {
             if ((string?)rule.Attribute("id") is not { } id) continue;
@@ -145,6 +149,50 @@ internal static class ConditionalFormatting
                 NegativeSameAsPositive: (string?)bar.Attribute("negativeBarColorSameAsPositive") is "1" or "true");
         }
     }
+
+    /// <summary>
+    /// Rules that exist only in the Excel 2010 extension list: the 3Stars, 3Triangles and 5Boxes icon sets and rules written with
+    /// <c>xm:f</c> formulas and an inline <c>x14:dxf</c>. They are rewritten as main-namespace rules and read like those. The data-bar
+    /// extensions (matched to a main rule by id) are not rules of their own.
+    /// </summary>
+    private static void ReadX14Rules(XElement extList, CfSheet sheet, Func<XElement?, Color?> resolve, Func<XElement, int> addDxf)
+    {
+        var linked = sheet.Rules.Select(r => r.X14Id).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var block in extList.Descendants().Where(e => e.Name.LocalName == "conditionalFormatting"))
+        {
+            if (block.Name.NamespaceName != X14Namespace) continue;
+            var ranges = ParseRanges(block.Elements().FirstOrDefault(e => e.Name.LocalName == "sqref")?.Value);
+            foreach (var rule in block.Elements().Where(e => e.Name.LocalName == "cfRule"))
+            {
+                var type = (string?)rule.Attribute("type") ?? "";
+                if (type == "dataBar" || (string?)rule.Attribute("id") is { } id && linked.Contains(id)) continue;
+                var main = new XElement("cfRule", rule.Attributes().Where(a => a.Name.LocalName != "id" && !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
+                foreach (var child in rule.Elements())
+                {
+                    switch (child.Name.LocalName)
+                    {
+                        case "f": main.Add(new XElement("formula", child.Value)); break;
+                        case "dxf": main.SetAttributeValue("dxfId", addDxf(child)); break;
+                        case "iconSet":
+                        {
+                            var icons = new XElement("iconSet", child.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
+                            foreach (var cfvo in child.Elements().Where(e => e.Name.LocalName == "cfvo"))
+                            {
+                                var converted = new XElement("cfvo", cfvo.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
+                                if (cfvo.Elements().FirstOrDefault(e => e.Name.LocalName == "f") is { } f) converted.SetAttributeValue("val", f.Value);
+                                icons.Add(converted);
+                            }
+                            main.Add(icons);
+                            break;
+                        }
+                    }
+                }
+                AddRule(main, ranges, sheet, resolve);
+            }
+        }
+    }
+
+    private const string X14Namespace = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
 
     private static double? Number(XElement e, string name) =>
         double.TryParse((string?)e.Attribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) ? v : null;

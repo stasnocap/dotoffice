@@ -463,15 +463,52 @@ public class XlsxConditionalFormattingTests
         Assert.Equal("A2", FilledRows(sheet));
     }
 
+    private static string X14Block(string sqref, string rule) =>
+        "<extLst><ext uri=\"{78C0D931-6437-407d-A8EE-F0AAD7539E65}\" xmlns:x14=\"" + X14Ns + "\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\">" +
+        $"<x14:conditionalFormattings><x14:conditionalFormatting>{rule}<xm:sqref>{sqref}</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
+
+    private static string X14Cfvo(string type, string? value = null) =>
+        value is null ? $"<x14:cfvo type=\"{type}\"/>" : $"<x14:cfvo type=\"{type}\"><xm:f>{value}</xm:f></x14:cfvo>";
+
     [Fact]
-    public void Rules_in_the_x14_extension_list_are_not_read_as_main_rules()
+    public void X14_only_icon_sets_are_read_from_the_extension_list()
     {
         var warnings = new ConversionWarningList();
-        var x14Only = "<extLst><ext uri=\"{78C0D931-6437-407d-A8EE-F0AAD7539E65}\" xmlns:x14=\"" + X14Ns + "\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\">" +
-                      "<x14:conditionalFormattings><x14:conditionalFormatting><x14:cfRule type=\"iconSet\" priority=\"1\"><x14:iconSet iconSet=\"4Rating\"/></x14:cfRule><xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
-        var sheet = Read(Column("A", 1), x14Only, warnings: warnings);
+        var rule = "<x14:cfRule type=\"iconSet\" priority=\"1\" id=\"{00000000-0000-0000-0000-000000000009}\"><x14:iconSet iconSet=\"3Stars\">" +
+                   X14Cfvo("percent", "0") + X14Cfvo("percent", "33") + X14Cfvo("percent", "67") + "</x14:iconSet></x14:cfRule>";
+        var sheet = Read(Column("A", 1, 5, 10), X14Block("A1:A3", rule), warnings: warnings);
         Assert.Empty(warnings.Warnings);
-        Assert.Null(sheet.Cells[(0, 0)].Icon);
+        Assert.Equal([0, 1, 2], Enumerable.Range(0, 3).Select(i => sheet.Cells[(i, 0)].Icon!.Level));
+        Assert.All(Enumerable.Range(0, 3), i => Assert.Equal(IconShape.Star, sheet.Cells[(i, 0)].Icon!.Shape));
+    }
+
+    [Fact]
+    public void X14_only_rules_use_their_inline_dxf_and_xm_formulas()
+    {
+        var rule = "<x14:cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" id=\"{00000000-0000-0000-0000-00000000000A}\"><xm:f>4</xm:f>" +
+                   "<x14:dxf><fill><patternFill><bgColor rgb=\"FF00FF00\"/></patternFill></fill></x14:dxf></x14:cfRule>";
+        var sheet = Read(Column("A", 1, 10, 5), X14Block("A1:A3", rule));
+        Assert.Equal("A2,A3", FilledRows(sheet, "00FF00"));
+    }
+
+    [Fact]
+    public void X14_only_rules_with_unsupported_content_warn()
+    {
+        var warnings = new ConversionWarningList();
+        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>Other!A1&gt;1</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
+        Read(Column("A", 1), X14Block("A1", rule), warnings: warnings);
+        Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void A_data_bar_extension_is_not_read_as_a_rule_of_its_own()
+    {
+        var warnings = new ConversionWarningList();
+        var tail = ConditionalFormatting("A1:A2", DataBar(1, extensionId: "{00000000-0000-0000-0000-00000000000C}")) +
+                   X14Block("A1:A2", "<x14:cfRule type=\"dataBar\" id=\"{00000000-0000-0000-0000-00000000000C}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\"/></x14:cfRule>");
+        var sheet = Read(Column("A", 1, 2), tail, warnings: warnings);
+        Assert.Empty(warnings.Warnings);
+        Assert.NotNull(sheet.Cells[(1, 0)].DataBar);
     }
 
     [Fact]
