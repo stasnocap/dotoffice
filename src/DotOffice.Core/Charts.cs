@@ -32,7 +32,28 @@ public enum LegendPosition { None, Right, Left, Top, Bottom }
 /// </remarks>
 public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Color Color, bool Marker = false,
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
-    IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true);
+    IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false);
+
+/// <summary>
+/// A further chart type drawn on the same category axis as the first (a combination chart), on the primary or the secondary value axis.
+/// </summary>
+public sealed record ChartGroup(ChartKind Kind, ChartGrouping Grouping, IReadOnlyList<ChartSeries> Series, bool Secondary, double GapWidth = 150, double Overlap = 0);
+
+/// <summary>Where the values of an axis fall: linear or logarithmic, and from the start or (reversed) from the end.</summary>
+public readonly record struct AxisScale(double Min, double Max, double LogBase = 0, bool Reversed = false)
+{
+    /// <summary>How far along the axis (0 at its start, 1 at its end) a value lies; values outside the scale are clamped.</summary>
+    public double Fraction(double value)
+    {
+        double f;
+        if (LogBase > 1 && Min > 0 && Max > Min)
+            f = Math.Log(Math.Max(value, Min) / Min) / Math.Log(Max / Min);
+        else
+            f = Max > Min ? (value - Min) / (Max - Min) : 0;
+        f = Math.Clamp(f, 0, 1);
+        return Reversed ? 1 - f : f;
+    }
+}
 
 /// <summary>A tick of the value axis with its formatted label.</summary>
 public readonly record struct ChartTick(double Value, string Label);
@@ -82,6 +103,42 @@ public sealed record SheetChart : SheetObject
     public double XMax { get; init; } = 1;
 
     public bool XGridlines { get; init; }
+
+    /// <summary>The base of a logarithmic value axis (0: linear); the same for the horizontal axis of scatter charts and the secondary axis.</summary>
+    public double LogBase { get; init; }
+
+    public double XLogBase { get; init; }
+
+    public double SecondaryLogBase { get; init; }
+
+    /// <summary>Whether the axes run backwards: values from the top (or right), categories from the right (or top), x from the right.</summary>
+    public bool ReverseValues { get; init; }
+
+    public bool ReverseCategories { get; init; }
+
+    public bool ReverseX { get; init; }
+
+    public bool ReverseSecondary { get; init; }
+
+    /// <summary>Further chart types of a combination chart, drawn over the first.</summary>
+    public IReadOnlyList<ChartGroup> ExtraGroups { get; init; } = [];
+
+    /// <summary>The secondary value axis (on the right), used by the groups marked <see cref="ChartGroup.Secondary"/>.</summary>
+    public IReadOnlyList<ChartTick> SecondaryTicks { get; init; } = [];
+
+    public double SecondaryMin { get; init; }
+
+    public double SecondaryMax { get; init; } = 1;
+
+    public string? SecondaryAxisTitle { get; init; }
+
+    public bool ShowSecondaryAxis { get; init; } = false;
+
+    public AxisScale ValueScale => new(ValueMin, ValueMax, LogBase, ReverseValues);
+
+    public AxisScale XScale => new(XMin, XMax, XLogBase, ReverseX);
+
+    public AxisScale SecondaryScale => new(SecondaryMin, SecondaryMax, SecondaryLogBase, ReverseSecondary);
 
     /// <summary>
     /// Whether the points of line and area charts sit in the middle of their category band (<c>between</c>) rather than on its edges

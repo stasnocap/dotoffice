@@ -39,6 +39,7 @@ internal static class ShowcaseXlsx
             ("Shapes", ShapesSheet(), "visible"),
             ("Charts", ChartsSheet(), "visible"),
             ("More charts", MoreChartsSheet(), "visible"),
+            ("Chart options", ChartOptionsSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
@@ -69,6 +70,7 @@ internal static class ShowcaseXlsx
         WriteShapes(zip, sheets.FindIndex(x => x.Name == "Shapes") + 1);
         WriteCharts(zip, sheets.FindIndex(x => x.Name == "Charts") + 1);
         WriteMoreCharts(zip, sheets.FindIndex(x => x.Name == "More charts") + 1);
+        WriteChartOptions(zip, sheets.FindIndex(x => x.Name == "Chart options") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
         content.Append("</Types>");
 
@@ -474,6 +476,32 @@ internal static class ShowcaseXlsx
 
     private static string MoreChartsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>",
         Row(1, Str("A1", "More charts: area, doughnut, scatter, bubble and radar (data on the Charts sheet)", Bold)),
+        "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
+
+    private static void WriteChartOptions(ZipArchive zip, int sheetNumber)
+    {
+        string Series(int i, string tail = "") => ChartSeries(i, true).Replace("</c:ser>", tail + "</c:ser>");
+        var secondaryAxes = Axes("", "Units") +
+            "<c:catAx><c:axId val=\"3\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"1\"/><c:axPos val=\"b\"/><c:crossAx val=\"4\"/></c:catAx>" +
+            "<c:valAx><c:axId val=\"4\"/><c:scaling><c:orientation val=\"minMax\"/><c:max val=\"40\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/>" + Rich("title", "Rate", 1000) +
+            "<c:numFmt formatCode=\"0&quot; %&quot;\" sourceLinked=\"0\"/><c:crossAx val=\"3\"/><c:crosses val=\"max\"/></c:valAx>";
+        var combo = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" + Series(0) + "<c:gapWidth val=\"150\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                    "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + Series(1) + "<c:marker val=\"1\"/><c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>" + secondaryAxes;
+        var smooth = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + Series(0, "<c:smooth val=\"1\"/>") + Series(1, "<c:smooth val=\"0\"/>") + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
+        var reversed = Bars("bar", "clustered", 1, true, axes: Axes().Replace("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/>"));
+        var log = Bars("col", "clustered", 2, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:logBase val=\"10\"/><c:orientation val=\"minMax\"/>"));
+        var flipped = Bars("col", "clustered", 1, true, axes: Axes().Replace("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"maxMin\"/>"));
+        string[] charts =
+        [
+            ChartSpace("Columns and a line on a second axis", combo, "b"), ChartSpace("Smoothed and straight lines", smooth, "b"),
+            ChartSpace("Categories reversed", reversed, ""), ChartSpace("Logarithmic axis", log, "b"), ChartSpace("Values reversed", flipped, ""),
+        ];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43)];
+        WriteChartParts(zip, sheetNumber, charts, places, "option");
+    }
+
+    private static string ChartOptionsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>",
+        Row(1, Str("A1", "Chart options: secondary axis, smoothing, reversed and logarithmic axes", Bold)),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ comments

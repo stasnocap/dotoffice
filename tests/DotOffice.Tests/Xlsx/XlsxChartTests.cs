@@ -108,13 +108,65 @@ public class XlsxChartTests
         Assert.Contains("stock", warning.Message);
     }
 
+    private const string SecondaryAxes =
+        "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:majorGridlines/></c:valAx>" +
+        "<c:catAx><c:axId val=\"3\"/><c:scaling/><c:delete val=\"1\"/></c:catAx><c:valAx><c:axId val=\"4\"/><c:scaling><c:min val=\"0\"/><c:max val=\"2\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"r\"/>" +
+        "<c:title><c:tx><c:rich><a:p><a:r><a:t>Share</a:t></a:r></a:p></c:rich></c:tx></c:title><c:crosses val=\"max\"/></c:valAx>";
+
     [Fact]
-    public void A_combination_chart_draws_its_first_type_and_says_so()
+    public void A_combination_chart_keeps_every_bar_line_and_area_group()
     {
-        var plot = Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")) + "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
+        var plot = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                   "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(1, null, null, "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" +
+                   "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+        var (sheet, warnings) = Read(Space(plot));
+        Assert.Empty(warnings.Warnings);
+        var chart = Assert.Single(sheet.Charts);
+        Assert.Equal(ChartKind.Column, chart.Kind);
+        var extra = Assert.Single(chart.ExtraGroups);
+        Assert.Equal((ChartKind.Line, false), (extra.Kind, extra.Secondary));
+        Assert.Equal("Series2", extra.Series[0].Name);
+        Assert.Equal(new Color(0xED, 0x7D, 0x31), extra.Series[0].Color); // the second series takes the second accent
+    }
+
+    [Fact]
+    public void A_group_on_its_own_value_axis_gets_the_secondary_scale()
+    {
+        var plot = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                   "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(1, null, null, "S!$B$2:$B$4") + "<c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>" + SecondaryAxes;
+        var (sheet, warnings) = Read(Space(plot));
+        Assert.Empty(warnings.Warnings);
+        var chart = sheet.Charts.Single();
+        Assert.True(chart.ExtraGroups[0].Secondary);
+        Assert.True(chart.ShowSecondaryAxis);
+        Assert.Equal((0.0, 2.0, "Share"), (chart.SecondaryMin, chart.SecondaryMax, chart.SecondaryAxisTitle));
+        Assert.True(chart.ValueMax >= 40); // the primary scale comes from the columns only
+    }
+
+    [Fact]
+    public void A_combination_with_an_unsupported_group_names_what_is_left_out()
+    {
+        var plot = Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4")) + "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/></c:scatterChart>";
         var (sheet, warnings) = Read(Space(plot));
         Assert.Single(sheet.Charts);
-        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated" && w.Message.Contains("combination"));
+        Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated" && w.Message.Contains("combination") && w.Message.Contains("scatter"));
+    }
+
+    [Fact]
+    public void Reads_reversed_and_logarithmic_axes_and_smoothed_lines()
+    {
+        var axes = "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/></c:scaling><c:delete val=\"0\"/></c:catAx>" +
+                   "<c:valAx><c:axId val=\"2\"/><c:scaling><c:logBase val=\"10\"/><c:orientation val=\"maxMin\"/></c:scaling><c:delete val=\"0\"/></c:valAx>";
+        var plot = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:smooth val=\"1\"/>").Replace("<c:smooth val=\"1\"/>", "") .Replace("</c:ser>", "<c:smooth val=\"1\"/></c:ser>") +
+                   "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + axes;
+        var chart = Read(Space(plot)).Sheet.Charts.Single();
+        Assert.True(chart.ReverseCategories);
+        Assert.True(chart.ReverseValues);
+        Assert.Equal(10.0, chart.LogBase);
+        Assert.Equal((10.0, 100.0), (chart.ValueMin, chart.ValueMax)); // data 10..40
+        Assert.Equal([10.0, 100.0], chart.Ticks.Select(t => t.Value));
+        Assert.True(chart.Series[0].Smooth);
+        Assert.False(Read(Space(plot.Replace("<c:smooth val=\"1\"/>", ""))).Sheet.Charts.Single().Series[0].Smooth);
     }
 
     private static string XyAxes(string extraY = "") =>

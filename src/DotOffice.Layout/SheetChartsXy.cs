@@ -27,11 +27,10 @@ public sealed partial class SheetLayoutEngine
         double plotTop = top + labelHeight / 2, plotBottom = bottom - (chart.ShowCategoryAxis ? labelHeight + 5 : 0);
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
-        double xRange = chart.XMax - chart.XMin, yRange = chart.ValueMax - chart.ValueMin;
-        if (xRange <= 0) xRange = 1;
-        if (yRange <= 0) yRange = 1;
-        double X(double v) => plotLeft + plotWidth * (Math.Clamp(v, chart.XMin, chart.XMax) - chart.XMin) / xRange;
-        double Y(double v) => plotBottom - plotHeight * (Math.Clamp(v, chart.ValueMin, chart.ValueMax) - chart.ValueMin) / yRange;
+        var xScale = chart.XScale;
+        var yScale = chart.ValueScale;
+        double X(double v) => plotLeft + plotWidth * xScale.Fraction(v);
+        double Y(double v) => plotBottom - plotHeight * yScale.Fraction(v);
 
         foreach (var tick in chart.Ticks)
         {
@@ -79,9 +78,7 @@ public sealed partial class SheetLayoutEngine
                         points[i] = (X(x), Y(y));
                         if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], X(x), Y(y) - 8, null));
                     }
-                if (s.Line)
-                    for (int i = 0; i + 1 < points.Length; i++)
-                        if (points[i] is { } a && points[i + 1] is { } b) items.Add(new LineItem(a.X, a.Y, b.X, b.Y, 2.25, s.Color));
+                if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
                 if (s.Marker || !s.Line)
                     foreach (var p in points)
                         if (p is { } q)
@@ -106,14 +103,13 @@ public sealed partial class SheetLayoutEngine
         double radius = Math.Min((right - left) / 2 - labelWidth - 6, (bottom - top) / 2 - labelHeight - 4);
         if (radius < 15) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
-        double range = chart.ValueMax - chart.ValueMin;
-        if (range <= 0) range = 1;
+        var valueScale = chart.ValueScale;
         (double X, double Y) Point(int k, double r)
         {
             double a = (-90 + 360.0 * k / n) * Math.PI / 180;
             return (cx + r * Math.Cos(a), cy + r * Math.Sin(a));
         }
-        double Radius(double v) => radius * (Math.Clamp(v, chart.ValueMin, chart.ValueMax) - chart.ValueMin) / range;
+        double Radius(double v) => radius * valueScale.Fraction(v);
 
         double lastLabel = -1e9;
         foreach (var tick in chart.Ticks)

@@ -35,33 +35,21 @@ internal static class XlsxCharts
         if (groups.Count == 0) return ("empty", null);
         var first = groups[0];
         if (!Supported.Contains(first.Name.LocalName)) return (Describe(first.Name.LocalName), null);
-        if (groups.Count > 1)
-            notes.Add($"a combination chart draws only its first chart type ({Describe(first.Name.LocalName)}) and not the {string.Join(" and ", groups.Skip(1).Select(g => Describe(g.Name.LocalName)))} part");
-        if (first.Name.LocalName is not ("scatterChart" or "bubbleChart") && plot.Elements().Count(e => e.Name.LocalName == "valAx") > 1) notes.Add("secondary axes are ignored");
-        return (null, sheets => Build(context, owner, sheets, space, plot, first, template));
+        // A combination of bar, line and area groups on one category axis is drawn whole (on the primary and the secondary value axis);
+        // anything else after the first group is named and left out.
+        var categoryTypes = new[] { "barChart", "lineChart", "areaChart" };
+        var extras = categoryTypes.Contains(first.Name.LocalName) ? groups.Skip(1).Where(g => categoryTypes.Contains(g.Name.LocalName)).ToList() : [];
+        var dropped = groups.Skip(1).Where(g => !extras.Contains(g)).ToList();
+        if (dropped.Count > 0)
+            notes.Add($"a combination chart draws only its {Describe(first.Name.LocalName)} part and not the {string.Join(" and ", dropped.Select(g => Describe(g.Name.LocalName)))} part");
+        if (first.Name.LocalName is not ("scatterChart" or "bubbleChart") && extras.Count == 0 && plot.Elements().Count(e => e.Name.LocalName == "valAx") > 1) notes.Add("secondary axes are ignored");
+        return (null, sheets => Build(context, owner, sheets, space, plot, first, extras, template));
     }
 
-    private static SheetChart Build(XlsxContext context, Worksheet owner, IReadOnlyList<Worksheet> sheets, XElement space, XElement plot, XElement group, SheetChart template)
+    private static SheetChart Build(XlsxContext context, Worksheet owner, IReadOnlyList<Worksheet> sheets, XElement space, XElement plot, XElement group, IReadOnlyList<XElement> extras, SheetChart template)
     {
         var theme = context.Theme;
         var chart = Child(space, "chart");
-        string type = group.Name.LocalName;
-        string barDirection = (string?)Child(group, "barDir")?.Attribute("val") ?? "col";
-        var grouping = (string?)Child(group, "grouping")?.Attribute("val") switch
-        {
-            "stacked" => ChartGrouping.Stacked,
-            "percentStacked" => ChartGrouping.PercentStacked,
-            _ => ChartGrouping.Clustered,
-        };
-        var kind = type switch
-        {
-            "pieChart" => ChartKind.Pie, "doughnutChart" => ChartKind.Doughnut, "lineChart" => ChartKind.Line, "areaChart" => ChartKind.Area,
-            "scatterChart" => ChartKind.Scatter, "bubbleChart" => ChartKind.Bubble, "radarChart" => ChartKind.Radar,
-            _ => barDirection == "bar" ? ChartKind.Bar : ChartKind.Column,
-        };
-        bool slices = kind is ChartKind.Pie or ChartKind.Doughnut, xy = kind is ChartKind.Scatter or ChartKind.Bubble;
-        if (slices || kind is ChartKind.Radar || xy) grouping = ChartGrouping.Clustered;
-
         // ---- data
         IEnumerable<Cell?> CellsOf(string formula)
         {
@@ -116,19 +104,32 @@ internal static class XlsxCharts
             return ([], null);
         }
 
-        var sers = group.Elements().Where(e => e.Name.LocalName == "ser").ToList();
         var categories = new List<string>();
-        foreach (var ser in sers)
+        foreach (var ser in new[] { group }.Concat(extras).SelectMany(g => g.Elements().Where(e => e.Name.LocalName == "ser")))
         {
             categories = Strings(Child(ser, "cat"));
             if (categories.Count > 0) break;
         }
 
-        bool filled = kind == ChartKind.Radar && (string?)Child(group, "radarStyle")?.Attribute("val") == "filled";
+        string? sourceFormat = null;
+        ChartGrouping GroupingOf(XElement g, ChartKind k) =>
+            k is ChartKind.Pie or ChartKind.Doughnut or ChartKind.Radar or ChartKind.Scatter or ChartKind.Bubble ? ChartGrouping.Clustered
+            : (string?)Child(g, "grouping")?.Attribute("val") switch { "stacked" => ChartGrouping.Stacked, "percentStacked" => ChartGrouping.PercentStacked, _ => ChartGrouping.Clustered };
+        ChartKind KindOf(XElement g) => g.Name.LocalName switch
+        {
+            "pieChart" => ChartKind.Pie, "doughnutChart" => ChartKind.Doughnut, "lineChart" => ChartKind.Line, "areaChart" => ChartKind.Area,
+            "scatterChart" => ChartKind.Scatter, "bubbleChart" => ChartKind.Bubble, "radarChart" => ChartKind.Radar,
+            _ => ((string?)Child(g, "barDir")?.Attribute("val") ?? "col") == "bar" ? ChartKind.Bar : ChartKind.Column,
+        };
+
+        List<ChartSeries> ReadSeries(XElement group, ChartKind kind, int firstIndex)
+        {
+        bool slices = kind is ChartKind.Pie or ChartKind.Doughnut, xy = kind is ChartKind.Scatter or ChartKind.Bubble;
+        var sers = group.Elements().Where(e => e.Name.LocalName == "ser").ToList();
         string? radarStyle = (string?)Child(group, "radarStyle")?.Attribute("val");
+        bool filled = kind == ChartKind.Radar && radarStyle == "filled";
         var groupLabels = Child(group, "dLbls");
         var series = new List<ChartSeries>();
-        string? sourceFormat = null;
         for (int i = 0; i < sers.Count; i++)
         {
             var ser = sers[i];
@@ -141,11 +142,12 @@ internal static class XlsxCharts
                 if (kind == ChartKind.Bubble) sizes = Numbers(Child(ser, "bubbleSize")).Values;
             }
             sourceFormat ??= format;
-            string name = Child(Child(ser, "tx"), "v")?.Value is { } literal ? literal : Strings(Child(ser, "tx")).FirstOrDefault() is { Length: > 0 } cached ? cached : $"Series{i + 1}";
+            bool smooth = kind is ChartKind.Line or ChartKind.Scatter && Child(ser, "smooth") is { } sm && ((string?)sm.Attribute("val") is null || Flag(sm, "val"));
+            string name = Child(Child(ser, "tx"), "v")?.Value is { } literal ? literal : Strings(Child(ser, "tx")).FirstOrDefault() is { Length: > 0 } cached ? cached : $"Series{firstIndex + i + 1}";
             var spPr = Child(ser, "spPr");
             bool lineLike = kind is ChartKind.Line or ChartKind.Scatter || (kind == ChartKind.Radar && !filled);
             var lineProperties = Child(spPr, "ln");
-            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? SolidFill(Child(Child(ser, "marker"), "spPr"), theme) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, i);
+            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? SolidFill(Child(Child(ser, "marker"), "spPr"), theme) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
             bool line = !(lineLike && lineProperties is not null && Child(lineProperties, "noFill") is not null);
 
             bool marker = true;
@@ -184,81 +186,143 @@ internal static class XlsxCharts
                     return string.Join("; ", parts);
                 }).ToList();
             }
-            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line));
+            series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth));
         }
-        int points = Math.Max(categories.Count, series.Count == 0 ? 0 : series.Max(s => s.Values.Count));
+        return series;
+        }
+
+        var kind = KindOf(group);
+        bool slices = kind is ChartKind.Pie or ChartKind.Doughnut, xy = kind is ChartKind.Scatter or ChartKind.Bubble;
+        bool filled = kind == ChartKind.Radar && (string?)Child(group, "radarStyle")?.Attribute("val") == "filled";
+        var grouping = GroupingOf(group, kind);
+        var series = ReadSeries(group, kind, 0);
+        var extraSeries = new List<(XElement Group, ChartKind Kind, List<ChartSeries> Series)>();
+        int nextIndex = series.Count;
+        foreach (var extra in extras)
+        {
+            var extraKind = KindOf(extra);
+            var read = ReadSeries(extra, extraKind, nextIndex);
+            nextIndex += read.Count;
+            extraSeries.Add((extra, extraKind, read));
+        }
+        int points = Math.Max(categories.Count, series.Concat(extraSeries.SelectMany(e => e.Series)).Select(s => s.Values.Count).DefaultIfEmpty(0).Max());
         while (categories.Count < points) categories.Add((categories.Count + 1).ToString(CultureInfo.InvariantCulture));
 
         // ---- axes and scale
         var valueAxes = plot.Elements().Where(e => e.Name.LocalName == "valAx").ToList();
-        var valueAxis = valueAxes.FirstOrDefault();
-        var categoryAxis = plot.Elements().FirstOrDefault(e => e.Name.LocalName is "catAx" or "dateAx");
+        var groupAxisIds = group.Elements().Where(e => e.Name.LocalName == "axId").Select(e => (string?)e.Attribute("val")).ToList();
+        var valueAxis = valueAxes.FirstOrDefault(a => groupAxisIds.Contains((string?)Child(a, "axId")?.Attribute("val"))) ?? valueAxes.FirstOrDefault();
+        var categoryAxis = plot.Elements().FirstOrDefault(e => e.Name.LocalName is "catAx" or "dateAx" && groupAxisIds.Contains((string?)Child(e, "axId")?.Attribute("val")))
+                           ?? plot.Elements().FirstOrDefault(e => e.Name.LocalName is "catAx" or "dateAx");
         if (xy)
         {
             // A scatter or bubble chart has two value axes: the horizontal one (axPos b/t, else the first) and the vertical one.
             categoryAxis = valueAxes.FirstOrDefault(a => (string?)Child(a, "axPos")?.Attribute("val") is "b" or "t") ?? valueAxes.FirstOrDefault();
             valueAxis = valueAxes.FirstOrDefault(a => a != categoryAxis);
         }
-        var scaling = Child(valueAxis, "scaling");
-        double? fixedMin = Child(scaling, "min") is { } mn ? Number(mn, "val") : null, fixedMax = Child(scaling, "max") is { } mx ? Number(mx, "val") : null;
-        double? fixedMajor = Child(valueAxis, "majorUnit") is { } mu && Number(mu, "val") > 0 ? Number(mu, "val") : null;
+        string? TextOf(XElement? holder) => holder is null ? null : string.Join(" ", holder.Descendants().Where(e => e.Name.LocalName == "p").Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(t => t.Value))).Where(s => s.Length > 0)) is { Length: > 0 } text ? text : null;
+        // A value axis' scale: the data range's automatic scale, or the fixed limits, units, logarithmic base and direction of the axis.
+        string? AxisId(XElement? e) => (string?)Child(e, "axId")?.Attribute("val");
+        (double Min, double Max, List<ChartTick> Ticks, double LogBase, bool Reversed) ValueScale(XElement? axis, double lo, double hi, double loPositive, ChartGrouping grouping, string? fallbackCode)
+        {
+            var scaling = Child(axis, "scaling");
+            double? fixedMin = Child(scaling, "min") is { } mn ? Number(mn, "val") : null, fixedMax = Child(scaling, "max") is { } mx ? Number(mx, "val") : null;
+            double? fixedMajor = Child(axis, "majorUnit") is { } mu && Number(mu, "val") > 0 ? Number(mu, "val") : null;
+            bool reversed = (string?)Child(scaling, "orientation")?.Attribute("val") == "maxMin";
+            double logBase = Child(scaling, "logBase") is { } lb ? Number(lb, "val") : 0;
+            if (logBase < 2 || logBase > 1000) logBase = 0;
+            string? code = Child(axis, "numFmt") is { } nf && !Flag(nf, "sourceLinked") ? (string?)nf.Attribute("formatCode") : null;
+            code ??= fallbackCode;
+            if (lo > hi) (lo, hi) = (0, 1);
+            if (logBase > 0 && grouping == ChartGrouping.Clustered)
+            {
+                // Logarithmic axes run from a power of the base below the smallest value to one above the largest.
+                if (loPositive == double.MaxValue || hi <= 0) (loPositive, hi) = (1, logBase);
+                double lMin = fixedMin is > 0 ? fixedMin.Value : Math.Pow(logBase, Math.Floor(Math.Log(loPositive, logBase) + 1e-9));
+                double lMax = fixedMax is { } fm && fm > lMin ? fm : Math.Pow(logBase, Math.Ceiling(Math.Log(hi, logBase) - 1e-9));
+                if (lMax <= lMin) lMax = lMin * logBase;
+                var logTicks = new List<ChartTick>();
+                for (double v = Math.Pow(logBase, Math.Ceiling(Math.Log(lMin, logBase) - 1e-9)); v <= lMax * (1 + 1e-9) && logTicks.Count < 40; v *= logBase)
+                    logTicks.Add(new ChartTick(v, Format(v, code)));
+                return (lMin, lMax, logTicks, logBase, reversed);
+            }
+            if (grouping == ChartGrouping.PercentStacked)
+            {
+                double pMin = fixedMin ?? 0, pMax = fixedMax ?? 1;
+                code ??= "0%";
+                if (fallbackCode is not null && code == fallbackCode) code = "0%";
+                return (pMin, pMax, Ticks(pMin, pMax, fixedMajor ?? 0.1, v => Format(v, code)), 0, reversed);
+            }
+            var scale = AutoScale(lo, hi, fixedMin, fixedMax, fixedMajor);
+            return (scale.Min, scale.Max, Ticks(scale.Min, scale.Max, scale.Step, v => Format(v, code)), 0, reversed);
+        }
+
+        // The range of the data of some groups on one axis: plain values, or per-category sums when stacked.
+        (double Lo, double Hi, double LoPositive) Range(IEnumerable<(ChartGrouping Grouping, IReadOnlyList<ChartSeries> Series)> groups)
+        {
+            double lo = double.MaxValue, hi = double.MinValue, loPositive = double.MaxValue;
+            foreach (var (g, list) in groups)
+            {
+                foreach (var v in list.SelectMany(s => s.Values))
+                    if (v is { } x) { (lo, hi) = (Math.Min(lo, x), Math.Max(hi, x)); if (x > 0) loPositive = Math.Min(loPositive, x); }
+                if (g == ChartGrouping.Stacked)
+                    for (int p = 0; p < points; p++)
+                    {
+                        double positive = 0, negative = 0;
+                        foreach (var s in list)
+                            if (p < s.Values.Count && s.Values[p] is { } x) { if (x >= 0) positive += x; else negative += x; }
+                        (lo, hi) = (Math.Min(lo, negative), Math.Max(hi, positive));
+                    }
+            }
+            return (lo, hi, loPositive);
+        }
+
         var ticks = new List<ChartTick>();
-        double min = 0, max = 1;
+        double min = 0, max = 1, logBase = 0, secondaryMin = 0, secondaryMax = 1, secondaryLog = 0, xMin = 0, xMax = 1, xLog = 0;
+        bool reverseValues = false, reverseX = false, reverseSecondary = false, secondaryShown = false;
         var xTicks = new List<ChartTick>();
-        double xMin = 0, xMax = 1;
+        var secondaryTicks = new List<ChartTick>();
+        string? secondaryTitle = null;
+        var extraGroups = new List<ChartGroup>();
         if (xy)
         {
-            var xScaling = Child(categoryAxis, "scaling");
-            double xlo = double.MaxValue, xhi = double.MinValue;
+            double xlo = double.MaxValue, xhi = double.MinValue, xPositive = double.MaxValue;
             foreach (var v in series.SelectMany(sr => sr.XValues ?? []))
-                if (v is { } x) (xlo, xhi) = (Math.Min(xlo, x), Math.Max(xhi, x));
-            if (xlo > xhi) (xlo, xhi) = (0, 1);
-            string? xCode = Child(categoryAxis, "numFmt") is { } xf && !Flag(xf, "sourceLinked") ? (string?)xf.Attribute("formatCode") : null;
-            var xScale = AutoScale(xlo, xhi, Child(xScaling, "min") is { } xmn ? Number(xmn, "val") : null, Child(xScaling, "max") is { } xmx ? Number(xmx, "val") : null,
-                Child(categoryAxis, "majorUnit") is { } xmu && Number(xmu, "val") > 0 ? Number(xmu, "val") : null);
-            (xMin, xMax) = (xScale.Min, xScale.Max);
-            xTicks = Ticks(xScale.Min, xScale.Max, xScale.Step, v => Format(v, xCode));
+                if (v is { } x) { (xlo, xhi) = (Math.Min(xlo, x), Math.Max(xhi, x)); if (x > 0) xPositive = Math.Min(xPositive, x); }
+            string? xFallback = null;
+            (xMin, xMax, xTicks, xLog, reverseX) = ValueScale(categoryAxis, xlo, xhi, xPositive, ChartGrouping.Clustered, xFallback);
         }
         if (!slices)
         {
-            double lo = double.MaxValue, hi = double.MinValue;
-            if (grouping == ChartGrouping.Clustered)
+            var primaryId = AxisId(valueAxis);
+            var primary = new List<(ChartGrouping, IReadOnlyList<ChartSeries>)> { (grouping, series) };
+            var secondary = new List<(ChartGrouping, IReadOnlyList<ChartSeries>)>();
+            XElement? secondaryAxis = null;
+            foreach (var (extra, extraKind, read) in extraSeries)
             {
-                foreach (var v in series.SelectMany(s => s.Values))
-                    if (v is { } x) (lo, hi) = (Math.Min(lo, x), Math.Max(hi, x));
+                var extraAxis = valueAxes.FirstOrDefault(a => extra.Elements().Any(i => i.Name.LocalName == "axId" && (string?)i.Attribute("val") == AxisId(a)));
+                bool onSecondary = extraAxis is not null && extraAxis != valueAxis;
+                var extraGrouping = GroupingOf(extra, extraKind);
+                (onSecondary ? secondary : primary).Add((extraGrouping, read));
+                if (onSecondary) secondaryAxis = extraAxis;
+                extraGroups.Add(new ChartGroup(extraKind, extraGrouping, read, onSecondary,
+                    Child(extra, "gapWidth") is { } eg ? Number(eg, "val", 150) : 150,
+                    Child(extra, "overlap") is { } eo ? Number(eo, "val") : extraGrouping == ChartGrouping.Clustered ? 0 : 100));
             }
-            else if (grouping == ChartGrouping.Stacked)
+            var (lo, hi, loPositive) = Range(primary);
+            var primaryGrouping = primary.Any(g => g.Item1 == ChartGrouping.PercentStacked) ? ChartGrouping.PercentStacked : ChartGrouping.Clustered;
+            (min, max, ticks, logBase, reverseValues) = ValueScale(valueAxis, lo, hi, loPositive, primaryGrouping, sourceFormat);
+            if (secondaryAxis is not null)
             {
-                for (int p = 0; p < points; p++)
-                {
-                    double positive = 0, negative = 0;
-                    foreach (var s in series)
-                        if (p < s.Values.Count && s.Values[p] is { } x) { if (x >= 0) positive += x; else negative += x; }
-                    (lo, hi) = (Math.Min(lo, negative), Math.Max(hi, positive));
-                }
-            }
-            if (lo > hi) (lo, hi) = (0, 1);
-            string? axisCode = null;
-            if (Child(valueAxis, "numFmt") is { } nf && !Flag(nf, "sourceLinked")) axisCode = (string?)nf.Attribute("formatCode");
-            axisCode ??= sourceFormat;
-            if (grouping == ChartGrouping.PercentStacked)
-            {
-                (min, max) = (fixedMin ?? 0, fixedMax ?? 1);
-                double step = fixedMajor ?? 0.1;
-                axisCode ??= "0%";
-                if (sourceFormat is not null && axisCode == sourceFormat) axisCode = "0%";
-                ticks = Ticks(min, max, step, v => Format(v, axisCode));
-            }
-            else
-            {
-                var scale = AutoScale(lo, hi, fixedMin, fixedMax, fixedMajor);
-                (min, max) = (scale.Min, scale.Max);
-                ticks = Ticks(scale.Min, scale.Max, scale.Step, v => Format(v, axisCode));
+                var (slo, shi, sPositive) = Range(secondary);
+                var secondaryGrouping = secondary.Any(g => g.Item1 == ChartGrouping.PercentStacked) ? ChartGrouping.PercentStacked : ChartGrouping.Clustered;
+                (secondaryMin, secondaryMax, secondaryTicks, secondaryLog, reverseSecondary) = ValueScale(secondaryAxis, slo, shi, sPositive, secondaryGrouping, sourceFormat);
+                secondaryShown = !Flag(Child(secondaryAxis, "delete"), "val");
+                secondaryTitle = TextOf(Path(secondaryAxis, "title", "tx", "rich"));
             }
         }
 
         // ---- text and chrome
-        string? TextOf(XElement? holder) => holder is null ? null : string.Join(" ", holder.Descendants().Where(e => e.Name.LocalName == "p").Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(t => t.Value))).Where(s => s.Length > 0)) is { Length: > 0 } text ? text : null;
         var titleElement = Child(chart, "title");
         string? title = null;
         double titleSize = 14;
@@ -306,6 +370,10 @@ internal static class XlsxCharts
             FirstSliceAngle = Child(group, "firstSliceAng") is { } angle ? Number(angle, "val") : 0,
             BubbleScale = Child(group, "bubbleScale") is { } bubble ? Math.Clamp(Number(bubble, "val", 100), 0, 300) : 100,
             Filled = filled,
+            LogBase = logBase, XLogBase = xLog, SecondaryLogBase = secondaryLog, ReverseValues = reverseValues, ReverseX = reverseX, ReverseSecondary = reverseSecondary,
+            ReverseCategories = (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") == "maxMin" && !xy,
+            ExtraGroups = extraGroups, SecondaryTicks = secondaryTicks, SecondaryMin = secondaryMin, SecondaryMax = secondaryMax,
+            SecondaryAxisTitle = secondaryTitle, ShowSecondaryAxis = secondaryShown,
         };
     }
 

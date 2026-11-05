@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Charts" "More charts"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper" "Areas" "Comments" "Shapes" "Charts" "More charts" "Chart options"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -155,6 +155,15 @@ for text in "Stacked areas" "Doughnut shares" "Rings" "Scatter" "Bubbles" "Radar
   [[ $more_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "More charts"; then fail "the more-charts sheet should not warn"; fi
+
+# Chart options: the combination with a secondary axis shows both axis titles and the secondary labels; no warning.
+opt_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Chart options" ] && opt_page=$p; done
+opt_text=$(page_text "$opt_page")
+for text in "Columns and a line on a second axis" "Smoothed and straight lines" "Categories reversed" "Logarithmic axis" "Values reversed" "Units" "Rate" "40 %" "100"; do
+  [[ $opt_text == *"$text"* ]] || fail "missing chart text: $text"
+done
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "the chart options sheet should not warn"; fi
 
 # Print areas: the three areas of the "Areas" sheet are three separate pages, and nothing outside them is printed.
 area_pages=0

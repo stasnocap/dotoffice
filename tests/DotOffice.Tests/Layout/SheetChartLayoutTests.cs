@@ -153,4 +153,59 @@ public class SheetChartLayoutTests
         Assert.Equal(3, polygon.Points.Count);
         Assert.Equal(3, Page(chart).Items.OfType<LineItem>().Count(l => l.Color == Red));
     }
+
+    [Fact]
+    public void Axis_scales_map_values_linearly_logarithmically_and_backwards()
+    {
+        Assert.Equal(0.25, new AxisScale(0, 20).Fraction(5), 6);
+        Assert.Equal(0.75, new AxisScale(0, 20, Reversed: true).Fraction(5), 6);
+        Assert.Equal(0.5, new AxisScale(1, 100, LogBase: 10).Fraction(10), 6);
+        Assert.Equal(0, new AxisScale(1, 100, LogBase: 10).Fraction(0), 6);
+        Assert.Equal(1, new AxisScale(0, 20).Fraction(50), 6);
+    }
+
+    [Fact]
+    public void A_smoothed_line_is_drawn_as_many_short_segments()
+    {
+        var straight = Page(Chart(ChartKind.Line, Series(Red, 5, 20, 5))).Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width > 2);
+        var smooth = Page(Chart(ChartKind.Line, new ChartSeries("S", new double?[] { 5, 20, 5 }, Red, Smooth: true))).Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width > 2);
+        Assert.Equal(2, straight);
+        Assert.Equal(24, smooth);
+    }
+
+    [Fact]
+    public void Reversed_categories_run_from_the_right()
+    {
+        var normal = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20))).Items.OfType<RectItem>().Where(r => r.Fill == Red).OrderBy(r => r.X).Select(r => r.Height).ToList();
+        var reversed = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with { ReverseCategories = true }).Items.OfType<RectItem>().Where(r => r.Fill == Red).OrderBy(r => r.X).Select(r => r.Height).ToList();
+        Assert.Equal(normal.AsEnumerable().Reverse(), reversed);
+    }
+
+    [Fact]
+    public void A_reversed_value_axis_hangs_the_columns_from_the_top()
+    {
+        var reversed = Page(Chart(ChartKind.Column, Series(Red, 5)) with { ReverseValues = true }).Items.OfType<RectItem>().Single(r => r.Fill == Red);
+        var normal = Page(Chart(ChartKind.Column, Series(Red, 5))).Items.OfType<RectItem>().Single(r => r.Fill == Red);
+        Assert.Equal(normal.Height, reversed.Height, 3);
+        Assert.True(reversed.Y < normal.Y);
+    }
+
+    [Fact]
+    public void A_secondary_axis_draws_its_labels_on_the_right_and_scales_its_group_separately()
+    {
+        var line = new ChartGroup(ChartKind.Line, ChartGrouping.Clustered, [new ChartSeries("L", new double?[] { 1, 2, 1 }, Blue, Marker: true)], true);
+        var chart = Chart(ChartKind.Column, Series(Red, 10, 10, 10)) with
+        {
+            ExtraGroups = [line], ShowSecondaryAxis = true, SecondaryTicks = [new(0, "0%"), new(2, "200%")], SecondaryMin = 0, SecondaryMax = 2,
+        };
+        var page = Page(chart);
+        var labels = page.Items.OfType<TextItem>().Where(t => t.Text is "0%" or "200%").ToList();
+        Assert.Equal(2, labels.Count);
+        double plotMiddle = page.Items.OfType<RectItem>().Where(r => r.Fill == Red).Average(r => r.X);
+        Assert.All(labels, t => Assert.True(t.X > plotMiddle));
+        var dots = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Blue).ToList();
+        Assert.Equal(3, dots.Count);
+        var bars = page.Items.OfType<RectItem>().Where(r => r.Fill == Red).ToList();
+        Assert.True(dots[1].Y < bars[0].Y); // 2 of 2 is the top, 10 of 20 only the middle
+    }
 }

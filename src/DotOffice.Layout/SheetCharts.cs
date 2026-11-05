@@ -41,8 +41,9 @@ public sealed partial class SheetLayoutEngine
 
         // ---- legend
         var legendEntries = chart.Kind is ChartKind.Pie or ChartKind.Doughnut
-            ? chart.Categories.Select((c, i) => (Name: c, Color: chart.Series.FirstOrDefault()?.PointColors is { } pc && i < pc.Count ? pc[i] : ChartColor(i), Series: (ChartSeries?)null)).ToList()
-            : chart.Series.Select(s => (Name: s.Name, Color: s.Color, Series: (ChartSeries?)s)).ToList();
+            ? chart.Categories.Select((c, i) => (Name: c, Color: chart.Series.FirstOrDefault()?.PointColors is { } pc && i < pc.Count ? pc[i] : ChartColor(i), Series: (ChartSeries?)null, Kind: chart.Kind)).ToList()
+            : chart.Series.Select(s => (Name: s.Name, Color: s.Color, Series: (ChartSeries?)s, Kind: chart.Kind))
+                .Concat(chart.ExtraGroups.SelectMany(g => g.Series.Select(s => (Name: s.Name, Color: s.Color, Series: (ChartSeries?)s, Kind: g.Kind)))).ToList();
         if (chart.Legend != LegendPosition.None && legendEntries.Count > 0 && right > left && bottom > top)
         {
             double entryHeight = chart.FontSize * 1.25 + 3, swatch = chart.FontSize * 0.8;
@@ -53,7 +54,7 @@ public sealed partial class SheetLayoutEngine
                 double lx = chart.Legend == LegendPosition.Right ? right - boxWidth : left;
                 double ly = (top + bottom) / 2 - legendEntries.Count * entryHeight / 2;
                 for (int i = 0; i < legendEntries.Count; i++)
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, lx, ly + i * entryHeight, swatch, entryHeight, font, items);
+                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * entryHeight, swatch, entryHeight, font, items);
                 if (chart.Legend == LegendPosition.Right) right -= boxWidth + 6; else left += boxWidth + 6;
             }
             else
@@ -62,7 +63,7 @@ public sealed partial class SheetLayoutEngine
                 double lx = (left + right) / 2 - total / 2, ly = chart.Legend == LegendPosition.Top ? top : bottom - entryHeight;
                 for (int i = 0; i < legendEntries.Count; i++)
                 {
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, lx, ly, swatch, entryHeight, font, items);
+                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly, swatch, entryHeight, font, items);
                     lx += widths[i] + swatch + 14;
                 }
                 if (chart.Legend == LegendPosition.Top) top += entryHeight + 4; else bottom -= entryHeight + 4;
@@ -85,10 +86,10 @@ public sealed partial class SheetLayoutEngine
 
     private static Color ChartColor(int index) => new[] { new Color(0x44, 0x72, 0xC4), new Color(0xED, 0x7D, 0x31), new Color(0xA5, 0xA5, 0xA5), new Color(0xFF, 0xC0, 0x00), new Color(0x5B, 0x9B, 0xD5), new Color(0x70, 0xAD, 0x47) }[index % 6];
 
-    private void DrawLegendEntry(SheetChart chart, string name, Color color, ChartSeries? series, double x, double y, double swatch, double height, RunProperties font, List<LayoutItem> items)
+    private void DrawLegendEntry(SheetChart chart, string name, Color color, ChartSeries? series, ChartKind kind, double x, double y, double swatch, double height, RunProperties font, List<LayoutItem> items)
     {
         double cy = y + height / 2;
-        bool lineStyle = chart.Kind is ChartKind.Line or ChartKind.Scatter || (chart.Kind == ChartKind.Radar && !chart.Filled);
+        bool lineStyle = kind is ChartKind.Line or ChartKind.Scatter || (kind == ChartKind.Radar && !chart.Filled);
         if (lineStyle)
         {
             bool joined = series?.Line ?? true;
@@ -97,7 +98,7 @@ public sealed partial class SheetLayoutEngine
                 items.Add(new EllipseItem(x + (swatch + 4) / 2 - 2.5, cy - 2.5, 5, 5, color));
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
         }
-        else if (chart.Kind == ChartKind.Bubble)
+        else if (kind == ChartKind.Bubble)
         {
             items.Add(new EllipseItem(x, cy - swatch / 2, swatch, swatch, color));
             PlaceText(name, font, x + swatch + 4, cy, Anchor.Start, true, 0, items);
@@ -135,40 +136,35 @@ public sealed partial class SheetLayoutEngine
         return pitch;
     }
 
-    // ------------------------------------------------------------------ axes, columns, bars and lines
+    // ------------------------------------------------------------------ axes, columns, bars, lines and areas
 
     private void EmitAxisChart(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
     {
         bool horizontalBars = chart.Kind == ChartKind.Bar;
         int categories = Math.Max(chart.Categories.Count, 1);
         double fontSize = chart.FontSize;
+        bool secondary = chart.ShowSecondaryAxis && chart.ExtraGroups.Any(g => g.Secondary);
 
         // ---- room for axis titles and labels
-        if (chart.CategoryAxisTitle is { Length: > 0 } categoryTitle && !horizontalBars)
+        string? horizontalTitle = horizontalBars ? chart.ValueAxisTitle : chart.CategoryAxisTitle, verticalTitle = horizontalBars ? chart.CategoryAxisTitle : chart.ValueAxisTitle;
+        if (horizontalTitle is { Length: > 0 })
         {
-            PlaceText(categoryTitle, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
+            PlaceText(horizontalTitle, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
             bottom -= fontSize + 8;
         }
-        if (chart.ValueAxisTitle is { Length: > 0 } valueTitle && !horizontalBars)
+        if (verticalTitle is { Length: > 0 })
         {
-            PlaceText(valueTitle, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
+            PlaceText(verticalTitle, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
             left += fontSize + 8;
         }
-        if (horizontalBars)
+        if (secondary && chart.SecondaryAxisTitle is { Length: > 0 } secondaryTitle)
         {
-            if (chart.ValueAxisTitle is { Length: > 0 } t1)
-            {
-                PlaceText(t1, font with { FontSize = fontSize + 1 }, (left + right) / 2, bottom - fontSize - 2, Anchor.Middle, false, 0, items);
-                bottom -= fontSize + 8;
-            }
-            if (chart.CategoryAxisTitle is { Length: > 0 } t2)
-            {
-                PlaceText(t2, font with { FontSize = fontSize + 1 }, left + fontSize / 2 + 1, (top + bottom) / 2, Anchor.Middle, true, 90, items);
-                left += fontSize + 8;
-            }
+            PlaceText(secondaryTitle, font with { FontSize = fontSize + 1 }, right - fontSize / 2 - 1, (top + bottom) / 2, Anchor.Middle, true, -90, items);
+            right -= fontSize + 8;
         }
 
         double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() : 0;
+        double secondaryWidth = secondary ? chart.SecondaryTicks.Select(t => MeasureChartText(t.Label, font)).DefaultIfEmpty(0).Max() + 6 : 0;
         double categoryWidth = chart.ShowCategoryAxis ? chart.Categories.Select(c => MeasureChartText(c, font)).DefaultIfEmpty(0).Max() : 0;
         double labelHeight = fontSize * 1.25;
 
@@ -178,7 +174,7 @@ public sealed partial class SheetLayoutEngine
         if (!horizontalBars)
         {
             plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0);
-            plotRight = right - 4;
+            plotRight = right - 4 - secondaryWidth;
             plotTop = top + labelHeight / 2;
             double bandWidth = (plotRight - plotLeft) / (chart.CategoriesBetween ? categories : Math.Max(categories - 1, 1));
             rotateLabels = chart.ShowCategoryAxis && categoryWidth > bandWidth * 0.95 - 2;
@@ -195,154 +191,166 @@ public sealed partial class SheetLayoutEngine
         }
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
-        double range = chart.ValueMax - chart.ValueMin;
-        if (range <= 0) range = 1;
+        var primary = chart.ValueScale;
+        var secondaryScale = chart.SecondaryScale;
 
-        // Positions along the value axis and the category axis.
-        double ValueX(double v) => plotLeft + plotWidth * (v - chart.ValueMin) / range;
-        double ValueY(double v) => plotBottom - plotHeight * (v - chart.ValueMin) / range;
-        double zero = Math.Clamp(0, chart.ValueMin, chart.ValueMax);
+        // Positions along the value axis (of the primary or the secondary scale) and the category axis.
+        double ValueX(AxisScale scale, double v) => plotLeft + plotWidth * scale.Fraction(v);
+        double ValueY(AxisScale scale, double v) => plotBottom - plotHeight * scale.Fraction(v);
+        double ValuePosition(AxisScale scale, double v) => horizontalBars ? ValueX(scale, v) : ValueY(scale, v);
+        double Baseline(AxisScale scale) => scale.LogBase > 1 ? scale.Min : Math.Clamp(0, scale.Min, scale.Max);
+        int Slot(int i) => chart.ReverseCategories ? categories - 1 - i : i;
         bool between = chart.CategoriesBetween || chart.Kind is ChartKind.Column or ChartKind.Bar;
-        double CategoryX(int i) => between ? plotLeft + (i + 0.5) * plotWidth / categories
-            : categories > 1 ? plotLeft + i * plotWidth / (categories - 1) : plotLeft + plotWidth / 2;
+        double CategoryX(int i) => between ? plotLeft + (Slot(i) + 0.5) * plotWidth / categories
+            : categories > 1 ? plotLeft + Slot(i) * plotWidth / (categories - 1) : plotLeft + plotWidth / 2;
 
         // ---- gridlines and value labels
         foreach (var tick in chart.Ticks)
         {
             if (horizontalBars)
             {
-                double tx = ValueX(tick.Value);
+                double tx = ValueX(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
                 if (chart.ShowValueAxis) PlaceText(tick.Label, font, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
             }
             else
             {
-                double ty = ValueY(tick.Value);
+                double ty = ValueY(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
                 if (chart.ShowValueAxis) PlaceText(tick.Label, font, plotLeft - 5, ty, Anchor.End, true, 0, items);
             }
         }
+        if (secondary && !horizontalBars)
+            foreach (var tick in chart.SecondaryTicks)
+                PlaceText(tick.Label, font, plotRight + 5, ValueY(secondaryScale, tick.Value), Anchor.Start, true, 0, items);
 
-        // ---- series
-        int seriesCount = chart.Series.Count;
-        var totals = new double[categories];
-        if (chart.Grouping == ChartGrouping.PercentStacked)
-            foreach (var s in chart.Series)
-                for (int i = 0; i < categories; i++) totals[i] += i < s.Values.Count && s.Values[i] is { } v ? Math.Abs(v) : 0;
-        double Scaled(ChartSeries s, int i) => i < s.Values.Count && s.Values[i] is { } v ? chart.Grouping == ChartGrouping.PercentStacked ? (totals[i] > 0 ? v / totals[i] : 0) : v : 0;
-
+        // ---- series: the first chart type, then the further types of a combination chart
         var labels = new List<(string Text, double X, double Y, bool Inside, Color Fill)>();
-        if (chart.Kind is ChartKind.Column or ChartKind.Bar)
+        var groups = new List<ChartGroup> { new(chart.Kind, chart.Grouping, chart.Series, false, chart.GapWidth, chart.Overlap) };
+        groups.AddRange(chart.ExtraGroups);
+        foreach (var group in groups)
         {
-            double band = (horizontalBars ? plotHeight : plotWidth) / categories;
-            bool stacked = chart.Grouping != ChartGrouping.Clustered;
-            double overlap = stacked ? 1 : chart.Overlap / 100, gap = chart.GapWidth / 100;
-            int perGroup = stacked ? 1 : Math.Max(seriesCount, 1);
-            double barWidth = band / (perGroup - (perGroup - 1) * overlap + gap);
-            double groupWidth = barWidth * (perGroup - (perGroup - 1) * overlap);
-            var positive = new double[categories];
-            var negative = new double[categories];
-            for (int j = 0; j < seriesCount; j++)
+            var scale = group.Secondary ? secondaryScale : primary;
+            var list = group.Series;
+            int seriesCount = list.Count;
+            var totals = new double[categories];
+            if (group.Grouping == ChartGrouping.PercentStacked)
+                foreach (var s in list)
+                    for (int i = 0; i < categories; i++) totals[i] += i < s.Values.Count && s.Values[i] is { } v ? Math.Abs(v) : 0;
+            double Scaled(ChartSeries s, int i) => i < s.Values.Count && s.Values[i] is { } v ? group.Grouping == ChartGrouping.PercentStacked ? (totals[i] > 0 ? v / totals[i] : 0) : v : 0;
+
+            if (group.Kind is ChartKind.Column or ChartKind.Bar)
             {
-                var s = chart.Series[j];
-                for (int i = 0; i < categories; i++)
+                double band = (horizontalBars ? plotHeight : plotWidth) / categories;
+                bool stacked = group.Grouping != ChartGrouping.Clustered;
+                double overlap = stacked ? 1 : group.Overlap / 100, gap = group.GapWidth / 100;
+                int perGroup = stacked ? 1 : Math.Max(seriesCount, 1);
+                double barWidth = band / (perGroup - (perGroup - 1) * overlap + gap);
+                double groupWidth = barWidth * (perGroup - (perGroup - 1) * overlap);
+                double baseline = Baseline(scale);
+                var positive = new double[categories];
+                var negative = new double[categories];
+                for (int j = 0; j < seriesCount; j++)
                 {
-                    if (i >= s.Values.Count || s.Values[i] is null) continue;
-                    double value = Scaled(s, i), from, to;
-                    if (stacked)
+                    var s = list[j];
+                    for (int i = 0; i < categories; i++)
                     {
-                        if (value >= 0) { from = positive[i]; to = from + value; positive[i] = to; }
-                        else { from = negative[i]; to = from + value; negative[i] = to; }
-                    }
-                    else (from, to) = (0, value);
-                    double c0 = Math.Clamp(from, chart.ValueMin, chart.ValueMax), c1 = Math.Clamp(to, chart.ValueMin, chart.ValueMax);
-                    double center = (horizontalBars ? plotBottom - (i + 0.5) * band : plotLeft + (i + 0.5) * band);
-                    double offset = stacked ? -barWidth / 2 : -groupWidth / 2 + j * barWidth * (1 - overlap);
-                    var color = s.Color;
-                    if (horizontalBars)
-                    {
-                        double yTop = center + offset, ya = Math.Min(ValueX(c0), ValueX(c1)), yb = Math.Max(ValueX(c0), ValueX(c1));
-                        // In horizontal bar charts the first series sits lowest in each group.
-                        double slot = stacked ? yTop : center - offset - barWidth;
-                        items.Add(new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
-                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], stacked ? (ya + yb) / 2 : yb + 3, slot + barWidth / 2, stacked, color));
-                    }
-                    else
-                    {
-                        double xLeft = center + offset, ya = Math.Min(ValueY(c0), ValueY(c1)), yb = Math.Max(ValueY(c0), ValueY(c1));
-                        items.Add(new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
-                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], xLeft + barWidth / 2, stacked ? (ya + yb) / 2 : (value >= 0 ? ya - 2 : yb + 2), stacked, color));
-                    }
-                }
-            }
-        }
-        else if (chart.Kind == ChartKind.Area)
-        {
-            var cumulative = new double[categories];
-            for (int j = 0; j < seriesCount; j++)
-            {
-                var s = chart.Series[j];
-                var baseline = (double[])cumulative.Clone();
-                var tops = new double[categories];
-                for (int i = 0; i < categories; i++)
-                {
-                    double value = i < s.Values.Count && s.Values[i] is not null ? Scaled(s, i) : 0;
-                    tops[i] = chart.Grouping == ChartGrouping.Clustered ? value : baseline[i] + value;
-                    if (chart.Grouping != ChartGrouping.Clustered) cumulative[i] = tops[i];
-                    if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], CategoryX(i), ValueY(Math.Clamp(tops[i], chart.ValueMin, chart.ValueMax)) + font.FontSize, false, s.Color));
-                }
-                var outline = new List<(double X, double Y)>();
-                for (int i = 0; i < categories; i++) outline.Add((CategoryX(i), ValueY(Math.Clamp(tops[i], chart.ValueMin, chart.ValueMax))));
-                var polygon = new List<(double X, double Y)>(outline);
-                for (int i = categories - 1; i >= 0; i--)
-                    polygon.Add((CategoryX(i), ValueY(Math.Clamp(chart.Grouping == ChartGrouping.Clustered ? zero : baseline[i], chart.ValueMin, chart.ValueMax))));
-                if (polygon.Count >= 3) items.Add(new PolygonItem(polygon, s.Color));
-            }
-        }
-        else
-        {
-            double band = plotWidth / categories;
-            var cumulative = new double[categories];
-            for (int j = 0; j < seriesCount; j++)
-            {
-                var s = chart.Series[j];
-                var points = new (double X, double Y)?[categories];
-                for (int i = 0; i < categories; i++)
-                {
-                    if (i >= s.Values.Count || s.Values[i] is null) continue;
-                    double value = Scaled(s, i);
-                    if (chart.Grouping != ChartGrouping.Clustered) { cumulative[i] += value; value = cumulative[i]; }
-                    points[i] = (CategoryX(i), ValueY(Math.Clamp(value, chart.ValueMin, chart.ValueMax)));
-                    if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], points[i]!.Value.X, points[i]!.Value.Y - 6, false, s.Color));
-                }
-                for (int i = 0; i + 1 < categories; i++)
-                    if (s.Line && points[i] is { } a && points[i + 1] is { } b) items.Add(new LineItem(a.X, a.Y, b.X, b.Y, 2.25, s.Color));
-                if (s.Marker)
-                    foreach (var p in points)
-                        if (p is { } q)
+                        if (i >= s.Values.Count || s.Values[i] is null) continue;
+                        double value = Scaled(s, i), from, to;
+                        if (stacked)
                         {
-                            items.Add(new EllipseItem(q.X - 3.2, q.Y - 3.2, 6.4, 6.4, Color.White));
-                            items.Add(new EllipseItem(q.X - 2.5, q.Y - 2.5, 5, 5, s.Color));
+                            if (value >= 0) { from = positive[i]; to = from + value; positive[i] = to; }
+                            else { from = negative[i]; to = from + value; negative[i] = to; }
                         }
+                        else (from, to) = (baseline, value);
+                        double offset = stacked ? -barWidth / 2 : -groupWidth / 2 + j * barWidth * (1 - overlap);
+                        var color = s.Color;
+                        double p0 = ValuePosition(scale, from), p1 = ValuePosition(scale, to);
+                        if (horizontalBars)
+                        {
+                            double center = plotBottom - (Slot(i) + 0.5) * band;
+                            double ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
+                            // In horizontal bar charts the first series sits lowest in each group.
+                            double slot = stacked ? center + offset : center - offset - barWidth;
+                            items.Add(new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
+                            if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], stacked ? (ya + yb) / 2 : yb + 3, slot + barWidth / 2, stacked, color));
+                        }
+                        else
+                        {
+                            double center = plotLeft + (Slot(i) + 0.5) * band;
+                            double xLeft = center + offset, ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
+                            items.Add(new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
+                            if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], xLeft + barWidth / 2, stacked ? (ya + yb) / 2 : (value >= 0 ? ya - 2 : yb + 2), stacked, color));
+                        }
+                    }
+                }
+            }
+            else if (group.Kind == ChartKind.Area)
+            {
+                var cumulative = new double[categories];
+                double baseline = Baseline(scale);
+                for (int j = 0; j < seriesCount; j++)
+                {
+                    var s = list[j];
+                    var below = (double[])cumulative.Clone();
+                    var tops = new double[categories];
+                    for (int i = 0; i < categories; i++)
+                    {
+                        double value = i < s.Values.Count && s.Values[i] is not null ? Scaled(s, i) : 0;
+                        tops[i] = group.Grouping == ChartGrouping.Clustered ? value : below[i] + value;
+                        if (group.Grouping != ChartGrouping.Clustered) cumulative[i] = tops[i];
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], CategoryX(i), ValueY(scale, tops[i]) + font.FontSize, false, s.Color));
+                    }
+                    var order = Enumerable.Range(0, categories).OrderBy(CategoryX).ToList();
+                    var polygon = order.Select(i => (CategoryX(i), ValueY(scale, tops[i]))).ToList();
+                    foreach (int i in Enumerable.Reverse(order))
+                        polygon.Add((CategoryX(i), ValueY(scale, group.Grouping == ChartGrouping.Clustered ? baseline : below[i])));
+                    if (polygon.Count >= 3) items.Add(new PolygonItem(polygon, s.Color));
+                }
+            }
+            else if (group.Kind == ChartKind.Line)
+            {
+                var cumulative = new double[categories];
+                for (int j = 0; j < seriesCount; j++)
+                {
+                    var s = list[j];
+                    var points = new (double X, double Y)?[categories];
+                    for (int i = 0; i < categories; i++)
+                    {
+                        if (i >= s.Values.Count || s.Values[i] is null) continue;
+                        double value = Scaled(s, i);
+                        if (group.Grouping != ChartGrouping.Clustered) { cumulative[i] += value; value = cumulative[i]; }
+                        points[i] = (CategoryX(i), ValueY(scale, value));
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], points[i]!.Value.X, points[i]!.Value.Y - 6, false, s.Color));
+                    }
+                    if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
+                    if (s.Marker)
+                        foreach (var p in points)
+                            if (p is { } q)
+                            {
+                                items.Add(new EllipseItem(q.X - 3.2, q.Y - 3.2, 6.4, 6.4, Color.White));
+                                items.Add(new EllipseItem(q.X - 2.5, q.Y - 2.5, 5, 5, s.Color));
+                            }
+                }
             }
         }
 
         // ---- category axis line and labels
         if (chart.ShowCategoryAxis)
         {
+            double crossing = Baseline(primary);
             if (horizontalBars)
             {
-                double ax = ValueX(zero);
+                double ax = ValueX(primary, crossing);
                 items.Add(new LineItem(ax, plotTop, ax, plotBottom, 0.75, ChartGrid));
                 double band = plotHeight / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i++)
-                    PlaceText(chart.Categories[i], font, plotLeft - 5, plotBottom - (i + 0.5) * band, Anchor.End, true, 0, items);
+                    PlaceText(chart.Categories[i], font, plotLeft - 5, plotBottom - (Slot(i) + 0.5) * band, Anchor.End, true, 0, items);
             }
             else
             {
-                double ay = ValueY(zero);
+                double ay = ValueY(primary, crossing);
                 items.Add(new LineItem(plotLeft, ay, plotRight, ay, 0.75, ChartGrid));
-                double band = plotWidth / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i += (int)stride)
                 {
                     double cx = CategoryX(i);
@@ -358,6 +366,43 @@ public sealed partial class SheetLayoutEngine
             var color = inside ? ContrastColor(fill) : ChartText;
             if (horizontalBars && !inside) PlaceText(text, font with { Color = color }, lx, ly, Anchor.Start, true, 0, items);
             else PlaceText(text, font with { Color = color }, lx, inside ? ly : ly - font.FontSize * 1.25, Anchor.Middle, inside, 0, items);
+        }
+    }
+
+    /// <summary>
+    /// Joins points with straight segments, or with a smooth curve through them (a Catmull-Rom spline, which Excel's smoothing
+    /// resembles). Missing points break the line.
+    /// </summary>
+    private static void DrawPolyline((double X, double Y)?[] points, bool smooth, double width, Color color, List<LayoutItem> items)
+    {
+        int i = 0;
+        while (i < points.Length)
+        {
+            if (points[i] is null) { i++; continue; }
+            int j = i;
+            while (j + 1 < points.Length && points[j + 1] is not null) j++;
+            var run = points[i..(j + 1)].Select(p => p!.Value).ToList();
+            for (int k = 0; k + 1 < run.Count; k++)
+            {
+                if (!smooth)
+                {
+                    items.Add(new LineItem(run[k].X, run[k].Y, run[k + 1].X, run[k + 1].Y, width, color));
+                    continue;
+                }
+                var p0 = run[Math.Max(k - 1, 0)]; var p1 = run[k]; var p2 = run[k + 1]; var p3 = run[Math.Min(k + 2, run.Count - 1)];
+                var c1 = (X: p1.X + (p2.X - p0.X) / 6, Y: p1.Y + (p2.Y - p0.Y) / 6);
+                var c2 = (X: p2.X - (p3.X - p1.X) / 6, Y: p2.Y - (p3.Y - p1.Y) / 6);
+                var last = p1;
+                for (int step = 1; step <= 12; step++)
+                {
+                    double t = step / 12.0, u = 1 - t;
+                    var q = (X: u * u * u * p1.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p2.X,
+                             Y: u * u * u * p1.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p2.Y);
+                    items.Add(new LineItem(last.X, last.Y, q.X, q.Y, width, color));
+                    last = q;
+                }
+            }
+            i = j + 1;
         }
     }
 
