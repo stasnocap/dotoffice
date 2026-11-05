@@ -11,9 +11,11 @@ public sealed class PdfImage
     private readonly bool _isJpeg;
     private readonly bool _adobeInverted;
     private readonly byte[]? _alpha;
+    private readonly RasterDecoders.CcittImage? _fax;
 
-    private PdfImage(byte[] data, int width, int height, string colorSpace, bool isJpeg, bool adobeInverted = false, byte[]? alpha = null)
+    private PdfImage(byte[] data, int width, int height, string colorSpace, bool isJpeg, bool adobeInverted = false, byte[]? alpha = null, RasterDecoders.CcittImage? fax = null)
     {
+        _fax = fax;
         _data = data;
         Width = width;
         Height = height;
@@ -83,12 +85,21 @@ public sealed class PdfImage
     public static PdfImage FromGif(byte[] data) => From(RasterDecoders.DecodeGif(data));
 
     /// <summary>Decodes a baseline TIFF (stored, PackBits or LZW); a TIFF holding one JPEG stream is embedded as that JPEG.</summary>
-    public static PdfImage FromTiff(byte[] data) => RasterDecoders.TiffJpeg(data) is { } jpeg ? FromJpeg(jpeg) : From(RasterDecoders.DecodeTiff(data));
+    public static PdfImage FromTiff(byte[] data) => RasterDecoders.TiffJpeg(data) is { } jpeg ? FromJpeg(jpeg)
+        : RasterDecoders.TiffCcitt(data) is { } fax ? new PdfImage(fax.Data, fax.Width, fax.Height, "/DeviceGray", isJpeg: false, fax: fax)
+        : From(RasterDecoders.DecodeTiff(data));
 
     private static PdfImage From(RasterImage r) => new(r.Rgb, r.Width, r.Height, "/DeviceRGB", isJpeg: false, alpha: r.Alpha);
 
     internal void Write(PdfWriter writer, int id)
     {
+        if (_fax is { } fax)
+        {
+            // Bilevel fax data: white runs come out as 0 bits (BlackIs1 true); with WhiteIsZero, 0 is shown white.
+            writer.WriteStream(id, $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace /DeviceGray /BitsPerComponent 1{(fax.WhiteIsZero ? " /Decode [1 0]" : "")} /Filter /CCITTFaxDecode " +
+                $"/DecodeParms << /K {fax.K} /Columns {Width} /Rows {Height} /BlackIs1 true /EncodedByteAlign {(fax.ByteAlign ? "true" : "false")} /EndOfLine {(fax.EndOfLine ? "true" : "false")} >>", _data, compress: false);
+            return;
+        }
         var dict = $"/Type /XObject /Subtype /Image /Width {Width} /Height {Height} /ColorSpace {_colorSpace} /BitsPerComponent 8";
         if (_isJpeg)
         {

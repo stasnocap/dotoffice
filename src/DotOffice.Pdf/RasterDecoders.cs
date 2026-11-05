@@ -475,6 +475,45 @@ internal static class RasterDecoders
         return false;
     }
 
+    /// <summary>A fax-coded TIFF strip as the parameters of a PDF <c>CCITTFaxDecode</c> filter.</summary>
+    internal sealed record CcittImage(byte[] Data, int Width, int Height, int K, bool ByteAlign, bool EndOfLine, bool WhiteIsZero);
+
+    /// <summary>
+    /// A bilevel TIFF compressed with CCITT Group 3 (one- or two-dimensional), Group 4 or the byte-aligned modified Huffman scheme, in a single
+    /// strip: the PDF viewer decodes it (<c>CCITTFaxDecode</c>), so the data is passed on as it is (with its bits turned around when the file
+    /// is least-significant-bit first). Null for any other TIFF, and for fax data in several strips, which are coded one by one.
+    /// </summary>
+    public static CcittImage? TiffCcitt(byte[] d)
+    {
+        var tags = ReadTiffTags(d);
+        uint One(int tag, uint def) => tags.TryGetValue(tag, out var v) && v.Length > 0 ? v[0] : def;
+        int compression = (int)One(259, 1);
+        if (compression is not (2 or 3 or 4) || One(258, 1) != 1 || One(277, 1) != 1 || One(284, 1) != 1) return null;
+        int width = (int)One(256, 0), height = (int)One(257, 0);
+        CheckSize(width, height);
+        if (!tags.TryGetValue(273, out var offsets) || !tags.TryGetValue(279, out var counts) || offsets.Length != 1 || counts.Length != 1) return null;
+        if (One(278, (uint)height) < height) return null;
+        if ((long)offsets[0] + counts[0] > d.Length || counts[0] == 0) return null;
+        var data = d.AsSpan((int)offsets[0], (int)counts[0]).ToArray();
+        if (One(266, 1) == 2)
+            for (int i = 0; i < data.Length; i++)
+            {
+                byte b = data[i];
+                b = (byte)((b & 0xF0) >> 4 | (b & 0x0F) << 4);
+                b = (byte)((b & 0xCC) >> 2 | (b & 0x33) << 2);
+                data[i] = (byte)((b & 0xAA) >> 1 | (b & 0x55) << 1);
+            }
+        uint t4 = One(292, 0);
+        // Fax codes make white runs 0 bits and black runs 1 bits whatever the photometric says; the photometric tells what those bits look like.
+        bool whiteIsZero = One(262, 0) == 0;
+        return compression switch
+        {
+            4 => new CcittImage(data, width, height, -1, false, false, whiteIsZero),
+            3 => new CcittImage(data, width, height, (t4 & 1) != 0 ? 4 : 0, (t4 & 4) != 0, true, whiteIsZero),
+            _ => new CcittImage(data, width, height, 0, true, false, whiteIsZero),
+        };
+    }
+
     /// <summary>Decodes a baseline TIFF: 1/2/4/8-bit gray or palette and 8-bit RGB(A), stored, PackBits or LZW strips.</summary>
     public static RasterImage DecodeTiff(byte[] d)
     {

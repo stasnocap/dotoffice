@@ -296,6 +296,40 @@ public class RasterDecoderTests
         Assert.True(result is null || result.Length > 100);   // never throws
     }
 
+    [Theory]
+    [InlineData("fax-g4.tif", -1, false, false, false)]
+    [InlineData("fax-g3-1d.tif", 0, false, true, false)]
+    [InlineData("fax-g3-1d-fill.tif", 0, true, true, false)]        // fill bits: every row starts on a byte
+    [InlineData("fax-g3-2d-fill.tif", 4, true, true, false)]        // two-dimensional (K > 0)
+    [InlineData("fax-g4-white-is-zero.tif", -1, false, false, true)]
+    public void A_fax_coded_tiff_is_passed_to_the_pdf_as_it_is(string file, int k, bool byteAlign, bool endOfLine, bool whiteIsZero)
+    {
+        // Written by libtiff (tiffcp -c g4 / g3:1d / g3:1d:fill / g3:2d:fill): 64x40, one strip.
+        var fax = RasterDecoders.TiffCcitt(TestAssets.Bytes(file))!;
+        Assert.NotNull(fax);
+        Assert.Equal((64, 40, k, byteAlign, endOfLine, whiteIsZero), (fax.Width, fax.Height, fax.K, fax.ByteAlign, fax.EndOfLine, fax.WhiteIsZero));
+        Assert.True(fax.Data.Length > 20);
+
+        var doc = new PdfDocument();
+        doc.AddPage(PageSize.A4).Canvas.DrawImage(doc.AddImage(PdfImage.FromTiff(TestAssets.Bytes(file))), 10, 10, 64, 40);
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var text = Encoding.Latin1.GetString(ms.ToArray());
+        Assert.Contains("/Filter /CCITTFaxDecode", text);
+        Assert.Contains($"/K {k} /Columns 64 /Rows 40 /BlackIs1 true /EncodedByteAlign {(byteAlign ? "true" : "false")} /EndOfLine {(endOfLine ? "true" : "false")}", text);
+        Assert.Equal(whiteIsZero, text.Contains("/Decode [1 0]"));
+        Assert.Contains("/BitsPerComponent 1", text);
+    }
+
+    [Fact]
+    public void Fax_data_in_several_strips_and_other_tiffs_are_not_passed_on()
+    {
+        Assert.Null(RasterDecoders.TiffCcitt(TestAssets.Bytes("fax-g4-strips.tif")));          // each strip is coded on its own
+        Assert.Null(RasterDecoders.TiffCcitt(TestAssets.Bytes("three-strips-jpeg.tif")));
+        Assert.Null(RasterDecoders.TiffCcitt(Tiff(1, 1, 2, 3, [1, 2, 3])));
+        Assert.Throws<NotSupportedException>(() => PdfImage.FromTiff(TestAssets.Bytes("fax-g4-strips.tif")));
+    }
+
     [Fact]
     public void Jpeg_strips_that_cannot_be_chained_are_not_joined()
     {
