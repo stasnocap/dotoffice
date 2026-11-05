@@ -539,7 +539,7 @@ internal static class ConditionalFormatting
             {
                 if (!clamped.TryGetValue(rule, out var ranges) || !ranges.Any(range => range.Contains(row, column))) continue;
                 var cell = cells.GetValueOrDefault((row, column));
-                var ctx = new CfContext(ValueAt, rule.OriginRow, rule.OriginColumn, row, column, bounds, ViewOf);
+                var ctx = new CfContext(ValueAt, rule.OriginRow, rule.OriginColumn, row, column, bounds, ViewOf) { Date1904 = env.Date1904, Today = (env.Today ?? DateTime.Today).Date, Now = env.Today ?? DateTime.Now };
                 bool scaleLike = rule.Type is "colorScale" or "dataBar" or "iconSet";
                 if (scaleLike)
                 {
@@ -607,7 +607,7 @@ internal static class ConditionalFormatting
                 return double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : cell.Text;
             case CellValueKind.Bool: return cell.Text == "TRUE";
             case CellValueKind.Error: return new CfError(cell.Text);
-            default: return cell.Text.Length == 0 ? CfBlank.Instance : cell.Text;
+            default: return cell.Text.Length == 0 && !cell.IsEmptyString ? CfBlank.Instance : cell.Text;
         }
     }
 

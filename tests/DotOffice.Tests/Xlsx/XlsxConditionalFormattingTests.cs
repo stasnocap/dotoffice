@@ -469,7 +469,7 @@ public class XlsxConditionalFormattingTests
 
         var tail = ConditionalFormatting("A1", CfRule("unknownKind", 1, "", "", 0)) +
                    ConditionalFormatting("A2", IconSet(2, "7Faces", Thresholds(0, 20, 40, 60, 80))) +
-                   ConditionalFormatting("A1:A2", Expression("TEXT(A1,\"0\")=\"1\"", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
+                   ConditionalFormatting("A1:A2", Expression("CHOOSE(1,A1)=1", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
         var sheet = Read(Column("A", 1, 2), tail, warnings: warnings);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.conditional-formatting", warning.Code);
@@ -512,7 +512,7 @@ public class XlsxConditionalFormattingTests
     public void X14_only_rules_with_unsupported_content_warn()
     {
         var warnings = new ConversionWarningList();
-        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>TEXT(A1,&quot;0&quot;)=&quot;1&quot;</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
+        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>CHOOSE(1,A1)=1</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
         Read(Column("A", 1), X14Block("A1", rule), warnings: warnings);
         Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
     }
@@ -625,7 +625,7 @@ public class XlsxConditionalFormattingTests
     [Fact]
     public void Names_that_are_not_plain_references_and_unknown_names_are_reported_as_unsupported()
     {
-        var names = "<definedName name=\"Dynamic\">TEXT(Lists!$A$1,&quot;0&quot;)</definedName>";
+        var names = "<definedName name=\"Dynamic\">CHOOSE(1,Lists!$A$1)</definedName>";
         var (main, _, warnings) = ReadTwo(Column("A", 1, 10), ConditionalFormatting("A1:A2", Expression("A1>MAX(Dynamic)", 1, 0), Expression("A1>Nothing", 2, 1)), Row(1, C("A1", "4")), names);
         Assert.Equal("", FilledRows(main));
         Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
@@ -779,6 +779,131 @@ public class XlsxConditionalFormattingTests
     [InlineData("SUM($1:$1)=11", "A1,A2,A3,A4")]                                   // 10 + 1 + a text cell
     public void Whole_column_and_row_references_are_read_within_the_used_range(string formula, string expected) =>
         Assert.Equal(expected, Filled(formula));
+
+    // ---- conditional sums and counts, dates, text and math functions
+
+    private const string All = "A1,A2,A3,A4";
+
+    [Theory]
+    [InlineData("SUMIF($C$1:$C$4,\"x\",$A$1:$A$4)=40", All)]
+    [InlineData("SUMIF($A$1:$A$4,\">15\")=90", All)]
+    [InlineData("SUMIF($C$1:$C$4,$C1,$A$1:$A$4)>40", "A2,A4")]                      // y: 20 + 40
+    [InlineData("SUMIF($C$1:$C$4,\"x\",$B$1:$B$2)=1", All)]                         // a shorter sum range is cut to the criteria range's shape: B1 (x) counts, B2 is paired with C2 (y)
+    [InlineData("SUMIFS($A$1:$A$4,$C$1:$C$4,\"y\",$B$1:$B$4,\">2\")=40", All)]
+    [InlineData("ISERROR(SUMIFS($A$1:$A$4,$C$1:$C$4,\"y\",$B$1:$B$3,\">2\"))", All)]  // ranges of different sizes
+    [InlineData("COUNTIFS($C$1:$C$4,\"x\",$B$1:$B$4,\">1\")=1", All)]
+    [InlineData("COUNTIFS($C$1:$C$4,\"?\",$A$1:$A$4,\">=20\")=3", All)]             // ? is one character
+    [InlineData("COUNTIFS($C$1:$C$4,\"*\")=4", All)]
+    [InlineData("AVERAGEIF($C$1:$C$4,\"y\",$A$1:$A$4)=30", All)]
+    [InlineData("ISERROR(AVERAGEIF($C$1:$C$4,\"z\",$A$1:$A$4))", All)]
+    [InlineData("AVERAGEIFS($A$1:$A$4,$C$1:$C$4,\"x\",$B$1:$B$4,\"<3\")=10", All)]
+    [InlineData("COUNTBLANK($D$1:$D$4)=4", All)]
+    [InlineData("COUNTIF($D$1:$D$4,\"\")=4", All)]
+    public void Conditional_sums_counts_and_averages(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("TEXT($A1,\"0.0\")=\"10.0\"", "A1")]
+    [InlineData("TEXT(1234.5,\"#,##0.00\")=\"1,234.50\"", All)]
+    [InlineData("TEXT(DATE(2024,3,5),\"yyyy-mm-dd\")=\"2024-03-05\"", All)]
+    [InlineData("TEXT(0.256,\"0%\")=\"26%\"", All)]
+    [InlineData("TEXT(\"abc\",\"0\")=\"abc\"", All)]
+    [InlineData("DATE(2024,1,31)+1=DATE(2024,2,1)", All)]
+    [InlineData("DATE(2024,14,1)=DATE(2025,2,1)", All)]
+    [InlineData("DATE(2024,3,0)=DATE(2024,2,29)", All)]
+    [InlineData("DATE(24,1,1)=DATE(1924,1,1)", All)]
+    [InlineData("DATE(2024,1,1)=45292", All)]
+    [InlineData("YEAR(DATE(2024,2,29))*10000+MONTH(DATE(2024,2,29))*100+DAY(DATE(2024,2,29))=20240229", All)]
+    [InlineData("WEEKDAY(DATE(2024,3,5))=3", All)]                                 // a Tuesday, Sunday = 1
+    [InlineData("WEEKDAY(DATE(2024,3,5),2)=2", All)]
+    [InlineData("WEEKDAY(DATE(2024,3,10),3)=6", All)]
+    [InlineData("EOMONTH(DATE(2024,1,15),1)=DATE(2024,2,29)", All)]
+    [InlineData("EDATE(DATE(2024,1,31),1)=DATE(2024,2,29)", All)]
+    [InlineData("TODAY()=DATE(2025,6,15)", All)]                                    // the reader's fixed clock
+    [InlineData("INT(NOW())=DATE(2025,6,15)", All)]
+    [InlineData("ISERROR(DATE(2024,1,1,1))", All)]
+    public void Date_and_text_formatting_functions(string formula, string expected)
+    {
+        var sheet = Read(Table, ConditionalFormatting("A1:A4", Expression(formula, 1, 0)), today: new DateTime(2025, 6, 15));
+        Assert.Equal(expected, FilledRows(sheet));
+    }
+
+    [Theory]
+    [InlineData("UPPER(\"ab\")=\"AB\"", All)]
+    [InlineData("LOWER(\"AB\")=\"ab\"", All)]
+    [InlineData("TRIM(\"  a   b \")=\"a b\"", All)]
+    [InlineData("MID(\"abcdef\",2,3)=\"bcd\"", All)]
+    [InlineData("MID(\"abc\",5,2)=\"\"", All)]
+    [InlineData("EXACT(\"a\",\"A\")", "")]
+    [InlineData("EXACT(\"a\",\"a\")", All)]
+    [InlineData("CONCATENATE(\"n\",$B1)=\"n2\"", "A2")]
+    [InlineData("SUBSTITUTE(\"a-b-c\",\"-\",\"+\",2)=\"a-b+c\"", All)]
+    [InlineData("SUBSTITUTE(\"a-b-c\",\"-\",\"+\")=\"a+b+c\"", All)]
+    [InlineData("VALUE(\"12.5\")=12.5", All)]
+    [InlineData("ISERROR(VALUE(\"abc\"))", All)]
+    [InlineData("ISNA(NA())", All)]
+    [InlineData("ISNA(1/0)", "")]
+    [InlineData("ISERR(1/0)", All)]
+    [InlineData("ISLOGICAL(TRUE)", All)]
+    [InlineData("ISNONTEXT($A1)", All)]
+    [InlineData("ISNONTEXT($C1)", "")]
+    public void Text_and_information_functions(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("ROUNDUP(2.11,1)=2.2", All)]
+    [InlineData("ROUNDUP(-2.11,1)=-2.2", All)]
+    [InlineData("ROUNDDOWN(-2.19,1)=-2.1", All)]
+    [InlineData("TRUNC(2.99)=2", All)]
+    [InlineData("TRUNC(-2.99,1)=-2.9", All)]
+    [InlineData("CEILING(2.1,0.5)=2.5", All)]
+    [InlineData("FLOOR(2.9,0.5)=2.5", All)]
+    [InlineData("LARGE($A$1:$A$4,2)=30", All)]
+    [InlineData("SMALL($A$1:$A$4,1)=10", All)]
+    [InlineData("ISERROR(LARGE($A$1:$A$4,5))", All)]
+    [InlineData("RANK($A1,$A$1:$A$4)<=2", "A3,A4")]
+    [InlineData("RANK($A1,$A$1:$A$4,1)<=2", "A1,A2")]
+    [InlineData("MEDIAN($A$1:$A$4)=25", All)]
+    [InlineData("PRODUCT($B$1:$B$4)=24", All)]
+    [InlineData("ROWS($A$1:$A$4)=4", All)]
+    [InlineData("COLUMNS($A$1:$C$1)=3", All)]
+    [InlineData("SIGN(-3)=-1", All)]
+    [InlineData("SQRT(16)=4", All)]
+    [InlineData("ISERROR(SQRT(-1))", All)]
+    [InlineData("POWER(2,10)=1024", All)]
+    public void Math_and_statistics_functions(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("INDIRECT(\"R\"&ROW()&\"C2\",FALSE)>2", "A3,A4")]               // absolute row and column
+    [InlineData("INDIRECT(\"R[0]C[1]\",FALSE)>2", "A3,A4")]                       // relative: the cell to the right
+    [InlineData("INDIRECT(\"RC[1]\",FALSE)>2", "A3,A4")]
+    [InlineData("INDIRECT(\"R[-1]C\",FALSE)>15", "A3,A4")]                        // the cell above (A0 does not exist: an error, false)
+    [InlineData("SUM(INDIRECT(\"R1C2:R4C2\",FALSE))=10", All)]
+    [InlineData("SUM(INDIRECT(\"R[0]C:R[1]C\",FALSE))>50", "A3")]                 // this cell and the one below: 70 for A3, 50 for A2, 40 for A4
+    [InlineData("INDIRECT(\"S!R\"&ROW()&\"C1\",FALSE)>20", "A3,A4")]
+    [InlineData("INDIRECT(\"'S'!R1C1\",FALSE)=10", All)]
+    [InlineData("ISERROR(INDIRECT(\"R0C1\",FALSE))", All)]
+    [InlineData("ISERROR(INDIRECT(\"R1C1\",TRUE))", All)]                          // A1 style text that is not A1 style
+    [InlineData("INDIRECT(\"A\"&ROW(),TRUE)>20", "A3,A4")]
+    public void INDIRECT_reads_R1C1_text_relative_to_the_cell(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Fact]
+    public void Empty_text_is_not_blank_but_a_missing_cell_is()
+    {
+        // A1 holds an empty string (as a formula's result can), A2 is missing, A3 holds text.
+        var rows = Row(1, "<c r=\"A1\" t=\"str\"><v></v></c>") + Row(3, Inline("A3", "x"));
+        string Filled(string formula) => FilledRows(Read(rows, ConditionalFormatting("A1:A3", Expression(formula, 1, 0))));
+        Assert.Equal("A2", Filled("ISBLANK(A1)"));
+        Assert.Equal("A1,A3", Filled("ISTEXT(A1)"));
+        Assert.Equal("A1,A2", Filled("A1=\"\""));                    // both are equal to ""
+        Assert.Equal("A2", Filled("A1=0"));                          // but only the blank one equals zero
+        Assert.Equal("A1,A2,A3", Filled("LEN(A1)<2"));
+        Assert.Equal("", Filled("COUNTA($A$1:$A$3)<>2"));            // the empty text counts as a value
+        Assert.Equal("A1,A2,A3", Filled("COUNTBLANK($A$1:$A$3)=2"));  // COUNTBLANK counts both kinds
+        Assert.Equal("A1,A2", Filled("LEN(TRIM(A1))=0"));
+    }
 
     // ---- x14 data bars without a main-namespace rule, and cells outside the used range
 

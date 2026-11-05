@@ -37,6 +37,9 @@ internal sealed class CfParser
         "AND", "OR", "NOT", "XOR", "IF", "IFERROR", "MOD", "ROW", "COLUMN", "ISBLANK", "ISNUMBER", "ISTEXT", "ISERROR", "ISEVEN", "ISODD",
         "ABS", "INT", "ROUND", "LEN", "LEFT", "RIGHT", "SEARCH", "FIND", "SUM", "MIN", "MAX", "AVERAGE", "COUNT", "COUNTA", "COUNTIF", "TRUE", "FALSE",
         "SUMPRODUCT", "VLOOKUP", "HLOOKUP", "INDEX", "MATCH", "OFFSET", "INDIRECT",
+        "SUMIF", "SUMIFS", "COUNTIFS", "AVERAGEIF", "AVERAGEIFS", "COUNTBLANK", "TEXT", "VALUE", "DATE", "YEAR", "MONTH", "DAY", "WEEKDAY", "TODAY", "NOW", "EDATE", "EOMONTH",
+        "UPPER", "LOWER", "TRIM", "MID", "EXACT", "CONCATENATE", "SUBSTITUTE", "ISNA", "ISERR", "ISLOGICAL", "ISNONTEXT", "NA",
+        "SIGN", "SQRT", "POWER", "ROUNDUP", "ROUNDDOWN", "TRUNC", "CEILING", "FLOOR", "LARGE", "SMALL", "RANK", "MEDIAN", "PRODUCT", "ROWS", "COLUMNS",
     };
 
     private readonly string _text;
@@ -351,6 +354,14 @@ internal sealed class CfContext(Func<int, int, object> cellAt, int originRow, in
 
     /// <summary>Ranges are clamped to this rectangle so that whole-column references stay cheap.</summary>
     public CellRange Bounds { get; } = bounds;
+
+    /// <summary>The workbook's date system, for DATE, YEAR, TEXT and the like.</summary>
+    public bool Date1904 { get; init; }
+
+    /// <summary>The current day and moment (TODAY, NOW); the real clock unless a test fixes it.</summary>
+    public DateTime Today { get; init; } = DateTime.Today;
+
+    public DateTime Now { get; init; } = DateTime.Now;
 
     public (int Row, int Column) Resolve(CfRef r) =>
         (r.RowAbsolute ? r.Row : r.Row + Row - OriginRow, r.ColumnAbsolute ? r.Column : r.Column + Column - OriginColumn);
@@ -694,6 +705,244 @@ internal static class CfEvaluator
                 if (LookupPosition(key, firsts, exact ? 0 : 1) is not { } found) return CfError.NotAvailable;
                 return vertical ? table[found, (int)index - 1] : table[(int)index - 1, found];
             }
+            case "SUMIF":
+            case "AVERAGEIF":
+            {
+                if (!Needs(2, 3) || ArrayOf(args[0], ctx) is not { } range) return CfError.Value;
+                var criteria = Arg(1);
+                if (criteria is CfError) return criteria;
+                var values = args.Count == 3 ? ArrayOf(args[2], ctx) : range;
+                if (values is null) return CfError.Value;
+                var matches = Criteria(criteria);
+                var picked = new List<double>();
+                for (int r = 0; r < range.GetLength(0); r++)
+                    for (int c = 0; c < range.GetLength(1); c++)
+                    {
+                        if (!matches(range[r, c])) continue;
+                        // The values range is taken at the size of the criteria range, from its own top-left cell.
+                        object v = r < values.GetLength(0) && c < values.GetLength(1) ? values[r, c] : CfBlank.Instance;
+                        if (v is CfError) return v;
+                        if (v is double d) picked.Add(d);
+                    }
+                return call.Name == "SUMIF" ? picked.Sum() : picked.Count == 0 ? CfError.DivisionByZero : picked.Average();
+            }
+            case "SUMIFS":
+            case "AVERAGEIFS":
+            case "COUNTIFS":
+            {
+                bool counting = call.Name == "COUNTIFS";
+                int first = counting ? 0 : 1;
+                if (args.Count < first + 2 || (args.Count - first) % 2 != 0) return CfError.Value;
+                var sums = counting ? null : ArrayOf(args[0], ctx);
+                if (!counting && sums is null) return CfError.Value;
+                var grids = new List<(object[,] Grid, Func<object, bool> Matches)>();
+                for (int k = first; k < args.Count; k += 2)
+                {
+                    if (ArrayOf(args[k], ctx) is not { } grid) return CfError.Value;
+                    var criteria = Arg(k + 1);
+                    if (criteria is CfError) return criteria;
+                    grids.Add((grid, Criteria(criteria)));
+                }
+                int rows = grids[0].Grid.GetLength(0), columns = grids[0].Grid.GetLength(1);
+                if (grids.Any(g => g.Grid.GetLength(0) != rows || g.Grid.GetLength(1) != columns) || (sums is not null && (sums.GetLength(0) != rows || sums.GetLength(1) != columns))) return CfError.Value;
+                var picked = new List<double>();
+                double count = 0;
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < columns; c++)
+                    {
+                        if (!grids.All(g => g.Matches(g.Grid[r, c]))) continue;
+                        count++;
+                        if (sums is null) continue;
+                        if (sums[r, c] is CfError error) return error;
+                        if (sums[r, c] is double d) picked.Add(d);
+                    }
+                return counting ? count : call.Name == "SUMIFS" ? picked.Sum() : picked.Count == 0 ? CfError.DivisionByZero : picked.Average();
+            }
+            case "COUNTBLANK":
+            {
+                if (!Needs(1, 1)) return CfError.Value;
+                // Counted over the whole range, including the part beyond the cells that hold anything.
+                if (ArrayOf(args[0], ctx) is not { } cells) return CfError.Value;
+                double blanks = 0;
+                foreach (var v in cells) if (v is CfBlank || v is string { Length: 0 }) blanks++;
+                return blanks;
+            }
+            case "TEXT":
+            {
+                if (!Needs(2, 2)) return CfError.Value;
+                var value = Arg(0);
+                if (value is CfError) return value;
+                var format = ToText(Arg(1));
+                if (value is string text) return NumberFormat.Parse(format).FormatText(text).Text;
+                return ToNumber(value) is { } number ? NumberFormat.Parse(format).FormatNumber(number, ctx.Date1904).Text : CfError.Value;
+            }
+            case "VALUE":
+            {
+                if (!Needs(1, 1)) return CfError.Value;
+                var v = Arg(0);
+                return v is CfError ? v : ToNumber(v) is { } n ? n : CfError.Value;
+            }
+            case "DATE":
+            {
+                if (!Needs(3, 3) || Num(0) is not { } y || Num(1) is not { } mo || Num(2) is not { } d) return CfError.Value;
+                int year = (int)Math.Truncate(y);
+                if (year is >= 0 and < 1900) year += 1900;
+                if (year is < 1900 or > 9999) return CfError.Value;
+                try { return SerialOf(new DateTime(year, 1, 1).AddMonths((int)Math.Truncate(mo) - 1).AddDays(Math.Truncate(d) - 1), ctx.Date1904); }
+                catch (ArgumentOutOfRangeException) { return CfError.Value; }
+            }
+            case "YEAR":
+            case "MONTH":
+            case "DAY":
+            case "WEEKDAY":
+            {
+                if (!Needs(1, call.Name == "WEEKDAY" ? 2 : 1) || Num(0) is not { } serial || DateOf(serial, ctx.Date1904) is not { } date) return CfError.Value;
+                switch (call.Name)
+                {
+                    case "YEAR": return (double)date.Year;
+                    case "MONTH": return (double)date.Month;
+                    case "DAY": return (double)date.Day;
+                }
+                int sunday = (int)date.DayOfWeek;   // 0 = Sunday
+                double type = args.Count > 1 ? Num(1) ?? 1 : 1;
+                return type switch { 1 => sunday + 1.0, 2 => (sunday + 6) % 7 + 1.0, 3 => (double)((sunday + 6) % 7), _ => CfError.Value };
+            }
+            case "TODAY": return Needs(0, 0) ? SerialOf(ctx.Today, ctx.Date1904) : CfError.Value;
+            case "NOW": return Needs(0, 0) ? SerialOf(ctx.Now, ctx.Date1904) : CfError.Value;
+            case "EDATE":
+            case "EOMONTH":
+            {
+                if (!Needs(2, 2) || Num(0) is not { } serial || Num(1) is not { } months || DateOf(serial, ctx.Date1904) is not { } date) return CfError.Value;
+                try
+                {
+                    var moved = date.AddMonths((int)Math.Truncate(months));
+                    if (call.Name == "EOMONTH") moved = new DateTime(moved.Year, moved.Month, DateTime.DaysInMonth(moved.Year, moved.Month));
+                    return SerialOf(moved, ctx.Date1904);
+                }
+                catch (ArgumentOutOfRangeException) { return CfError.Value; }
+            }
+            case "UPPER": return Needs(1, 1) && Arg(0) is var up and not CfError ? ToText(up).ToUpperInvariant() : CfError.Value;
+            case "LOWER": return Needs(1, 1) && Arg(0) is var low and not CfError ? ToText(low).ToLowerInvariant() : CfError.Value;
+            case "TRIM":
+                return Needs(1, 1) && Arg(0) is var tr and not CfError ? System.Text.RegularExpressions.Regex.Replace(ToText(tr).Trim(' '), " {2,}", " ") : CfError.Value;
+            case "MID":
+            {
+                if (!Needs(3, 3) || Arg(0) is CfError || Num(1) is not { } start || Num(2) is not { } length || start < 1 || length < 0) return CfError.Value;
+                var text = ToText(Arg(0));
+                int from = (int)Math.Min(start - 1, text.Length);
+                return text.Substring(from, (int)Math.Min(length, text.Length - from));
+            }
+            case "EXACT": return Needs(2, 2) && Arg(0) is var e0 and not CfError && Arg(1) is var e1 and not CfError ? ToText(e0) == ToText(e1) : CfError.Value;
+            case "CONCATENATE":
+            {
+                var builder = new System.Text.StringBuilder();
+                foreach (var arg in args)
+                {
+                    var v = Evaluate(arg, ctx);
+                    if (v is CfError) return v;
+                    builder.Append(ToText(v));
+                }
+                return builder.ToString();
+            }
+            case "SUBSTITUTE":
+            {
+                if (!Needs(3, 4) || Arg(0) is CfError) return CfError.Value;
+                string text = ToText(Arg(0)), oldText = ToText(Arg(1)), newText = ToText(Arg(2));
+                if (oldText.Length == 0) return text;
+                if (args.Count == 4)
+                {
+                    if (Num(3) is not { } instance || instance < 1) return CfError.Value;
+                    int at = -1;
+                    for (int k = 0; k < (int)instance; k++)
+                    {
+                        at = text.IndexOf(oldText, at + 1, StringComparison.Ordinal);
+                        if (at < 0) return text;
+                    }
+                    return text[..at] + newText + text[(at + oldText.Length)..];
+                }
+                return text.Replace(oldText, newText, StringComparison.Ordinal);
+            }
+            case "ISNA": return Needs(1, 1) ? Arg(0) is CfError { Code: "#N/A" } : CfError.Value;
+            case "ISERR": return Needs(1, 1) ? Arg(0) is CfError { Code: not "#N/A" } : CfError.Value;
+            case "ISLOGICAL": return Needs(1, 1) ? Arg(0) is bool : CfError.Value;
+            case "ISNONTEXT": return Needs(1, 1) ? Arg(0) is not string : CfError.Value;
+            case "NA": return CfError.NotAvailable;
+            case "SIGN": return Needs(1, 1) && Num(0) is { } sg ? (double)Math.Sign(sg) : CfError.Value;
+            case "SQRT": return Needs(1, 1) && Num(0) is { } sq ? sq < 0 ? CfError.Value : Math.Sqrt(sq) : CfError.Value;
+            case "POWER":
+            {
+                if (!Needs(2, 2) || Num(0) is not { } b || Num(1) is not { } e) return CfError.Value;
+                return BinaryValues("^", b, e);
+            }
+            case "ROUNDUP":
+            case "ROUNDDOWN":
+            case "TRUNC":
+            {
+                if (!Needs(1, call.Name == "TRUNC" ? 2 : 2) || Num(0) is not { } x) return CfError.Value;
+                double digits = args.Count > 1 ? Num(1) ?? double.NaN : 0;
+                if (double.IsNaN(digits)) return CfError.Value;
+                double scale = Math.Pow(10, Math.Truncate(Math.Clamp(digits, -15, 15)));
+                double scaled = x * scale;
+                double rounded = call.Name == "ROUNDUP" ? Math.Sign(scaled) * Math.Ceiling(Math.Abs(scaled) - 1e-9) : Math.Truncate(scaled);
+                return rounded / scale;
+            }
+            case "CEILING":
+            case "FLOOR":
+            {
+                if (!Needs(2, 2) || Num(0) is not { } x || Num(1) is not { } significance) return CfError.Value;
+                if (significance == 0) return 0.0;
+                if (x > 0 && significance < 0) return CfError.Value;
+                double steps = x / significance;
+                return (call.Name == "CEILING" ? Math.Ceiling(steps - 1e-12) : Math.Floor(steps + 1e-12)) * significance;
+            }
+            case "LARGE":
+            case "SMALL":
+            {
+                if (!Needs(2, 2) || Num(1) is not { } k || k < 1) return CfError.Value;
+                var numbers = new List<double>();
+                foreach (var v in Values(args[0], ctx))
+                {
+                    if (v is CfError) return v;
+                    if (v is double d) numbers.Add(d);
+                }
+                if (k > numbers.Count) return CfError.Value;
+                numbers.Sort();
+                return call.Name == "SMALL" ? numbers[(int)k - 1] : numbers[numbers.Count - (int)k];
+            }
+            case "RANK":
+            {
+                if (!Needs(2, 3) || Num(0) is not { } x) return CfError.Value;
+                bool ascending = args.Count == 3 && Num(2) is { } order && order != 0;
+                double rank = 1;
+                bool found = false;
+                foreach (var v in Values(args[1], ctx))
+                {
+                    if (v is not double d) continue;
+                    if (d == x) found = true;
+                    else if (ascending ? d < x : d > x) rank++;
+                }
+                return found ? rank : CfError.NotAvailable;
+            }
+            case "MEDIAN":
+            case "PRODUCT":
+            {
+                var numbers = new List<double>();
+                foreach (var arg in args)
+                    foreach (var v in Values(arg, ctx))
+                    {
+                        if (v is CfError) return v;
+                        if (v is double d) numbers.Add(d);
+                        else if (arg is not CfRange && v is not CfBlank && ToNumber(v) is { } direct) numbers.Add(direct);
+                    }
+                if (call.Name == "PRODUCT") return numbers.Count == 0 ? 0.0 : numbers.Aggregate(1.0, (a, b) => a * b);
+                if (numbers.Count == 0) return CfError.Value;
+                numbers.Sort();
+                int mid = numbers.Count / 2;
+                return numbers.Count % 2 == 1 ? numbers[mid] : (numbers[mid - 1] + numbers[mid]) / 2;
+            }
+            case "ROWS":
+            case "COLUMNS":
+                return Needs(1, 1) && ArrayOf(args[0], ctx) is { } shape ? (double)shape.GetLength(call.Name == "ROWS" ? 0 : 1) : CfError.Value;
             case "COUNTIF":
             {
                 if (!Needs(2, 2) || !(args[0] is CfRange || ReferenceOf(args[0], ctx) is CfRange)) return CfError.Value;
@@ -701,7 +950,7 @@ internal static class CfEvaluator
                 if (criteria is CfError) return criteria;
                 var matches = Criteria(criteria);
                 double count = 0;
-                foreach (var v in Values(args[0], ctx))
+                foreach (var v in ArrayOf(args[0], ctx)?.Cast<object>() ?? Values(args[0], ctx))
                 {
                     if (matches(v)) count++;
                 }
@@ -710,6 +959,15 @@ internal static class CfEvaluator
         }
         return CfError.Value;
     }
+
+    // ---- dates
+
+    private static DateTime BaseDate(bool date1904) => date1904 ? new DateTime(1904, 1, 1) : new DateTime(1899, 12, 30);
+
+    private static double SerialOf(DateTime date, bool date1904) => (date - BaseDate(date1904)).TotalDays;
+
+    private static DateTime? DateOf(double serial, bool date1904) =>
+        serial is >= 0 and < 2_958_466 ? BaseDate(date1904).AddDays(Math.Floor(serial)) : null;
 
     // ---- references and arrays
 
@@ -745,7 +1003,7 @@ internal static class CfEvaluator
             case CfCall { Name: "INDIRECT" } call when call.Args.Count is 1 or 2:
             {
                 if (Evaluate(call.Args[0], ctx) is not string text) return null;
-                if (call.Args.Count == 2 && !IsTrue(Evaluate(call.Args[1], ctx))) return null; // R1C1 text
+                if (call.Args.Count == 2 && !IsTrue(Evaluate(call.Args[1], ctx))) return ParseR1C1(text, ctx); // R1C1 text
                 CfExpr parsed;
                 try { parsed = CfParser.Parse(text); }
                 catch (NotSupportedException) { return null; }
@@ -755,6 +1013,35 @@ internal static class CfEvaluator
             }
             default: return null;
         }
+    }
+
+    /// <summary>
+    /// A reference in R1C1 notation (<c>R2C3</c>, <c>R[-1]C</c>, <c>RC[2]:R[3]C[2]</c>, optionally after a sheet name and <c>!</c>); the bracketed offsets
+    /// count from the cell the formula is evaluated for. Null when the text is no such reference.
+    /// </summary>
+    private static CfExpr? ParseR1C1(string text, CfContext ctx)
+    {
+        var t = text.Trim();
+        string? sheet = null;
+        int bang = t.LastIndexOf('!');
+        if (bang >= 0)
+        {
+            sheet = t[..bang];
+            if (sheet.Length >= 2 && sheet[0] == '\'' && sheet[^1] == '\'') sheet = sheet[1..^1].Replace("''", "'");
+            t = t[(bang + 1)..];
+        }
+        CfRef? One(string part)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(part, @"^R(?:(\d+)|\[(-?\d+)\])?C(?:(\d+)|\[(-?\d+)\])?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (!m.Success) return null;
+            int row = m.Groups[1].Success ? int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) - 1 : ctx.Row + (m.Groups[2].Success ? int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) : 0);
+            int column = m.Groups[3].Success ? int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture) - 1 : ctx.Column + (m.Groups[4].Success ? int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture) : 0);
+            if (row < 0 || column < 0 || row >= CellReference.MaxRows || column >= CellReference.MaxColumns) return null;
+            return new CfRef(row, true, column, true, sheet);
+        }
+        var parts = t.Split(':');
+        if (parts.Length == 1) return One(parts[0]);
+        return parts.Length == 2 && One(parts[0]) is { } from && One(parts[1]) is { } to ? new CfRange(from, to) : null;
     }
 
     /// <summary>The value at an absolute reference (the top-left cell of a range).</summary>
@@ -846,11 +1133,27 @@ internal static class CfEvaluator
         return found;
     }
 
+    /// <summary>A criterion with <c>*</c> (any run of characters) and <c>?</c> (any one character); <c>~</c> escapes either.</summary>
+    private static System.Text.RegularExpressions.Regex Wildcard(string text)
+    {
+        var pattern = new System.Text.StringBuilder("^");
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '~' && i + 1 < text.Length && text[i + 1] is '*' or '?' or '~') pattern.Append(System.Text.RegularExpressions.Regex.Escape(text[++i].ToString()));
+            else if (c == '*') pattern.Append(".*");
+            else if (c == '?') pattern.Append('.');
+            else pattern.Append(System.Text.RegularExpressions.Regex.Escape(c.ToString()));
+        }
+        return new System.Text.RegularExpressions.Regex(pattern.Append('$').ToString(), System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
     /// <summary>A COUNTIF criterion: a value, or text such as <c>"&gt;5"</c> / <c>"&lt;&gt;x"</c>; text compares without regard to case.</summary>
     private static Func<object, bool> Criteria(object criteria)
     {
         if (criteria is string text)
         {
+            if (text.Length == 0) return v => v is CfBlank || v is string { Length: 0 }; // "" matches blank cells and empty text
             foreach (var op in new[] { "<=", ">=", "<>", "<", ">", "=" })
             {
                 if (!text.StartsWith(op, StringComparison.Ordinal)) continue;
@@ -867,6 +1170,11 @@ internal static class CfEvaluator
             }
             if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var asNumber))
                 return v => v is double d && d == asNumber || v is string s && string.Equals(s, text, StringComparison.OrdinalIgnoreCase);
+            if (text.AsSpan().IndexOfAny('*', '?') >= 0)
+            {
+                var pattern = Wildcard(text);
+                return v => v is string s && pattern.IsMatch(s);
+            }
             return v => v is string s && string.Equals(s, text, StringComparison.OrdinalIgnoreCase);
         }
         return v => v is not CfBlank && v is not CfError && Rank(v) == Rank(criteria) && Compare(v, criteria) == 0;

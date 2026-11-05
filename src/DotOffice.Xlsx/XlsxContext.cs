@@ -858,10 +858,10 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     {
         var code = CodeOf(format);
         // Runs are kept only when the text is shown as it is; a text format (e.g. "@" with literals) rewrites it.
-        if (code == "General") return new Cell { Text = rich.Text, Runs = ResolveRuns(rich, format.Style.Font), Kind = CellValueKind.Text, Style = format.Style };
+        if (code == "General") return new Cell { Text = rich.Text, Runs = ResolveRuns(rich, format.Style.Font), Kind = CellValueKind.Text, Style = format.Style, IsEmptyString = rich.Text.Length == 0 };
         var text = rich.Text;
         var shown = NumberFormat.Parse(code, _palette).FormatText(text);
-        return new Cell { Text = shown.Text, Kind = CellValueKind.Text, Style = WithColor(format.Style, shown.Color) };
+        return new Cell { Text = shown.Text, Kind = CellValueKind.Text, Style = WithColor(format.Style, shown.Color), IsEmptyString = text.Length == 0 };
     }
 
     private Cell TextCell(string text, CellFormat format) => TextCell(new RichString(text, null), format);

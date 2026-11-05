@@ -145,6 +145,9 @@ public sealed record Cell
 
     public CellValueKind Kind { get; init; }
 
+    /// <summary>Whether the cell holds an empty string (a formula returning <c>""</c>, an empty shared string) rather than nothing: formulas see it as text, not as a blank.</summary>
+    public bool IsEmptyString { get; init; }
+
     /// <summary>The raw numeric value (before number formatting) of number cells; null for everything else.</summary>
     public double? Value { get; init; }
 

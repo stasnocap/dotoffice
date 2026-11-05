@@ -166,7 +166,7 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment horizontal=\"fill\"/></xf>" +                                                  // 31 fill alignment
         "</cellXfs>" +
-        "<dxfs count=\"6\">" +
+        "<dxfs count=\"7\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
         "<dxf><font><color rgb=\"FF006100\"/></font><fill><patternFill><bgColor rgb=\"FFC6EFCE\"/></patternFill></fill></dxf>" +                       // 1 good
         "<dxf><fill><patternFill><bgColor rgb=\"FFDDEBF7\"/></patternFill></fill></dxf>" +                                                              // 2 zebra
@@ -174,6 +174,7 @@ internal static class ShowcaseXlsx
         "<border><bottom style=\"thin\"><color rgb=\"FF9C5700\"/></bottom></border></dxf>" +                                                          // 3 top
         "<dxf><font><b/><i/><u/><color rgb=\"FFC00000\"/></font><numFmt numFmtId=\"167\" formatCode=\"0.0&quot; (!)&quot;\"/></dxf>" +                  // 4 duplicate
         "<dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFFD966\"/></patternFill></fill></dxf>" +                                                  // 5 time period
+        "<dxf><font><color rgb=\"FF403151\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></dxf>" +                      // 6 lavender: the function showcase
         "</dxfs>" +
         // The workbook's own palette: entries 0–9 as in Excel, entry 10 (what [Color3] means) purple instead of red.
         "<colors><indexedColors><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FFFF0000\"/><rgbColor rgb=\"FF00FF00\"/><rgbColor rgb=\"FF0000FF\"/>" +
@@ -1147,11 +1148,13 @@ internal static class ShowcaseXlsx
         var rows = new StringBuilder();
         rows.Append(Row(1, Str("A1", "Conditional formatting with lookups, whole columns and an x14-only data bar", Bold)));
         rows.Append(Row(3, Str("A3", "Name: repeats", Header) + Str("B3", "Score: x14 bar", Header) + Str("C3", "VLOOKUP > 60", Header) + Str("D3", "Name total > 100", Header) +
-                           Str("E3", "INDEX/MATCH", Header) + Str("F3", "OFFSET > 60", Header) + Str("G3", "INDIRECT < 30", Header)));
+                           Str("E3", "INDEX/MATCH", Header) + Str("F3", "OFFSET > 60", Header) + Str("G3", "INDIRECT < 30", Header) +
+                           Str("H3", "SUMIF > 100", Header) + Str("I3", "COUNTIFS = 1", Header) + Str("J3", "TEXT = 35", Header) + Str("K3", "INDIRECT R1C1 < 30", Header)));
         for (int i = 0; i < names.Length; i++)
         {
             int r = 4 + i;
-            rows.Append(Row(r, Str($"A{r}", names[i]) + Num($"B{r}", scores[i]) + Num($"C{r}", scores[i]) + Num($"D{r}", scores[i]) + Num($"E{r}", scores[i]) + Num($"F{r}", scores[i]) + Num($"G{r}", scores[i])));
+            rows.Append(Row(r, Str($"A{r}", names[i]) + Num($"B{r}", scores[i]) + Num($"C{r}", scores[i]) + Num($"D{r}", scores[i]) + Num($"E{r}", scores[i]) + Num($"F{r}", scores[i]) + Num($"G{r}", scores[i]) +
+                           Num($"H{r}", scores[i]) + Num($"I{r}", scores[i]) + Num($"J{r}", scores[i]) + Num($"K{r}", scores[i])));
         }
         rows.Append(Row(12, Str("A12", "Repeated names (whole-column COUNTIF), scores of repeated names add up, Dee's score is looked up by MATCH.")));
         string Rule(string sqref, int dxf, int priority, string formula) =>
@@ -1163,12 +1166,17 @@ internal static class ShowcaseXlsx
         tail.Append(Rule("E4:E10", 1, 4, "INDEX($B$4:$B$10,MATCH(\"Dee\",$A$4:$A$10,0))=B4"));
         tail.Append(Rule("F4:F10", 0, 5, "OFFSET(F4,0,-4)>60"));
         tail.Append(Rule("G4:G10", 5, 6, "INDIRECT(\"B\"&ROW())<30"));
+        // The functions of milestone 6, all in the lavender format: Ann and Bob (the repeated names) total over 100 only for Ann (112) and Bob (101).
+        tail.Append(Rule("H4:H10", 6, 8, "SUMIF($A$4:$A$10,$A4,$B$4:$B$10)>100"));
+        tail.Append(Rule("I4:I10", 6, 9, "COUNTIFS($A$4:$A$10,$A4,$B$4:$B$10,\">50\")=1"));
+        tail.Append(Rule("J4:J10", 6, 10, "TEXT(J4,\"0\")=\"35\""));
+        tail.Append(Rule("K4:K10", 6, 11, "INDIRECT(\"RC2\",FALSE)<30"));
         tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
         tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
                     "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" priority=\"7\" id=\"{CCCCCCCC-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\" border=\"1\">" +
                     "<x14:cfvo type=\"num\"><xm:f>0</xm:f></x14:cfvo><x14:cfvo type=\"num\"><xm:f>100</xm:f></x14:cfvo><x14:borderColor rgb=\"FF2E75B6\"/></x14:dataBar></x14:cfRule><xm:sqref>B4:B10</xm:sqref></x14:conditionalFormatting>" +
                     "</x14:conditionalFormattings></ext></extLst>");
-        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"7\" width=\"18\" customWidth=\"1\"/></cols>";
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"11\" width=\"18\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
     }
 

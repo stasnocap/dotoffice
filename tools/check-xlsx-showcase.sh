@@ -155,6 +155,8 @@ for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Conditional lookups" ] &
 if grep -E "warning xlsx\.conditional" "$log"; then fail "the conditional lookups should not warn"; fi
 qpdf --qdf --object-streams=disable "$pdf" lookups-qdf.pdf
 grep -aq "^0.1804 0.4588 0.7137 RG$" lookups-qdf.pdf || fail "the x14-only data bar border color (2E75B6) is missing"
+# SUMIF, COUNTIFS, TEXT and R1C1 INDIRECT rules use the lavender fill (E4DFEC); Ann, Bob and one text match are filled in four columns.
+[ "$(grep -ac '^0.8941 0.8745 0.9255 rg$' lookups-qdf.pdf || true)" -ge 6 ] || fail "the SUMIF/COUNTIFS/TEXT/INDIRECT rules should fill their cells in lavender"
 
 # Shapes: drawn as vector content on a single page (themed blue fill, group parts, a dashed outline), with their text, and not reported.
 shape_pages=0; shape_page=0
