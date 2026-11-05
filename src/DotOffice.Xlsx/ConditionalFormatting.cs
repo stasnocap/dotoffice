@@ -23,6 +23,7 @@ internal sealed class CfRule
 
     public string? Operator { get; init; }
     public string? Text { get; init; }
+    public string? TimePeriod { get; init; }
     public List<CfExpr> Formulas { get; } = [];
 
     public int Rank { get; init; } = 10;
@@ -142,7 +143,7 @@ internal static class ConditionalFormatting
         XElement? Child(XElement? parent, string name) => parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name);
 
         bool known = type is "cellIs" or "expression" or "top10" or "aboveAverage" or "duplicateValues" or "uniqueValues"
-                     or "colorScale" or "dataBar" or "iconSet" || TextTypes.Contains(type);
+                     or "colorScale" or "dataBar" or "iconSet" or "timePeriod" || TextTypes.Contains(type);
         if (!known) throw new NotSupportedException("rule type not supported");
 
         int dxf = Int("dxfId", -1);
@@ -159,6 +160,7 @@ internal static class ConditionalFormatting
             OriginColumn = ranges.Min(r => r.FirstColumn),
             Operator = (string?)rule.Attribute("operator"),
             Text = (string?)rule.Attribute("text"),
+            TimePeriod = (string?)rule.Attribute("timePeriod"),
             Rank = Math.Max(Int("rank", 10), 1),
             Percent = Flag("percent", false),
             Bottom = Flag("bottom", false),
@@ -191,6 +193,10 @@ internal static class ConditionalFormatting
                 break;
             case "containsText" or "notContainsText" or "beginsWith" or "endsWith":
                 if (result.Text is null) throw new NotSupportedException("missing text");
+                break;
+            case "timePeriod":
+                if (result.TimePeriod is not ("today" or "yesterday" or "tomorrow" or "last7Days" or "thisWeek" or "lastWeek" or "nextWeek" or "thisMonth" or "lastMonth" or "nextMonth"))
+                    throw new NotSupportedException("missing or unknown time period");
                 break;
             case "colorScale":
             {
@@ -253,7 +259,7 @@ internal static class ConditionalFormatting
     // ------------------------------------------------------------------ applying
 
     /// <summary>Everything an evaluation needs besides the sheet.</summary>
-    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904, IReadOnlyList<Color?>? Palette = null);
+    public sealed record Environment(IReadOnlyList<Dxf> Dxfs, bool Date1904, IReadOnlyList<Color?>? Palette = null, DateTime? Today = null);
 
     /// <summary>What the rules decided for one cell; the first rule (highest priority) to set a property keeps it.</summary>
     private sealed class Outcome
@@ -369,7 +375,7 @@ internal static class ConditionalFormatting
                     ApplyScale(rule, value, StatsOf(rule), ctx, outcome);
                     continue;
                 }
-                if (!Matches(rule, cell, ctx, StatsOf, CountsOf)) continue;
+                if (!Matches(rule, cell, ctx, env, StatsOf, CountsOf)) continue;
                 outcome ??= new Outcome();
                 if (rule.DxfId is { } id && id >= 0 && id < env.Dxfs.Count) outcome.Add(env.Dxfs[id]);
                 if (rule.StopIfTrue) break;
@@ -440,7 +446,7 @@ internal static class ConditionalFormatting
         _ => null,
     };
 
-    private static bool Matches(CfRule rule, Cell? cell, CfContext ctx, Func<CfRule, Stats> statsOf, Func<CfRule, Dictionary<string, int>> countsOf)
+    private static bool Matches(CfRule rule, Cell? cell, CfContext ctx, Environment env, Func<CfRule, Stats> statsOf, Func<CfRule, Dictionary<string, int>> countsOf)
     {
         var value = ValueOf(cell);
         switch (rule.Type)
@@ -513,12 +519,41 @@ internal static class ConditionalFormatting
                     _ => text.EndsWith(needle, StringComparison.OrdinalIgnoreCase),
                 };
             }
+            case "timePeriod":
+            {
+                if (value is not double serial || double.IsNaN(serial)) return false;
+                var baseDate = env.Date1904 ? new DateTime(1904, 1, 1) : new DateTime(1899, 12, 30);
+                if (Math.Floor(serial) is var day && (day < 0 || day > 2_958_465)) return false;
+                return InTimePeriod(rule.TimePeriod!, baseDate.AddDays(Math.Floor(serial)), (env.Today ?? DateTime.Today).Date);
+            }
             case "containsBlanks": return value is CfBlank || value is string s0 && s0.Trim().Length == 0;
             case "notContainsBlanks": return !(value is CfBlank || value is string s1 && s1.Trim().Length == 0);
             case "containsErrors": return value is CfError;
             case "notContainsErrors": return value is not CfError;
         }
         return false;
+    }
+
+    /// <summary>Whether a date falls in a time period relative to today; weeks run from Sunday to Saturday, as in Excel.</summary>
+    private static bool InTimePeriod(string period, DateTime date, DateTime today)
+    {
+        var sunday = today.AddDays(-(int)today.DayOfWeek);
+        bool Month(int offset) { var m = new DateTime(today.Year, today.Month, 1).AddMonths(offset); return date.Year == m.Year && date.Month == m.Month; }
+        bool Week(int offset) { var start = sunday.AddDays(7 * offset); return date >= start && date < start.AddDays(7); }
+        return period switch
+        {
+            "today" => date == today,
+            "yesterday" => date == today.AddDays(-1),
+            "tomorrow" => date == today.AddDays(1),
+            "last7Days" => date > today.AddDays(-7) && date <= today,
+            "thisWeek" => Week(0),
+            "lastWeek" => Week(-1),
+            "nextWeek" => Week(1),
+            "thisMonth" => Month(0),
+            "lastMonth" => Month(-1),
+            "nextMonth" => Month(1),
+            _ => false,
+        };
     }
 
     // ---- color scales, data bars, icon sets

@@ -104,7 +104,9 @@ qpdf --qdf --object-streams=disable "$pdf" conditional-qdf.pdf
 zebra=$(grep -ac '^0.8667 0.9216 0.9686 rg$' conditional-qdf.pdf || true)
 [ "$zebra" -ge 5 ] || fail "expected five zebra stripes from the expression rule, found $zebra"
 bad=$(grep -ac '^1 0.7804 0.8078 rg$' conditional-qdf.pdf || true)
-[ "$bad" -ge 4 ] || fail "expected four cellIs fills, found $bad"
+[ "$bad" -ge 5 ] || fail "expected four cellIs fills plus the tomorrow cell, found $bad"
+yellow=$(grep -ac '^1 0.851 0.4 rg$' conditional-qdf.pdf || true)
+[ "$yellow" -ge 1 ] || fail "the time-period rule for today should have filled a cell (found $yellow)"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
 

@@ -133,13 +133,14 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"170\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 29 # ?/8
         "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
         "</cellXfs>" +
-        "<dxfs count=\"5\">" +
+        "<dxfs count=\"6\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
         "<dxf><font><color rgb=\"FF006100\"/></font><fill><patternFill><bgColor rgb=\"FFC6EFCE\"/></patternFill></fill></dxf>" +                       // 1 good
         "<dxf><fill><patternFill><bgColor rgb=\"FFDDEBF7\"/></patternFill></fill></dxf>" +                                                              // 2 zebra
         "<dxf><font><b/><color rgb=\"FF9C5700\"/></font><fill><patternFill><bgColor rgb=\"FFFFEB9C\"/></patternFill></fill>" +
         "<border><bottom style=\"thin\"><color rgb=\"FF9C5700\"/></bottom></border></dxf>" +                                                          // 3 top
         "<dxf><font><b/><i/><u/><color rgb=\"FFC00000\"/></font><numFmt numFmtId=\"167\" formatCode=\"0.0&quot; (!)&quot;\"/></dxf>" +                  // 4 duplicate
+        "<dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFFD966\"/></patternFill></fill></dxf>" +                                                  // 5 time period
         "</dxfs>" +
         // The workbook's own palette: entries 0–9 as in Excel, entry 10 (what [Color3] means) purple instead of red.
         "<colors><indexedColors><rgbColor rgb=\"FF000000\"/><rgbColor rgb=\"FFFFFFFF\"/><rgbColor rgb=\"FFFF0000\"/><rgbColor rgb=\"FF00FF00\"/><rgbColor rgb=\"FF0000FF\"/>" +
@@ -399,6 +400,12 @@ internal static class ShowcaseXlsx
         }
         rows.Append(Row(15, Str("A15", "Priority, stopIfTrue and relative formulas decide which format wins; fills, fonts, borders and number formats come from the rules.")));
 
+        // Time periods are relative to the day the file is converted, so the dates are generated from today.
+        double today = (DateTime.Today - new DateTime(1899, 12, 30)).TotalDays;
+        rows.Append(Row(17, Str("A17", "Today", Header) + Str("B17", "Yesterday", Header) + Str("C17", "Tomorrow", Header) + Str("D17", "Three weeks ago", Header) + Str("E17", "Next month", Header)));
+        rows.Append(Row(18, Num("A18", today, IsoDate) + Num("B18", today - 1, IsoDate) + Num("C18", today + 1, IsoDate) + Num("D18", today - 21, IsoDate) + Num("E18", today + 40, IsoDate)));
+        rows.Append(Row(19, Str("A19", "Time-period rules: only today, yesterday and tomorrow are highlighted,.")));
+
         const string Percents = "<cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/>";
         const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
         var tail = new StringBuilder();
@@ -417,6 +424,8 @@ internal static class ShowcaseXlsx
         tail.Append($"<conditionalFormatting sqref=\"I4:I13\"><cfRule type=\"iconSet\" priority=\"10\"><iconSet iconSet=\"3Arrows\">{Percents}</iconSet></cfRule></conditionalFormatting>");
         tail.Append($"<conditionalFormatting sqref=\"J4:J13\"><cfRule type=\"iconSet\" priority=\"11\"><iconSet iconSet=\"3TrafficLights1\">{Percents}</iconSet></cfRule></conditionalFormatting>");
         tail.Append($"<conditionalFormatting sqref=\"K4:K13\"><cfRule type=\"iconSet\" priority=\"12\"><iconSet iconSet=\"3Symbols\">{Percents}</iconSet></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"A18:E18\"><cfRule type=\"timePeriod\" timePeriod=\"today\" dxfId=\"5\" priority=\"13\"/>" +
+                    "<cfRule type=\"timePeriod\" timePeriod=\"yesterday\" dxfId=\"1\" priority=\"14\"/><cfRule type=\"timePeriod\" timePeriod=\"tomorrow\" dxfId=\"0\" priority=\"15\"/></conditionalFormatting>");
         tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
         tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
                     "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" id=\"{AAAAAAAA-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\">" +

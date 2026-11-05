@@ -37,7 +37,7 @@ public class XlsxConverterTests
     public async Task Surfaces_reader_warnings()
     {
         var warnings = new ConversionWarningList();
-        await Convert(new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"1\"/></conditionalFormatting>"), warnings);
+        await Convert(new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"unknownKind\" priority=\"1\"/></conditionalFormatting>"), warnings);
         Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.conditional-formatting");
     }
 

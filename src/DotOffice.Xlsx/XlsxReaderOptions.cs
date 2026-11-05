@@ -8,6 +8,11 @@ public sealed class XlsxReaderOptions
     /// <summary>Receives warnings about unsupported or malformed content.</summary>
     public IConversionWarningSink? Warnings { get; init; }
 
+    /// <summary>
+    /// The date that "today" means for rules that depend on it (conditional formatting by time period); the current date when null.
+    /// </summary>
+    public DateTime? Today { get; init; }
+
     /// <summary>Maximum total bytes decompressed from the package (zip bomb guard).</summary>
     public long MaxTotalUncompressedSize { get; init; } = 512L * 1024 * 1024;
 

@@ -79,7 +79,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             ReadDrawing(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
-            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette),
+            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904, _palette, (Options.Today ?? DateTime.Today).Date),
                 message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
             workbook.Sheets.Add(sheet);
         }

@@ -18,10 +18,10 @@ public class XlsxConditionalFormattingTests
         return rows.ToString();
     }
 
-    private static Worksheet Read(string rows, string tail, string[]? dxfs = null, ConversionWarningList? warnings = null, string? definedNames = null)
+    private static Worksheet Read(string rows, string tail, string[]? dxfs = null, ConversionWarningList? warnings = null, string? definedNames = null, DateTime? today = null)
     {
         var builder = new XlsxBuilder { Styles = StylesWithDxfs(dxfs ?? [Dxf(Red), Dxf(Green)]), DefinedNames = definedNames }.AddSheet("S", rows, tail: tail);
-        return XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0];
+        return XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings, Today = today }).Sheets[0];
     }
 
     private static Color Hex(string hex) => Color.TryParseHex(hex)!.Value;
@@ -415,13 +415,13 @@ public class XlsxConditionalFormattingTests
         Read(Column("A", 1, 2), ConditionalFormatting("A1:A2", CellIs("greaterThan", "1", 1, 0), DataBar(2)), warnings: warnings);
         Assert.Empty(warnings.Warnings);
 
-        var tail = ConditionalFormatting("A1", CfRule("timePeriod", 1, "timePeriod=\"today\"", "", 0)) +
+        var tail = ConditionalFormatting("A1", CfRule("unknownKind", 1, "", "", 0)) +
                    ConditionalFormatting("A2", IconSet(2, "5Arrows", Thresholds(0, 20, 40, 60, 80))) +
                    ConditionalFormatting("A1:A2", Expression("SUMPRODUCT(A1:A2)>1", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
         var sheet = Read(Column("A", 1, 2), tail, warnings: warnings);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.conditional-formatting", warning.Code);
-        Assert.Contains("timePeriod", warning.Message);
+        Assert.Contains("unknownKind", warning.Message);
         Assert.Contains("5Arrows", warning.Message);
         Assert.Contains("expression", warning.Message);
         // The supported rule still applies.
@@ -444,5 +444,33 @@ public class XlsxConditionalFormattingTests
     {
         var sheet = Read(Column("A", 5), ConditionalFormatting("A1", CfRule("cellIs", 1, "operator=\"greaterThan\"", "<formula>1</formula>", 99)));
         Assert.Null(sheet.Cells[(0, 0)].Style.Fill);
+    }
+
+    [Theory]
+    [InlineData("today", "A3")]
+    [InlineData("yesterday", "A2")]
+    [InlineData("tomorrow", "A4")]
+    [InlineData("last7Days", "A1,A2,A3,A6,A9")]           // May 9 .. May 15
+    [InlineData("thisWeek", "A2,A3,A4,A5")]               // Sunday May 12 .. Saturday May 18
+    [InlineData("lastWeek", "A1,A6,A9")]                  // Sunday May 5 .. Saturday May 11
+    [InlineData("nextWeek", "A7")]                        // May 19 .. May 25
+    [InlineData("thisMonth", "A1,A2,A3,A4,A5,A6,A7,A9")]
+    [InlineData("lastMonth", "A8")]
+    [InlineData("nextMonth", "A10")]
+    public void Time_period_rules_are_relative_to_today(string period, string expected)
+    {
+        // Today is Wednesday 2024-05-15. Rows: 1 = May 10, 2 = May 14, 3 = May 15, 4 = May 16, 5 = May 18 (Sat), 6 = May 11 (Sat),
+        // 7 = May 19 (Sun), 8 = April 30, 9 = May 9, 10 = June 1.
+        static double Serial(int month, int day) => (new DateTime(2024, month, day) - new DateTime(1899, 12, 30)).TotalDays;
+        var sheet = Read(Column("A", Serial(5, 10), Serial(5, 14), Serial(5, 15), Serial(5, 16), Serial(5, 18), Serial(5, 11), Serial(5, 19), Serial(4, 30), Serial(5, 9), Serial(6, 1)),
+            ConditionalFormatting("A1:A10", CfRule("timePeriod", 1, $" timePeriod=\"{period}\"", dxfId: 0)), today: new DateTime(2024, 5, 15));
+        Assert.Equal(expected, FilledRows(sheet, Red));
+    }
+
+    [Fact]
+    public void Time_period_rules_ignore_text_and_blanks()
+    {
+        var sheet = Read(Row(1, Inline("A1", "today")), ConditionalFormatting("A1:A2", CfRule("timePeriod", 1, " timePeriod=\"today\"", dxfId: 0)), today: new DateTime(2024, 5, 15));
+        Assert.Empty(FilledRows(sheet));
     }
 }
