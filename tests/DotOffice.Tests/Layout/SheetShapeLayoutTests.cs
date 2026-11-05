@@ -266,4 +266,59 @@ public class SheetShapeLayoutTests
         Assert.DoesNotContain(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Blue);
         Assert.Contains(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Color.Black);
     }
+
+    [Fact]
+    public void A_blurred_shadow_is_nine_faint_copies_that_add_up_to_its_opacity()
+    {
+        var page = Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4, Blur: 6) });
+        var copies = page.Items.OfType<PushItem>().Where(p => p.Opacity < 1).ToList();
+        Assert.Equal(9, copies.Count);
+        double each = copies[0].Opacity;
+        Assert.Equal(0.5, 1 - Math.Pow(1 - each, 9), 6);
+        Assert.All(copies, c => Assert.Equal(each, c.Opacity, 9));
+        // The copies are spread over the blur radius (3 points either side) around the shadow's place.
+        var xs = copies.Select(c => c.CenterX).Distinct().Order().ToList();
+        Assert.Equal(3, xs.Count);
+        Assert.Equal(3 * 2, xs[^1] - xs[0], 6);
+        Assert.Single(Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4) }).Items.OfType<PushItem>(), p => p.Opacity < 1);
+    }
+
+    [Fact]
+    public void A_picture_fill_is_the_image_over_the_frame_cut_at_the_outline()
+    {
+        var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");
+        var rectangle = Page(Shape(fill: Red) with { FillImage = picture }).Items.OfType<ImageItem>().Single();
+        Assert.Null(rectangle.Clip);
+        var plain = Page(Shape(fill: Red)).Items.OfType<PolygonItem>().Single().Points;
+        Assert.Equal((plain.Min(p => p.X), plain.Min(p => p.Y)), (rectangle.X, rectangle.Y));
+        var diamond = Page(Shape(ShapeGeometry.Diamond, Red) with { FillImage = picture }).Items.OfType<ImageItem>().Single();
+        Assert.Equal(4, diamond.Clip!.Count);
+        Assert.DoesNotContain(Page(Shape(fill: Red) with { FillImage = picture }).Items.OfType<PolygonItem>(), p => p.Fill == Red);
+        // A gradient wins over a picture; a plain shape has no image.
+        Assert.Empty(Page(Shape(fill: Red) with { FillImage = picture, FillGradient = new GradientFill { Kind = GradientKind.Linear, Stops = RedBlue } }).Items.OfType<ImageItem>());
+    }
+
+    [Fact]
+    public void Rectangular_path_gradients_are_marked_for_concentric_rectangles()
+    {
+        GradientItem Draw(bool rectangular) => Page(Shape(ShapeGeometry.Ellipse, Red) with
+        {
+            FillGradient = new GradientFill { Kind = GradientKind.Path, Rectangular = rectangular, Left = 0.5, Right = 0.5, Top = 0.5, Bottom = 0.5, Stops = RedBlue },
+        }).Items.OfType<GradientItem>().Single();
+        Assert.True(Draw(true).Rectangular);
+        Assert.False(Draw(false).Rectangular);
+        Assert.False(Page(Shape(fill: Red) with { FillGradient = new GradientFill { Kind = GradientKind.Linear, Stops = RedBlue } }).Items.OfType<GradientItem>().Single().Rectangular);
+    }
+
+    [Fact]
+    public void A_picture_fill_clip_scales_with_the_sheet()
+    {
+        var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");
+        var item = Page(Shape(ShapeGeometry.Ellipse, Red) with { FillImage = picture }, sheet => sheet.PageSetup.Scale = 0.5).Items.OfType<ImageItem>().Single();
+        Assert.Equal(100 * 0.5, item.Width, 6);
+        // The clip polygon lies on the (scaled) image frame, not on the unscaled one.
+        Assert.InRange(item.Clip!.Min(p => p.X), item.X - 1e-6, item.X + 1);
+        Assert.InRange(item.Clip!.Max(p => p.X), item.X + item.Width - 1, item.X + item.Width + 1e-6);
+        Assert.InRange(item.Clip!.Max(p => p.Y), item.Y + item.Height - 1, item.Y + item.Height + 1e-6);
+    }
 }

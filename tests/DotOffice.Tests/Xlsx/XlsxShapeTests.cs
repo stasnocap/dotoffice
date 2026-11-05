@@ -303,4 +303,38 @@ public class XlsxShapeTests
         // An empty effect list on the shape switches the style's shadow off.
         Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + "<a:effectLst/>", string.Format(Accent1Style, 1, 3))).Shadow);
     }
+
+    [Fact]
+    public void A_shadow_keeps_its_blur_and_a_blur_without_distance_still_counts()
+    {
+        string Shadow(string attributes) => $"<a:effectLst><a:outerShdw {attributes}><a:srgbClr val=\"000000\"/></a:outerShdw></a:effectLst>";
+        Assert.Equal(4.0, ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + Shadow("blurRad=\"50800\" dist=\"38100\" dir=\"2700000\""))).Shadow!.Blur);
+        var glow = ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + Shadow("blurRad=\"127000\" dist=\"0\""))).Shadow!;
+        Assert.Equal((10.0, 0.0), (glow.Blur, glow.Dx));
+        Assert.Null(ReadOne(Sp("<a:prstGeom prst=\"rect\"/>" + SolidRed + Shadow("dist=\"0\""))).Shadow);
+    }
+
+    [Fact]
+    public void A_picture_fill_loads_its_image_and_a_rect_path_gradient_keeps_its_shape()
+    {
+        var picture = ReadOne(Sp("<a:prstGeom prst=\"ellipse\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"));
+        Assert.Equal(ImageFormat.Png, picture.FillImage!.Format);
+        Assert.Null(picture.FillGradient);
+
+        const string Stops = "<a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"FF0000\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"0000FF\"/></a:gs></a:gsLst>";
+        GradientFill Gradient(string path) => ReadOne(Sp($"<a:prstGeom prst=\"rect\"/><a:gradFill>{Stops}<a:path path=\"{path}\"><a:fillToRect l=\"50000\" t=\"50000\" r=\"50000\" b=\"50000\"/></a:path></a:gradFill>")).FillGradient!;
+        Assert.True(Gradient("rect").Rectangular);
+        Assert.False(Gradient("circle").Rectangular);
+    }
+
+    [Fact]
+    public void A_picture_fill_without_its_image_leaves_it_out_and_a_tile_is_noted()
+    {
+        var (sheet, warnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId9\"/><a:stretch/></a:blipFill><a:ln><a:solidFill><a:srgbClr val=\"0000FF\"/></a:solidFill></a:ln>")));
+        Assert.Null(Assert.Single(sheet.Shapes).FillImage);
+        Assert.Contains("picture fill whose image is missing", Assert.Single(warnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+        var (tiled, tileWarnings) = Read(OneCellAnchor(1, 1, 100, 50, Sp("<a:prstGeom prst=\"rect\"/><a:blipFill><a:blip r:embed=\"rId1\"/><a:tile tx=\"0\" ty=\"0\" sx=\"100000\" sy=\"100000\"/></a:blipFill>")));
+        Assert.NotNull(Assert.Single(tiled.Shapes).FillImage);
+        Assert.Contains("tiled picture fills are stretched", Assert.Single(tileWarnings.Warnings, w => w.Code == "xlsx.drawing-approximated").Message);
+    }
 }

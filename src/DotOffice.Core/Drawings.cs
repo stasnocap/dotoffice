@@ -89,8 +89,11 @@ public enum HatchKind { Horizontal, Vertical, UpDiagonal, DownDiagonal, Cross, D
 /// </summary>
 public sealed record ShapePattern(HatchKind Kind, Color Foreground, Color Background, double Spacing = 6, double Weight = 1, double Coverage = 0.5);
 
-/// <summary>A shadow drawn as a copy of the shape moved by (<paramref name="Dx"/>, <paramref name="Dy"/>) points, painted with <paramref name="Opacity"/>.</summary>
-public sealed record ShapeShadow(Color Color, double Opacity, double Dx, double Dy);
+/// <summary>
+/// A shadow drawn as a copy of the shape moved by (<paramref name="Dx"/>, <paramref name="Dy"/>) points, painted with <paramref name="Opacity"/>;
+/// with a <paramref name="Blur"/> radius (points) it is several translucent copies spread around that place.
+/// </summary>
+public sealed record ShapeShadow(Color Color, double Opacity, double Dx, double Dy, double Blur = 0);
 
 /// <summary>A shape, text box or line of a drawing.</summary>
 public sealed record SheetShape : SheetObject
@@ -108,6 +111,9 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>A pattern fill (hatching); drawn instead of <see cref="Fill"/>, which holds its foreground color.</summary>
     public ShapePattern? FillPattern { get; init; }
+
+    /// <summary>A picture fill, stretched over the shape's frame and cut at its outline; drawn instead of <see cref="Fill"/>.</summary>
+    public ImageData? FillImage { get; init; }
 
     /// <summary>An outer shadow; null means none.</summary>
     public ShapeShadow? Shadow { get; init; }

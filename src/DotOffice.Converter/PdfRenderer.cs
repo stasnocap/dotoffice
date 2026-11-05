@@ -130,7 +130,43 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     double half = (Math.Abs(gradient.Width * dx) + Math.Abs(gradient.Height * dy)) / 2;
                     double cx = gradient.X + gradient.Width / 2, cy = gradient.Y + gradient.Height / 2;
                     var stops = gradient.Stops.Select(s => new ShadingStop(s.Position, s.Color.R / 255.0, s.Color.G / 255.0, s.Color.B / 255.0)).ToList();
-                    PdfShading shading;
+                    PdfShading? shading = null;
+                    if (gradient.Radial && gradient.Rectangular)
+                    {
+                        // Concentric rectangles from the focus out to the box's edges: stop 0 at the focus, the last stop at the edges.
+                        double fx = gradient.X + gradient.Width * gradient.FocusX, fy = gradient.Y + gradient.Height * gradient.FocusY;
+                        double toLeft = fx - gradient.X, toRight = gradient.X + gradient.Width - fx, toTop = fy - gradient.Y, toBottom = gradient.Y + gradient.Height - fy;
+                        var fillStops = gradient.Stops;
+                        Color At(double t)
+                        {
+                            if (t <= fillStops[0].Position) return fillStops[0].Color;
+                            for (int k = 1; k < fillStops.Count; k++)
+                                if (t <= fillStops[k].Position)
+                                {
+                                    double span = Math.Max(fillStops[k].Position - fillStops[k - 1].Position, 1e-9), u = (t - fillStops[k - 1].Position) / span;
+                                    return fillStops[k - 1].Color.Blend(fillStops[k].Color, u);
+                                }
+                            return fillStops[^1].Color;
+                        }
+                        canvas.SaveState();
+                        if (gradient.Clip is { Count: >= 3 } rectClip)
+                        {
+                            canvas.MoveTo(rectClip[0].X, h - rectClip[0].Y);
+                            for (int k = 1; k < rectClip.Count; k++) canvas.LineTo(rectClip[k].X, h - rectClip[k].Y);
+                            canvas.ClosePath().Clip();
+                        }
+                        else canvas.Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip();
+                        const int bands = 48;
+                        for (int band = bands; band >= 1; band--)
+                        {
+                            double t = (double)band / bands, color = (band - 0.5) / bands;
+                            var c = At(color);
+                            canvas.SetFillColor(c.R / 255.0, c.G / 255.0, c.B / 255.0)
+                                  .Rectangle(fx - toLeft * t, h - (fy + toBottom * t), (toLeft + toRight) * t, (toTop + toBottom) * t).Fill();
+                        }
+                        canvas.RestoreState();
+                        break;
+                    }
                     if (gradient.Radial)
                     {
                         // Blends outwards from the focus to the farthest corner.
@@ -147,7 +183,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                         canvas.ClosePath().Clip();
                     }
                     else canvas.Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip();
-                    canvas.PaintShading(shading).RestoreState();
+                    canvas.PaintShading(shading!).RestoreState();
                     break;
                 }
                 case RectItem rect:
@@ -184,7 +220,16 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     break;
                 case ImageItem image:
                     if (Image(image.Image) is { } pdfImage)
+                    {
+                        if (image.Clip is { Count: >= 3 } imageClip)
+                        {
+                            canvas.SaveState().MoveTo(imageClip[0].X, h - imageClip[0].Y);
+                            for (int k = 1; k < imageClip.Count; k++) canvas.LineTo(imageClip[k].X, h - imageClip[k].Y);
+                            canvas.ClosePath().Clip();
+                        }
                         canvas.DrawImage(pdfImage, image.X, h - image.Y - image.Height, image.Width, image.Height);
+                        if (image.Clip is { Count: >= 3 }) canvas.RestoreState();
+                    }
                     else
                     {
                         // Unsupported format: keep the layout box visible.

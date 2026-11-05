@@ -22,16 +22,24 @@ public sealed partial class SheetLayoutEngine
         bool flipped = shape.FlipH || shape.FlipV;
         if (shape.Shadow is { } shadow)
         {
-            // The shadow is the shape's outline in the shadow color, moved and translucent (blur is not drawn).
-            bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null;
+            // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 3 x 3 grid of such copies spread
+            // over the blur radius, each so faint that the middle, where they all overlap, ends up with the shadow's opacity.
+            bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null || shape.FillImage is not null;
             var dark = shape with
             {
-                Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, Shadow = null,
+                Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, FillImage = null, Shadow = null,
                 LineColor = shape.LineColor is null ? null : shadow.Color, Paragraphs = [],
             };
-            items.Add(new PushItem(null, 0, cx + shadow.Dx, cy + shadow.Dy, shape.FlipH, shape.FlipV, shadow.Opacity));
-            EmitOutline(dark, x + shadow.Dx, y + shadow.Dy, width, height, items);
-            items.Add(new PopItem());
+            bool soft = shadow.Blur >= 0.5;
+            double spread = shadow.Blur / 2, copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / 9) : shadow.Opacity;
+            for (int gx = soft ? -1 : 0; gx <= (soft ? 1 : 0); gx++)
+                for (int gy = soft ? -1 : 0; gy <= (soft ? 1 : 0); gy++)
+                {
+                    double dx = shadow.Dx + gx * spread, dy = shadow.Dy + gy * spread;
+                    items.Add(new PushItem(null, 0, cx + dx, cy + dy, shape.FlipH, shape.FlipV, copyOpacity));
+                    EmitOutline(dark, x + dx, y + dy, width, height, items);
+                    items.Add(new PopItem());
+                }
         }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
         EmitOutline(shape, x, y, width, height, items);
@@ -146,11 +154,14 @@ public sealed partial class SheetLayoutEngine
             {
                 Clip = box ? null : points,
                 Radial = gradient.Kind == GradientKind.Path,
+                Rectangular = gradient.Kind == GradientKind.Path && gradient.Rectangular,
                 FocusX = (gradient.Left + gradient.Right) / 2, FocusY = (gradient.Top + gradient.Bottom) / 2,
             });
         }
         else if (shape.FillPattern is { } pattern)
             EmitPattern(pattern, points, x, y, w, h, ellipse, items);
+        else if (shape.FillImage is { } picture)
+            items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle ? null : points });
         else if (shape.Fill is { } fill)
         {
             if (ellipse) items.Add(new EllipseItem(x, y, w, h, fill));

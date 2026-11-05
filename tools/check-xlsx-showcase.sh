@@ -245,15 +245,21 @@ if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "
 fills_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape fills" ] && fills_page=$p; done
 fills_text=$(page_text "$fills_page")
-for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides"; do
+for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides" "Blurred shadow" "Picture fill" "Cut to an ellipse" "Rectangular" "Circular"; do
   [[ $fills_text == *"$text"* ]] || fail "missing shape text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape fills"; then fail "the shape fills sheet should not warn"; fi
 qpdf --qdf --object-streams=disable "$pdf" fills-qdf.pdf
 hatches=$(grep -ac "^0.7725 0.3529 0.0667 RG$" fills-qdf.pdf || true)
 [ "$hatches" -ge 1 ] || fail "pattern fills should stroke hatch lines in the pattern color"
-[ "$(grep -ac '^/GSa40 gs$' fills-qdf.pdf || true)" -ge 1 ] || fail "the drop shadow should be 40 % opaque"
-[ "$(grep -ac '^/GSa63 gs$' fills-qdf.pdf || true)" -ge 1 ] || fail "the theme shadow should be 63 % opaque"
+# Shadows with a blur are nine faint copies that add up to their opacity (copy = 1 - (1 - alpha)^(1/9)): the drop shadow (40 %, 4 pt blur)
+# is nine copies of 5.5 %; the theme shadow (63 %) and the blurred one (60 %) are nine copies of about 10 % each.
+[ "$(grep -ac '^/GSa6 gs$' fills-qdf.pdf || true)" -ge 9 ] || fail "the drop shadow should be nine copies at about 6 % opacity"
+[ "$(grep -ac '^/GSa10 gs$' fills-qdf.pdf || true)" -ge 18 ] || fail "the theme and the blurred shadow should be eighteen copies at about 10 % opacity"
+# The picture fills are images (one clipped to the ellipse).
+[ "$(pdfimages -list -f "$fills_page" -l "$fills_page" "$pdf" | awk 'NR > 2' | wc -l)" -ge 1 ] || fail "the picture fills should be images"
+# The rectangular path gradient is a stack of rectangles in the colors between white and dark red (no shading object for it).
+grep -aqE "^1 0.[0-9]+ 0.[0-9]+ rg$" fills-qdf.pdf || fail "the rectangular gradient should step through colors between white and C00000"
 
 # Chart extras: translucent areas and bubbles use graphics states, and the trendlines and error bars are drawn without a warning.
 extra_page=0

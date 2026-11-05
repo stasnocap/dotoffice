@@ -86,13 +86,20 @@ public sealed record GradientItem(double X, double Y, double Width, double Heigh
 
     public double FocusY { get; init; } = 0.5;
 
+    /// <summary>With <see cref="Radial"/>: the colors run in concentric rectangles from the focus to the box's edges instead of in circles.</summary>
+    public bool Rectangular { get; init; }
+
     public override LayoutItem Offset(double dx, double dy) =>
         this with { X = X + dx, Y = Y + dy, Clip = Clip?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem
 {
-    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+    /// <summary>When set, the picture is painted only inside this polygon (a picture fill of a shape).</summary>
+    public IReadOnlyList<(double X, double Y)>? Clip { get; init; }
+
+    public override LayoutItem Offset(double dx, double dy) =>
+        this with { X = X + dx, Y = Y + dy, Clip = Clip?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
 /// <summary>

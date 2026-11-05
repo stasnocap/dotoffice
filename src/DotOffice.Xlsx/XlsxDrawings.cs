@@ -272,10 +272,16 @@ internal static class XlsxDrawings
         Color? fill = lineOnly ? null : SolidFill(spPr, theme, Number(fillRef, "idx") > 0 ? StyleColor("fillRef") : null);
         GradientFill? gradient = null;
         ShapePattern? pattern = null;
+        ImageData? fillImage = null;
         if (!lineOnly)
         {
             var explicitFill = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
-            if (explicitFill is not null) { gradient = ReadGradientFill(explicitFill, theme, state, null); pattern = ReadPattern(explicitFill, theme); }
+            if (explicitFill is not null)
+            {
+                gradient = ReadGradientFill(explicitFill, theme, state, null);
+                pattern = ReadPattern(explicitFill, theme);
+                if (explicitFill.Name.LocalName == "blipFill") fillImage = ReadPictureFill(state, explicitFill);
+            }
             else if (theme.FillStyle((int)Number(fillRef, "idx")) is { } themed && StyleColor("fillRef") is { } phColor)
             {
                 // The shape takes the theme's fill style: a gradient (or tint) of the style's color.
@@ -310,7 +316,7 @@ internal static class XlsxDrawings
         var fontColor = Resolve(Child(style, "fontRef"), theme);
         var paragraphs = ReadText(Child(shape, "txBody"), theme, fontColor, out var body);
 
-        if (fill is null && lineColor is null && paragraphs.Count == 0) return;
+        if (fill is null && fillImage is null && lineColor is null && paragraphs.Count == 0) return;
         var (kind, from, to, x, y, width, height) = Placement(anchor, xfrm, frame);
         double Inset(string name, double fallback) => (string?)body?.Attribute(name) is { } v && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var e) ? e / EmuPerPoint : fallback;
         state.Sheet.Shapes.Add(new SheetShape
@@ -323,6 +329,7 @@ internal static class XlsxDrawings
             Fill = fill,
             FillGradient = gradient,
             FillPattern = pattern,
+            FillImage = fillImage,
             Shadow = shadow,
             Paths = paths,
             HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
@@ -351,14 +358,38 @@ internal static class XlsxDrawings
         var path = Child(first, "path");
         if (path is not null)
         {
-            if ((string?)path.Attribute("path") == "rect") state.Note("rectangular path gradients are drawn as radial ones");
             var focus = Child(path, "fillToRect");
             double Edge(string name, double fallback) => focus?.Attribute(name) is null ? fallback : Number(focus, name) / 100_000.0;
             double l = Edge("l", 0.5), t = Edge("t", 0.5), r = Edge("r", 0.5), b = Edge("b", 0.5);
-            return new GradientFill { Kind = GradientKind.Path, Left = l, Right = 1 - r, Top = t, Bottom = 1 - b, Stops = stops };
+            return new GradientFill { Kind = GradientKind.Path, Rectangular = (string?)path.Attribute("path") == "rect", Left = l, Right = 1 - r, Top = t, Bottom = 1 - b, Stops = stops };
         }
         double degree = Child(first, "lin")?.Attribute("ang") is not null ? Number(Child(first, "lin"), "ang") / 60_000.0 : 0;
         return new GradientFill { Kind = GradientKind.Linear, Degree = degree, Stops = stops };
+    }
+
+    /// <summary>
+    /// The picture of a <c>blipFill</c> shape fill, stretched over the shape. Null when the image is missing or unreadable (the shape then takes
+    /// the color it would otherwise have); a tiled picture is stretched instead, which is noted.
+    /// </summary>
+    private static ImageData? ReadPictureFill(State state, XElement blipFill)
+    {
+        var embed = Child(blipFill, "blip")?.Attributes().FirstOrDefault(a => a.Name.LocalName == "embed")?.Value;
+        if (embed is null || !state.Relationships.TryGetValue(embed, out var rel) || rel.IsExternal || !state.Context.Package.Exists(rel.Target))
+        {
+            state.Note("a shape's picture fill whose image is missing is left out");
+            return null;
+        }
+        try
+        {
+            var image = state.Context.GetImage(rel.Target);
+            if (Child(blipFill, "tile") is not null) state.Note("tiled picture fills are stretched over the shape");
+            return image;
+        }
+        catch (InvalidDataException)
+        {
+            state.Note("a shape's picture fill whose image could not be read is left out");
+            return null;
+        }
     }
 
     /// <summary>The hatching of a <c>pattFill</c> (null for any other fill): the preset's lines, their spacing and weight, or a tint for dot patterns.</summary>
@@ -383,15 +414,16 @@ internal static class XlsxDrawings
         };
     }
 
-    /// <summary>An outer shadow from an <c>effectLst</c>: how far and in which direction it falls, in what color and how opaque. Blur is ignored.</summary>
+    /// <summary>An outer shadow from an <c>effectLst</c>: how far and in which direction it falls, in what color, how opaque and how blurred.</summary>
     private static ShapeShadow? ReadShadow(XElement? effects, XlsxTheme theme, Color? placeholder)
     {
         var shadow = Child(effects, "outerShdw");
         if (shadow is null) return null;
         double distance = Number(shadow, "dist") / EmuPerPoint, direction = Number(shadow, "dir") / 60_000.0 * Math.PI / 180;
-        if (distance <= 0) return null;
+        double blur = Number(shadow, "blurRad") / EmuPerPoint;
+        if (distance <= 0 && blur <= 0) return null;
         var color = Resolve(shadow, theme, placeholder) ?? Color.Black;
-        return new ShapeShadow(color, ColorOpacity(shadow), distance * Math.Cos(direction), distance * Math.Sin(direction));
+        return new ShapeShadow(color, ColorOpacity(shadow), distance * Math.Cos(direction), distance * Math.Sin(direction), blur);
     }
 
     /// <summary>The route of a bent or curved connector as points in fractions of its frame; null for any other geometry.</summary>

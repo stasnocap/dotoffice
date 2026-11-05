@@ -453,13 +453,29 @@ internal static class ShowcaseXlsx
         anchors.Append(OneCell(5, 14, 0, 0, 110, 55, Styled("Themed shadow", "rect", Style(1, 3, "accent6"), Text("Theme shadow", "FFFFFF", bold: true))));
         anchors.Append(OneCell(7, 14, 0, 0, 100, 55, Shadowed("Drop shadow", "ellipse", "7030A0", Drop)));
         anchors.Append(OneCell(1, 20, 0, 0, 100, 50, chevron));
+        // Soft shadows, picture fills and rectangular path gradients.
+        const string Blurred = "<a:effectLst><a:outerShdw blurRad=\"190500\" dist=\"76200\" dir=\"2700000\" algn=\"tl\" rotWithShape=\"0\"><a:srgbClr val=\"000000\"><a:alpha val=\"60000\"/></a:srgbClr></a:outerShdw></a:effectLst>";
+        string Stops(string a, string b) => $"<a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"{a}\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"{b}\"/></a:gs></a:gsLst>";
+        string PathGradient(string path, string a, string b) =>
+            $"<a:gradFill>{Stops(a, b)}<a:path path=\"{path}\"><a:fillToRect l=\"50000\" t=\"50000\" r=\"50000\" b=\"50000\"/></a:path></a:gradFill>";
+        string Picture(string preset, string name) =>
+            Shape(preset, name, "", Line("404040", 1), Text(name, "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", "<a:blipFill><a:blip r:embed=\"rId1\"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>");
+        anchors.Append(OneCell(3, 20, 0, 0, 100, 50, Shadowed("Blurred shadow", "roundRect", "ED7D31", Blurred)));
+        anchors.Append(OneCell(5, 20, 0, 0, 100, 50, Picture("rect", "Picture fill")));
+        anchors.Append(OneCell(7, 20, 0, 0, 100, 50, Picture("ellipse", "Cut to an ellipse")));
+        anchors.Append(OneCell(1, 25, 0, 0, 100, 50, Shape("rect", "Rectangular", "").Replace("<a:noFill/>", PathGradient("rect", "FFFFFF", "C00000")).Replace("</xdr:sp>", Text("Rectangular", "000000", 900, bold: true) + "</xdr:sp>")));
+        anchors.Append(OneCell(3, 25, 0, 0, 100, 50, Shape("diamond", "Rect in a diamond", "").Replace("<a:noFill/>", PathGradient("rect", "FFC000", "7030A0")).Replace("</xdr:sp>", Text("Diamond", "FFFFFF", 900, bold: true) + "</xdr:sp>")));
+        anchors.Append(OneCell(5, 25, 0, 0, 100, 50, Shape("rect", "Circular", "").Replace("<a:noFill/>", PathGradient("circle", "FFFFFF", "2F5597")).Replace("</xdr:sp>", Text("Circular", "000000", 900, bold: true) + "</xdr:sp>")));
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
+        Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/shapefill.png\"/></Relationships>");
+        using (var media = zip.CreateEntry("xl/media/shapefill.png").Open()) media.Write(ShowcaseDocx.GradientPng(120, 80));
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
     }
 
     private static string ShapeFillsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"10\" width=\"13\" customWidth=\"1\"/></cols>",
-        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides:")),
+        Row(1, Str("A1", "Shape fills: patterns, theme gradients, shadows, guide formulas", Bold)) + Row(3, Str("A3", "Pattern fills:")) + Row(14, Str("A14", "Theme style gradients and shadows:")) + Row(20, Str("A20", "Guides, soft shadow, picture fills:")) + Row(25, Str("A25", "Rectangular and circular path gradients:")),
         "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
 
     // ------------------------------------------------------------------ charts

@@ -174,6 +174,9 @@ public sealed record GradientFill
     public double Top { get; init; }
     public double Bottom { get; init; }
 
+    /// <summary>Path gradients: whether the colors run in concentric rectangles (<c>path="rect"</c>) instead of ellipses.</summary>
+    public bool Rectangular { get; init; }
+
     /// <summary>At least two stops, sorted by position.</summary>
     public IReadOnlyList<GradientStop> Stops { get; init; } = [];
 
