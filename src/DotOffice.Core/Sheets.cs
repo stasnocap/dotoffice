@@ -120,9 +120,9 @@ public sealed record CellTextRun(string Text, RunProperties Font);
 
 /// <summary>
 /// A conditional-format data bar: the bar spans <see cref="Start"/> to <see cref="End"/> (fractions of the cell width, left to right).
-/// Gradient bars fade from the full color at their base (the end next to the axis) to a light tint.
+/// Gradient bars fade from the full color at their base (the end next to the axis) to a light tint. A <see cref="BorderColor"/> outlines the bar.
 /// </summary>
-public sealed record CellDataBar(double Start, double End, Color Color, bool Gradient, bool Negative = false);
+public sealed record CellDataBar(double Start, double End, Color Color, bool Gradient, bool Negative = false, Color? BorderColor = null);
 
 public enum IconShape
 {

@@ -34,6 +34,19 @@ public class SheetConditionalLayoutTests
     }
 
     [Fact]
+    public void A_data_bar_border_is_four_thin_rectangles_inside_the_bar()
+    {
+        var edge = new Color(0, 0, 0x80);
+        var page = Page(Numbered("5", new CellDataBar(0, 0.5, Blue, Gradient: false, BorderColor: edge)));
+        var rects = page.Items.OfType<RectItem>().ToList();
+        Assert.Equal(5, rects.Count);
+        var edges = rects.Where(r => r.Fill == edge).ToList();
+        Assert.Equal(4, edges.Count);
+        Assert.All(edges, r => Assert.True(r.X >= 50.4 - 1e-6 && r.X + r.Width <= 100.4 + 1e-6));
+        Assert.Equal(0.75, edges.Min(r => Math.Min(r.Width, r.Height)), 6);
+    }
+
+    [Fact]
     public void A_gradient_data_bar_fades_from_its_base_and_a_negative_one_from_the_right()
     {
         var positive = Page(Numbered("5", new CellDataBar(0.25, 0.75, Blue, Gradient: true))).Items.OfType<GradientItem>().Single();

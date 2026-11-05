@@ -110,6 +110,8 @@ yellow=$(grep -ac '^1 0.851 0.4 rg$' conditional-qdf.pdf || true)
 grep -aq '^0.251 0.251 0.251 rg$' conditional-qdf.pdf || fail "the level icons (quarters, rating bars) are missing"
 grep -aq '^0.9569 0.6275 0.6275 rg$' conditional-qdf.pdf || fail "the pink icon of 4RedToBlack is missing"
 grep -aq '^0.8941 0.8745 0.9255 rg$' conditional-qdf.pdf || fail "the x14-only cellIs rule (inline dxf) did not fill a cell"
+grep -aq '^0.1843 0.3333 0.5922 rg$' conditional-qdf.pdf || fail "the data bars should have a blue border"
+grep -aq '^0.498 0 0 rg$' conditional-qdf.pdf || fail "the negative data bars should have a dark red border"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
 

@@ -8,7 +8,8 @@ namespace DotOffice.Xlsx;
 internal sealed record Cfvo(string Type, CfExpr? Value, bool GreaterOrEqual = true);
 
 /// <summary>Settings a data bar takes from its Excel 2010 extension (<c>x14:dataBar</c>), matched by the rule's <c>x14:id</c>.</summary>
-internal sealed record DataBarExtension(bool Gradient, double? MinLength, double? MaxLength, Color? NegativeColor, bool NegativeSameAsPositive);
+internal sealed record DataBarExtension(bool Gradient, double? MinLength, double? MaxLength, Color? NegativeColor, bool NegativeSameAsPositive,
+    bool Border = false, Color? BorderColor = null, Color? NegativeBorderColor = null, bool NegativeBorderSameAsPositive = true);
 
 /// <summary>One <c>cfRule</c> of the main namespace.</summary>
 internal sealed class CfRule
@@ -146,7 +147,11 @@ internal static class ConditionalFormatting
                 MinLength: Number(bar, "minLength"),
                 MaxLength: Number(bar, "maxLength"),
                 NegativeColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeFillColor")),
-                NegativeSameAsPositive: (string?)bar.Attribute("negativeBarColorSameAsPositive") is "1" or "true");
+                NegativeSameAsPositive: (string?)bar.Attribute("negativeBarColorSameAsPositive") is "1" or "true",
+                Border: (string?)bar.Attribute("border") is "1" or "true",
+                BorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "borderColor")),
+                NegativeBorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeBorderColor")),
+                NegativeBorderSameAsPositive: (string?)bar.Attribute("negativeBarBorderColorSameAsPositive") is not ("0" or "false"));
         }
     }
 
@@ -682,6 +687,7 @@ internal static class ConditionalFormatting
                 double min = Threshold(rule.Cfvos[0], stats, ctx), max = Threshold(rule.Cfvos[1], stats, ctx);
                 var color = rule.Colors[0];
                 bool gradient = ext?.Gradient ?? true;
+                Color? border = ext is { Border: true } ? ext.BorderColor ?? color : null;
                 outcome.Any = true;
                 if (ext is not null && min < 0 && max > min)
                 {
@@ -690,19 +696,20 @@ internal static class ConditionalFormatting
                     if (value < 0)
                     {
                         double length = Math.Clamp(value / min, 0, 1) * axis;
-                        outcome.Bar = new CellDataBar(axis - length, axis, ext.NegativeSameAsPositive ? color : ext.NegativeColor ?? new Color(0xFF, 0, 0), gradient, Negative: true);
+                        outcome.Bar = new CellDataBar(axis - length, axis, ext.NegativeSameAsPositive ? color : ext.NegativeColor ?? new Color(0xFF, 0, 0), gradient, Negative: true,
+                            BorderColor: border is null ? null : ext.NegativeBorderSameAsPositive ? border : ext.NegativeBorderColor ?? new Color(0xFF, 0, 0));
                     }
                     else
                     {
                         double length = max > 0 ? Math.Clamp(value / max, 0, 1) * (1 - axis) : 0;
-                        outcome.Bar = new CellDataBar(axis, axis + length, color, gradient);
+                        outcome.Bar = new CellDataBar(axis, axis + length, color, gradient, BorderColor: border);
                     }
                 }
                 else
                 {
                     double minLength = (ext?.MinLength ?? rule.MinLength) / 100, maxLength = (ext?.MaxLength ?? rule.MaxLength) / 100;
                     double position = max - min <= 1e-12 ? 1 : Math.Clamp((value - min) / (max - min), 0, 1);
-                    outcome.Bar = new CellDataBar(0, minLength + position * (maxLength - minLength), color, gradient);
+                    outcome.Bar = new CellDataBar(0, minLength + position * (maxLength - minLength), color, gradient, BorderColor: border);
                 }
                 if (!rule.ShowValue) outcome.HideValue = true;
                 return;

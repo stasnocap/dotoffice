@@ -918,14 +918,22 @@ public sealed class SheetLayoutEngine
             double left = x + bar.Start * width, barWidth = (bar.End - bar.Start) * width;
             if (barWidth <= 0.05 || height <= 2) return;
             double top = y + 1, barHeight = height - 2;
-            if (!bar.Gradient)
+            if (!bar.Gradient) items.Add(new RectItem(left, top, barWidth, barHeight, bar.Color));
+            else
             {
-                items.Add(new RectItem(left, top, barWidth, barHeight, bar.Color));
-                return;
+                // Gradient bars are solid at their base (next to the axis) and fade towards the free end.
+                var light = bar.Color.Blend(White, 0.8);
+                items.Add(new GradientItem(left, top, barWidth, barHeight, bar.Negative ? 180 : 0, [new GradientStop(0, bar.Color), new GradientStop(1, light)]));
             }
-            // Gradient bars are solid at their base (next to the axis) and fade towards the free end.
-            var light = bar.Color.Blend(White, 0.8);
-            items.Add(new GradientItem(left, top, barWidth, barHeight, bar.Negative ? 180 : 0, [new GradientStop(0, bar.Color), new GradientStop(1, light)]));
+            if (bar.BorderColor is { } border)
+            {
+                // A thin solid outline, drawn inside the bar.
+                double line = Math.Min(0.75, Math.Min(barWidth, barHeight) / 2);
+                items.Add(new RectItem(left, top, barWidth, line, border));
+                items.Add(new RectItem(left, top + barHeight - line, barWidth, line, border));
+                items.Add(new RectItem(left, top + line, line, barHeight - 2 * line, border));
+                items.Add(new RectItem(left + barWidth - line, top + line, line, barHeight - 2 * line, border));
+            }
         }
 
         /// <summary>Draws an icon in a square of the given size.</summary>

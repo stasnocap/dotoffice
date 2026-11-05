@@ -287,6 +287,23 @@ public class XlsxConditionalFormattingTests
     }
 
     [Fact]
+    public void Data_bar_borders_come_from_the_extension()
+    {
+        const string id = "{44444444-4444-4444-4444-444444444444}";
+        var tail = ConditionalFormatting("A1:A3", DataBar(1, extensionId: id)) +
+                   DataBarExtension(id, gradient: false, "border=\"1\" negativeBarBorderColorSameAsPositive=\"0\"",
+                       "<x14:negativeFillColor rgb=\"FF00FF00\"/><x14:borderColor rgb=\"FF0000FF\"/><x14:negativeBorderColor rgb=\"FFFF00FF\"/>");
+        var sheet = Read(Column("A", -50, 0, 100), tail);
+        Assert.Equal(Hex("FF00FF"), sheet.Cells[(0, 0)].DataBar!.BorderColor);
+        Assert.Equal(Hex("0000FF"), sheet.Cells[(2, 0)].DataBar!.BorderColor);
+        // Without border="1" there is no border, and without a border color it takes the bar's color.
+        var plain = Read(Column("A", 1, 2), ConditionalFormatting("A1:A2", DataBar(1, extensionId: id)) + DataBarExtension(id, gradient: false));
+        Assert.Null(plain.Cells[(1, 0)].DataBar!.BorderColor);
+        var defaulted = Read(Column("A", 1, 2), ConditionalFormatting("A1:A2", DataBar(1, extensionId: id)) + DataBarExtension(id, gradient: false, "border=\"1\""));
+        Assert.Equal(defaulted.Cells[(1, 0)].DataBar!.Color, defaulted.Cells[(1, 0)].DataBar!.BorderColor);
+    }
+
+    [Fact]
     public void Data_bars_with_negative_values_grow_from_an_axis()
     {
         const string id = "{33333333-3333-3333-3333-333333333333}";
