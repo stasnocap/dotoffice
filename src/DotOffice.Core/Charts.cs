@@ -33,7 +33,8 @@ public enum LegendPosition { None, Right, Left, Top, Bottom }
 public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Color Color, bool Marker = false,
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
-    double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null);
+    double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
+    IReadOnlyList<ChartTextStyle?>? LabelStyles = null);
 
 public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial, MovingAverage }
 
@@ -43,10 +44,18 @@ public enum TrendlineKind { Linear, Exponential, Logarithmic, Power, Polynomial,
 /// <paramref name="Period"/> the window of a moving average.
 /// </summary>
 public sealed record ChartTrendline(TrendlineKind Kind, Color Color, double Width = 2.25, bool Dashed = true, int Order = 2, int Period = 2,
-    double Forward = 0, double Backward = 0, bool ShowEquation = false, bool ShowRSquared = false, ChartTextStyle? LabelStyle = null);
+    double Forward = 0, double Backward = 0, bool ShowEquation = false, bool ShowRSquared = false, ChartTextStyle? LabelStyle = null,
+    Func<double, string>? NumberFormatter = null, ChartLabelOffset? LabelPosition = null);
+
+/// <summary>
+/// Where a trendline's label sits when the chart places it by hand: either at a position measured from the chart's top-left corner
+/// (<paramref name="FromEdge"/>) or moved by that fraction of the chart's size from where it would be.
+/// </summary>
+public readonly record struct ChartLabelOffset(double X, double Y, bool FromEdge);
 
 /// <summary>Text formatting that differs from the chart's base: any part that is null keeps the default.</summary>
-public sealed record ChartTextStyle(double? Size = null, Color? Color = null, bool? Bold = null, bool? Italic = null, string? Family = null);
+public sealed record ChartTextStyle(double? Size = null, Color? Color = null, bool? Bold = null, bool? Italic = null, string? Family = null,
+    double? Rotation = null);
 
 /// <summary>The text styles of the parts of a chart (title, axis labels, axis titles, legend, data labels); null parts use the defaults.</summary>
 public sealed record ChartTextStyles

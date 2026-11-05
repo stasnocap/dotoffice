@@ -40,8 +40,10 @@ public sealed partial class SheetLayoutEngine
         double tickWidth = chart.ShowValueAxis ? chart.Ticks.Select(t => MeasureChartText(t.Label, yFont)).DefaultIfEmpty(0).Max() : 0;
         double lastWidth = chart.ShowCategoryAxis ? chart.XTicks.Select(t => MeasureChartText(t.Label, xFont)).DefaultIfEmpty(0).Max() : 0;
         double labelHeight = xFont.FontSize * 1.25;
+        double xAngle = Math.Clamp(styles.CategoryAxis?.Rotation ?? 0, -90, 90) * Math.PI / 180;
+        double xLabelSpace = chart.ShowCategoryAxis ? lastWidth * Math.Abs(Math.Sin(xAngle)) + labelHeight * Math.Abs(Math.Cos(xAngle)) + 5 : 0;
         double plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0) + 2, plotRight = right - Math.Max(4, lastWidth / 2);
-        double plotTop = top + labelHeight / 2, plotBottom = bottom - (chart.ShowCategoryAxis ? labelHeight + 5 : 0);
+        double plotTop = top + labelHeight / 2, plotBottom = bottom - xLabelSpace;
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         var xScale = chart.XScale;
@@ -59,12 +61,12 @@ public sealed partial class SheetLayoutEngine
         {
             double tx = X(tick.Value);
             if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
-            if (chart.ShowCategoryAxis) PlaceText(tick.Label, xFont, tx, plotBottom + 4, Anchor.Middle, false, 0, items);
+            if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + 4, styles.CategoryAxis?.Rotation ?? 0, items);
         }
         if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), 0.75, ChartGrid));
         if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, 0.75, ChartGrid));
 
-        var labels = new List<(string Text, double X, double Y, Color? Fill)>();
+        var labels = new List<(string Text, double X, double Y, Color? Fill, ChartTextStyle? Style)>();
         var trendLabels = new List<LayoutItem>();
         // The groups: the chart's own series on the primary axes, then the further groups on the primary or the secondary pair.
         var secondaryXScale = chart.SecondaryXScale;
@@ -78,7 +80,7 @@ public sealed partial class SheetLayoutEngine
         if (secondaryX)
             foreach (var tick in chart.SecondaryXTicks) PlaceText(tick.Label, xFont, SecondaryX(tick.Value), plotTop - 4 - xFont.FontSize * 1.25, Anchor.Middle, false, 0, items);
         double maxSize = chart.Kind == ChartKind.Bubble ? drawGroups.SelectMany(g => g.Series).SelectMany(s => s.Sizes ?? []).Where(v => v is > 0).Select(v => v!.Value).DefaultIfEmpty(0).Max() : 0;
-        var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label, double Alpha)>();
+        var bubbles = new List<(double Size, double X, double Y, Color Color, string? Label, double Alpha, ChartTextStyle? Style)>();
         foreach (var (groupSeries, GX, GY) in drawGroups)
         {
             if (chart.Kind == ChartKind.Bubble)
@@ -86,7 +88,7 @@ public sealed partial class SheetLayoutEngine
                 foreach (var s in groupSeries)
                     for (int i = 0; i < s.Values.Count; i++)
                         if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x && s.Sizes is { } sizes && i < sizes.Count && sizes[i] is > 0 and var size)
-                            bubbles.Add((size, GX(x), GY(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null, s.Alpha));
+                            bubbles.Add((size, GX(x), GY(y), s.Color, s.Labels is { } l && i < l.Count ? l[i] : null, s.Alpha, LabelStyleAt(s, i)));
                 continue;
             }
             foreach (var s in groupSeries)
@@ -96,7 +98,7 @@ public sealed partial class SheetLayoutEngine
                     if (s.Values[i] is { } y && s.XValues is { } xs && i < xs.Count && xs[i] is { } x)
                     {
                         points[i] = (GX(x), GY(y));
-                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], GX(x), GY(y) - 8, null));
+                        if (s.Labels is { } l && i < l.Count && l[i].Length > 0) labels.Add((l[i], GX(x), GY(y) - 8, null, LabelStyleAt(s, i)));
                     }
                 var overlays = new List<LayoutItem>();
                 foreach (var bars in s.ErrorBars ?? [])
@@ -138,12 +140,22 @@ public sealed partial class SheetLayoutEngine
                 if (d < 1) continue;
                 if (b.Alpha >= 1) items.Add(new EllipseItem(b.X - d / 2 - 0.75, b.Y - d / 2 - 0.75, d + 1.5, d + 1.5, Color.White));
                 AddFaded(items, b.Alpha, new EllipseItem(b.X - d / 2, b.Y - d / 2, d, d, b.Color));
-                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color));
+                if (!string.IsNullOrEmpty(b.Label)) labels.Add((b.Label, b.X, b.Y, b.Color, b.Style));
             }
         }
         items.AddRange(trendLabels);
-        foreach (var (text, lx, ly, fill) in labels)
-            PlaceText(text, Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), lx, ly, Anchor.Middle, true, 0, items);
+        foreach (var (text, lx, ly, fill, pointStyle) in labels)
+            PlaceText(text, Styled(Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), pointStyle), lx, ly, Anchor.Middle, true, 0, items);
+    }
+
+    /// <summary>A label under a horizontal axis, turned by <paramref name="angle"/> degrees counter-clockwise (negative: clockwise) from its tick.</summary>
+    private void PlaceXLabel(string text, RunProperties font, double x, double y, double angle, List<LayoutItem> items)
+    {
+        angle = Math.Clamp(angle, -90, 90);
+        if (angle == 0) { PlaceText(text, font, x, y, Anchor.Middle, false, 0, items); return; }
+        double turn = Math.Pow(Math.Sin(angle * Math.PI / 180), 2) * (3 + font.FontSize * 0.625);
+        if (angle > 0) PlaceText(text, font, x + 3 - turn, y + 1, Anchor.End, false, angle, items);
+        else PlaceText(text, font, x - 3 + turn, y + 1, Anchor.Start, false, angle, items);
     }
 
     // ------------------------------------------------------------------ radar

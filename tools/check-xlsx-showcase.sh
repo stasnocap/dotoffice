@@ -304,7 +304,7 @@ text_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Chart text" ] && text_page=$p; done
 [ "$text_page" -gt 0 ] || fail "no chart text sheet"
 text_text=$(page_text "$text_page")
-for text in "Columns: equation and R" "Bars with a trendline" "Stacked columns: trend of the totals" "Polynomial: equation and R" "Formatted text" "y = " "R² = "; do
+for text in "Columns: equation and R" "Bars with a trendline" "Stacked columns: trend of the totals" "Polynomial: equation and R" "Formatted text" "Turned labels and point labels" "Trendline label format, legend size" " units" "y = " "R² = "; do
   [[ $text_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart text"; then fail "the chart text sheet should not warn"; fi

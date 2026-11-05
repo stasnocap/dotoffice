@@ -457,4 +457,84 @@ public class SheetChartLayoutTests
         Assert.True(legend.SyntheticItalic || legend.Font.PostScriptName.Contains("Italic", StringComparison.OrdinalIgnoreCase));
         Assert.All(texts.Where(t => t.Text is "a1" or "a2" or "a3"), t => Assert.Equal(Red, t.Color));
     }
+
+    [Fact]
+    public void A_trendline_number_format_applies_to_the_equation_and_a_manual_position_moves_the_label()
+    {
+        var noisy = new List<(double X, double Y)> { (1, 1), (2, 3), (3, 2), (4, 5), (5, 4) };
+        var format = new ChartTrendline(TrendlineKind.Linear, Red, NumberFormatter: v => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal("y = 0.80x + 0.60", ChartTrendlines.Describe(format, noisy)!.Value.Equation);
+
+        SheetChart WithLabel(ChartLabelOffset? at) => Chart(ChartKind.Line, Series(Red, 10, 20, 30) with
+        {
+            Trendline = new ChartTrendline(TrendlineKind.Linear, Blue, ShowEquation: true, NumberFormatter: v => v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture), LabelPosition: at),
+        });
+        TextItem Label(SheetChart c) => Page(c).Items.OfType<TextItem>().Single(t => t.Text == "y"); // the first word of the equation
+        var automatic = Label(WithLabel(null));
+        Assert.Contains("y = 10.0x", Text(Page(WithLabel(null))));
+        var fromEdge = Label(WithLabel(new ChartLabelOffset(0.1, 0.5, true)));
+        Assert.Equal(OriginX + 30, fromEdge.X, 3);                       // 10 % of the 300-pt chart from its left edge
+        Assert.InRange(fromEdge.Baseline, OriginY + 100, OriginY + 120); // half the 200-pt height down
+        var shifted = Label(WithLabel(new ChartLabelOffset(-0.1, 0.1, false)));
+        Assert.Equal(automatic.X - 30, shifted.X, 3);
+        Assert.Equal(automatic.Baseline + 20, shifted.Baseline, 3);
+    }
+
+    [Fact]
+    public void Category_labels_turn_by_the_angle_the_axis_asks_for()
+    {
+        SheetChart WithRotation(double? angle) => Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with
+        {
+            TextStyles = new ChartTextStyles { CategoryAxis = angle is null ? null : new ChartTextStyle(Rotation: angle) },
+        };
+        Assert.DoesNotContain(Page(WithRotation(null)).Items.OfType<PushItem>(), p => p.Rotation != 0);
+        Assert.DoesNotContain(Page(WithRotation(0)).Items.OfType<PushItem>(), p => p.Rotation != 0);
+        var up = Page(WithRotation(90)).Items.OfType<PushItem>().Where(p => p.Rotation != 0).ToList();
+        Assert.Equal(3, up.Count);
+        Assert.All(up, p => Assert.Equal(90, p.Rotation));
+        var down = Page(WithRotation(-45)).Items.OfType<PushItem>().Where(p => p.Rotation != 0).ToList();
+        Assert.Equal(3, down.Count);
+        Assert.All(down, p => Assert.Equal(-45, p.Rotation));
+    }
+
+    [Fact]
+    public void A_scatter_chart_turns_its_x_labels_too()
+    {
+        var series = new ChartSeries("S", new double?[] { 0, 20 }, Red, Marker: true, XValues: new double?[] { 0, 10 }, Line: false);
+        var chart = Chart(ChartKind.Scatter, series) with
+        {
+            XTicks = [new(0, "0"), new(10, "10")], XMin = 0, XMax = 10, TextStyles = new ChartTextStyles { CategoryAxis = new ChartTextStyle(Rotation: 90) },
+        };
+        Assert.Equal(2, Page(chart).Items.OfType<PushItem>().Count(p => p.Rotation == 90));
+    }
+
+    [Fact]
+    public void A_manual_legend_size_makes_the_entries_flow_inside_it()
+    {
+        var a = Series(Red, 1) with { Name = "One" };
+        var chart = Chart(ChartKind.Column, a, a with { Name = "Two", Color = Blue }, a with { Name = "Three", Color = Color.Black }, a with { Name = "Four", Color = new Color(0, 160, 0) }) with { Legend = LegendPosition.Right, Border = null, Background = null };
+        TextItem Entry(LayoutPage page, string name) => page.Items.OfType<TextItem>().Single(t => t.Text == name);
+        // Two entries' height: the four entries need two columns.
+        var tall = Page(chart with { LegendBox = new ChartBox(0.5, 0.1, 0.4, 0.8, false) });
+        Assert.Equal(Entry(tall, "One").X, Entry(tall, "Four").X, 3);
+        var narrow = Page(chart with { LegendBox = new ChartBox(0.5, 0.1, 0.4, 0.2, false) });
+        Assert.True(Entry(narrow, "Three").X > Entry(narrow, "One").X + 20);
+        Assert.Equal(Entry(narrow, "One").X, Entry(narrow, "Two").X, 3);
+        Assert.True(Entry(narrow, "Two").Baseline > Entry(narrow, "One").Baseline);
+        // A horizontal legend wraps along rows instead.
+        var wide = Page(chart with { Legend = LegendPosition.Bottom, LegendBox = new ChartBox(0.1, 0.5, 0.35, 0.5, false) });
+        Assert.True(Entry(wide, "Three").Baseline > Entry(wide, "One").Baseline);
+    }
+
+    [Fact]
+    public void A_points_own_label_style_wins_over_the_series_labels()
+    {
+        var green = new Color(0, 160, 0);
+        var series = Series(Red, 5, 10, 20) with { Labels = ["a1", "", "a3"], LabelStyles = [null, null, new ChartTextStyle(Size: 16, Color: green)] };
+        var texts = Page(Chart(ChartKind.Column, series)).Items.OfType<TextItem>().ToList();
+        Assert.DoesNotContain(texts, t => t.Text == "");
+        Assert.Equal(16, texts.Single(t => t.Text == "a3").FontSize);
+        Assert.Equal(green, texts.Single(t => t.Text == "a3").Color);
+        Assert.NotEqual(16, texts.Single(t => t.Text == "a1").FontSize);
+    }
 }

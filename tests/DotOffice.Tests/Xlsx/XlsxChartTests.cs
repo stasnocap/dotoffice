@@ -373,4 +373,52 @@ public class XlsxChartTests
         Assert.True(group.Secondary);
         Assert.Equal(0.3, group.Series[0].Alpha, 6);
     }
+
+    [Fact]
+    public void Reads_a_trendline_labels_number_format_and_position()
+    {
+        string Trend(string label) => $"<c:trendline><c:trendlineType val=\"linear\"/><c:dispEq val=\"1\"/><c:trendlineLbl>{label}</c:trendlineLbl></c:trendline>";
+        var factor = "<c:layout><c:manualLayout><c:x val=\"-0.1\"/><c:y val=\"0.2\"/></c:manualLayout></c:layout><c:numFmt formatCode=\"0.00\" sourceLinked=\"0\"/>";
+        var edge = "<c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.3\"/><c:y val=\"0.4\"/></c:manualLayout></c:layout><c:numFmt formatCode=\"General\" sourceLinked=\"1\"/>";
+        var first = Read(Space(Line(Ser(0, null, null, "S!$B$2:$B$4", Trend(factor))))).Sheet.Charts.Single().Series[0].Trendline!;
+        Assert.Equal(new ChartLabelOffset(-0.1, 0.2, false), first.LabelPosition);
+        Assert.Equal("1.50", first.NumberFormatter!(1.5));
+        var second = Read(Space(Line(Ser(0, null, null, "S!$B$2:$B$4", Trend(edge))))).Sheet.Charts.Single().Series[0].Trendline!;
+        Assert.Equal(new ChartLabelOffset(0.3, 0.4, true), second.LabelPosition);
+        Assert.Null(second.NumberFormatter);
+    }
+
+    [Fact]
+    public void Reads_the_rotation_of_axis_text_and_the_size_of_a_manual_legend()
+    {
+        string Axis(string body) => $"<c:txPr><a:bodyPr {body}/><a:p><a:pPr><a:defRPr/></a:pPr></a:p></c:txPr>";
+        string Plot(string categoryText) => $"<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>{Ser(0, null, null, "S!$B$2:$B$4")}<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+            $"<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/>{categoryText}</c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+        double? Rotation(string body) => Read(Space(Plot(Axis(body)))).Sheet.Charts.Single().TextStyles.CategoryAxis?.Rotation;
+        Assert.Equal(90, Rotation("rot=\"-5400000\" vert=\"horz\""));  // clockwise in the file, counter-clockwise on the page
+        Assert.Equal(-45, Rotation("rot=\"2700000\""));
+        Assert.Equal(0, Rotation("rot=\"0\""));
+        Assert.Null(Rotation("rot=\"-60000000\""));                      // automatic
+        Assert.Equal(90, Rotation("vert=\"vert270\""));
+        var legend = "<c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.6\"/><c:y val=\"0.1\"/><c:w val=\"0.3\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout></c:legend>";
+        var box = Read(Space(Plot(""), legend)).Sheet.Charts.Single().LegendBox!.Value;
+        Assert.Equal((0.3, 0.2), (box.Width, box.Height));
+    }
+
+    [Fact]
+    public void A_points_own_data_label_can_show_hide_format_and_style_it()
+    {
+        var labels = "<c:dLbls>" +
+                     "<c:dLbl><c:idx val=\"0\"/><c:delete val=\"1\"/></c:dLbl>" +
+                     "<c:dLbl><c:idx val=\"1\"/><c:numFmt formatCode=\"0.0&quot; u&quot;\" sourceLinked=\"0\"/><c:txPr><a:p><a:pPr><a:defRPr sz=\"1400\" b=\"1\"/></a:pPr></a:p></c:txPr><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbl>" +
+                     "<c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>";
+        var series = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", labels)))).Sheet.Charts.Single().Series[0];
+        Assert.Equal(["", "25.0 u", "40"], series.Labels);
+        Assert.Equal(new ChartTextStyle(14, null, true), series.LabelStyles![1]);
+        Assert.Null(series.LabelStyles[2]);
+        // Only one point labelled while the series itself shows none.
+        var only = "<c:dLbls><c:dLbl><c:idx val=\"2\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbl><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/></c:dLbls>";
+        var single = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", only)))).Sheet.Charts.Single().Series[0];
+        Assert.Equal(["", "", "40"], single.Labels);
+    }
 }

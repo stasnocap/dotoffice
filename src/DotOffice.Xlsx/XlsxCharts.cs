@@ -170,28 +170,43 @@ internal static class XlsxCharts
                     if ((int)Number(Child(point, "idx"), "val", -1) is var k && k >= 0 && k < count && SolidFill(Child(point, "spPr"), theme) is { } c) pointColors[k] = c;
             }
 
-            // Data labels: values and/or percentages, formatted like the label's number format or the source cells.
+            // Data labels: values and/or percentages, formatted like the label's number format or the source cells. A point's own label
+            // (dLbl) can switch it on or off, format it differently and style it.
             var dLbls = Child(ser, "dLbls") ?? groupLabels;
             IReadOnlyList<string>? labels = null;
-            if (dLbls is not null && (Flag(Child(dLbls, "showVal"), "val") || Flag(Child(dLbls, "showPercent"), "val")))
+            List<ChartTextStyle?>? labelStyles = null;
+            var pointLabels = dLbls?.Elements().Where(e => e.Name.LocalName == "dLbl").ToList() ?? [];
+            bool Shows(XElement? holder) => holder is not null && (Flag(Child(holder, "showVal"), "val") || Flag(Child(holder, "showPercent"), "val"));
+            if (Shows(dLbls) || pointLabels.Any(Shows))
             {
-                bool showValue = Flag(Child(dLbls, "showVal"), "val"), showPercent = Flag(Child(dLbls, "showPercent"), "val") && slices;
-                var numFmt = Child(dLbls, "numFmt");
-                string? code = numFmt is not null && !Flag(numFmt, "sourceLinked") ? (string?)numFmt.Attribute("formatCode") : format;
                 double total = values.Sum(v => v is { } x && x > 0 ? x : 0);
-                labels = values.Select(v =>
+                string LabelOf(double x, XElement holder, XElement? fallback)
                 {
-                    if (v is not { } x) return "";
+                    bool showValue = Flag(Child(holder, "showVal"), "val"), showPercent = Flag(Child(holder, "showPercent"), "val") && slices;
+                    var numFmt = Child(holder, "numFmt") ?? Child(fallback, "numFmt");
+                    string? code = numFmt is not null && !Flag(numFmt, "sourceLinked") ? (string?)numFmt.Attribute("formatCode") : format;
                     var parts = new List<string>();
                     if (showValue) parts.Add(Format(x, code));
                     if (showPercent) parts.Add(total > 0 ? (x / total).ToString("0%", CultureInfo.InvariantCulture) : "0%");
                     return string.Join("; ", parts);
-                }).ToList();
+                }
+                var own = pointLabels.Where(e => (int)Number(Child(e, "idx"), "val", -1) is >= 0).ToDictionary(e => (int)Number(Child(e, "idx"), "val", -1));
+                var texts = new List<string>();
+                var styles = new List<ChartTextStyle?>();
+                for (int k = 0; k < values.Count; k++)
+                {
+                    var holder = own.GetValueOrDefault(k);
+                    if (values[k] is not { } x || holder is not null && (Flag(Child(holder, "delete"), "val") || !Shows(holder))) { texts.Add(""); styles.Add(null); continue; }
+                    texts.Add(holder is null ? Shows(dLbls) ? LabelOf(x, dLbls!, null) : "" : LabelOf(x, holder, dLbls));
+                    styles.Add(holder is null ? null : TextStyleOf(Child(holder, "txPr"), theme));
+                }
+                labels = texts;
+                if (styles.Any(st => st is not null)) labelStyles = styles;
             }
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind)));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles));
         }
         return series;
         }
@@ -210,7 +225,19 @@ internal static class XlsxCharts
             return new ChartTrendline(type, SolidFill(ln, theme) ?? seriesColor, width, dash is not null and not "solid",
                 (int)Math.Clamp(Number(Child(t, "order"), "val", 2), 2, 6), (int)Math.Clamp(Number(Child(t, "period"), "val", 2), 2, 100),
                 Number(Child(t, "forward"), "val"), Number(Child(t, "backward"), "val"),
-                Flag(Child(t, "dispEq"), "val"), Flag(Child(t, "dispRSqr"), "val"), TextStyleOf(Path(t, "trendlineLbl", "txPr"), theme));
+                Flag(Child(t, "dispEq"), "val"), Flag(Child(t, "dispRSqr"), "val"), TextStyleOf(Path(t, "trendlineLbl", "txPr"), theme),
+                Path(t, "trendlineLbl", "numFmt") is { } nf && (string?)nf.Attribute("formatCode") is { Length: > 0 } code && code != "General" && !Flag(nf, "sourceLinked") ? v => Format(v, code) : null,
+                TrendlineLabelPosition(Path(t, "trendlineLbl")));
+        }
+
+        // A trendline label placed by hand: x and y measured from the chart's corner (edge mode) or as a shift from the automatic spot (factor mode).
+        static ChartLabelOffset? TrendlineLabelPosition(XElement? label)
+        {
+            var m = Path(label, "layout", "manualLayout");
+            if (m is null || Child(m, "x") is null || Child(m, "y") is null) return null;
+            bool edge = (string?)Child(m, "xMode")?.Attribute("val") == "edge" && (string?)Child(m, "yMode")?.Attribute("val") == "edge";
+            double x = Number(Child(m, "x"), "val"), y = Number(Child(m, "y"), "val");
+            return edge && (x is < 0 or > 1 || y is < 0 or > 1) ? null : new ChartLabelOffset(x, y, edge);
         }
 
         IReadOnlyList<ChartErrorBars>? ReadErrorBars(XElement ser, List<double?> values, List<double?>? xValues, ChartKind seriesKind)
@@ -527,6 +554,13 @@ internal static class XlsxCharts
     {
         if (holder is null) return null;
         ChartTextStyle? style = null;
+        // The angle the text is turned by: bodyPr's rot in 60000ths of a degree clockwise (-60000000 means automatic), or its vertical text mode.
+        if (Descendant(holder, "bodyPr") is { } body)
+        {
+            double? turn = body.Attribute("rot") is { } rot && double.TryParse(rot.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) && Math.Abs(r) <= 21_600_000 ? -r / 60000
+                : (string?)body.Attribute("vert") switch { "vert270" => 90, "vert" => -90, _ => null };
+            if (turn is { } t) style = new ChartTextStyle(Rotation: t);
+        }
         foreach (var name in new[] { "defRPr", "rPr" })
         {
             if (Descendant(holder, name) is not { } e) continue;
@@ -536,7 +570,7 @@ internal static class XlsxCharts
             string? family = (string?)Child(e, "latin")?.Attribute("typeface");
             if (family is { Length: 0 } or ['+', ..]) family = null; // theme font tokens such as +mn-lt keep the default
             Color? color = Child(e, "solidFill") is not null ? SolidFill(e, theme) : null;
-            style = MergeStyles(style, new ChartTextStyle(size, color, bold, italic, family));
+            style = MergeStyles(style, new ChartTextStyle(size, color, bold, italic, family, style?.Rotation));
         }
         return style;
     }
@@ -546,11 +580,11 @@ internal static class XlsxCharts
     {
         if (under is null) return IsEmpty(over) ? null : over;
         if (over is null) return under;
-        var merged = new ChartTextStyle(over.Size ?? under.Size, over.Color ?? under.Color, over.Bold ?? under.Bold, over.Italic ?? under.Italic, over.Family ?? under.Family);
+        var merged = new ChartTextStyle(over.Size ?? under.Size, over.Color ?? under.Color, over.Bold ?? under.Bold, over.Italic ?? under.Italic, over.Family ?? under.Family, over.Rotation ?? under.Rotation);
         return IsEmpty(merged) ? null : merged;
     }
 
-    private static bool IsEmpty(ChartTextStyle? s) => s is null || (s.Size is null && s.Color is null && s.Bold is null && s.Italic is null && s.Family is null);
+    private static bool IsEmpty(ChartTextStyle? s) => s is null || (s.Size is null && s.Color is null && s.Bold is null && s.Italic is null && s.Family is null && s.Rotation is null);
 
     private static XElement? Descendant(XElement? root, params string[] names) =>
         root?.Descendants().FirstOrDefault(e => names.Contains(e.Name.LocalName));

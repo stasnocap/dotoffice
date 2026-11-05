@@ -699,12 +699,27 @@ internal static class ShowcaseXlsx
             .Replace("<a:rPr lang=\"en-US\" sz=\"1400\"/><a:t>Formatted text", "<a:rPr lang=\"en-US\" sz=\"1800\" b=\"1\">" + Fill("1F3864") + "<a:latin typeface=\"Georgia\"/></a:rPr><a:t>Formatted text")
             .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.62\"/><c:y val=\"0.2\"/><c:w val=\"0.2\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout><c:overlay val=\"1\"/>" +
                      TextProperties("sz=\"1000\" b=\"1\"", "7030A0") + "</c:legend>");
+        // Axis labels turned 90° (rot is clockwise in the file), and labels on single points: one deleted, one with its own format and style.
+        string PointLabels(string inner) => "<c:dLbls>" + inner + "<c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"0\"/></c:dLbls>";
+        const string Show = "<c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"0\"/>";
+        var turned = "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>" +
+                     Series(0, PointLabels("<c:dLbl><c:idx val=\"2\"/><c:numFmt formatCode=\"0.0&quot; units&quot;\" sourceLinked=\"0\"/>" + TextProperties("sz=\"1100\" b=\"1\"", "C00000") + Show + "</c:dLbl>" +
+                                                "<c:dLbl><c:idx val=\"4\"/>" + Show + "</c:dLbl>")) +
+                     "<c:gapWidth val=\"80\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>" +
+                     Axes().Replace("<c:crossAx val=\"2\"/></c:catAx>", "<c:txPr><a:bodyPr rot=\"-5400000\" vert=\"horz\"/><a:p><a:pPr><a:defRPr sz=\"900\"/></a:pPr><a:endParaRPr lang=\"en-US\"/></a:p></c:txPr><c:crossAx val=\"2\"/></c:catAx>");
+        // A trendline label with its own number format, moved from its place, and a legend given a size (the entries flow into columns).
+        var trendLabel = "<c:trendline><c:spPr><a:ln w=\"22225\"><a:solidFill><a:srgbClr val=\"C00000\"/></a:solidFill><a:prstDash val=\"sysDash\"/></a:ln></c:spPr><c:trendlineType val=\"linear\"/><c:dispRSqr val=\"1\"/><c:dispEq val=\"1\"/>" +
+                         "<c:trendlineLbl><c:layout><c:manualLayout><c:x val=\"-0.25\"/><c:y val=\"0.12\"/></c:manualLayout></c:layout><c:numFmt formatCode=\"0.000\" sourceLinked=\"0\"/></c:trendlineLbl></c:trendline>";
+        var formatted = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + Series(0, trendLabel) + Series(1) + Series(2) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
+        var formattedSpace = ChartSpace("Trendline label format, legend size", formatted, "")
+            .Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:layout><c:manualLayout><c:xMode val=\"edge\"/><c:yMode val=\"edge\"/><c:x val=\"0.55\"/><c:y val=\"0.12\"/><c:w val=\"0.4\"/><c:h val=\"0.2\"/></c:manualLayout></c:layout><c:overlay val=\"1\"/></c:legend>");
         string[] charts =
         [
             ChartSpace("Columns: equation and R²", columns, ""), ChartSpace("Bars with a trendline", bars, ""), ChartSpace("Stacked columns: trend of the totals", stacked, "b"),
             ChartSpace("Polynomial: equation and R²", scatter, ""), styledSpace,
+            ChartSpace("Turned labels and point labels", turned, ""), formattedSpace,
         ];
-        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43)];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 2, 3, 15), (3, 2, 6, 15), (0, 16, 3, 29), (3, 16, 6, 29), (0, 30, 3, 43), (3, 30, 6, 43), (0, 44, 3, 57)];
         WriteChartParts(zip, sheetNumber, charts, places, "text");
     }
 

@@ -151,17 +151,18 @@ internal static class ChartTrendlines
         double mean = fitted.Average(p => p.Y), total = fitted.Sum(p => (p.Y - mean) * (p.Y - mean)), residual = fitted.Sum(p => (p.Y - Predict(p.X)) * (p.Y - Predict(p.X)));
         double r2 = total < 1e-300 ? 1 : Math.Clamp(1 - residual / total, 0, 1);
 
+        var fmt = trend.NumberFormatter ?? Number;
         string equation = trend.Kind switch
         {
-            TrendlineKind.Exponential => $"y = {Number(Math.Exp(coefficients[0]))}e^{Number(coefficients[1])}x",
-            TrendlineKind.Logarithmic => $"y = {Term(coefficients[1], "ln(x)", first: true)}{Sign(coefficients[0])}",
-            TrendlineKind.Power => $"y = {Number(Math.Exp(coefficients[0]))}x^{Number(coefficients[1])}",
-            _ => "y = " + Polynomial(coefficients),
+            TrendlineKind.Exponential => $"y = {fmt(Math.Exp(coefficients[0]))}e^{fmt(coefficients[1])}x",
+            TrendlineKind.Logarithmic => $"y = {Term(coefficients[1], "ln(x)", true, fmt)}{Sign(coefficients[0], fmt)}",
+            TrendlineKind.Power => $"y = {fmt(Math.Exp(coefficients[0]))}x^{fmt(coefficients[1])}",
+            _ => "y = " + Polynomial(coefficients, fmt),
         };
         return (equation, r2);
     }
 
-    private static string Polynomial(double[] c)
+    private static string Polynomial(double[] c, Func<double, string> fmt)
     {
         var text = new System.Text.StringBuilder();
         double largest = c.Max(Math.Abs);
@@ -169,21 +170,21 @@ internal static class ChartTrendlines
         {
             if (Math.Abs(c[k]) < largest * 1e-9 && k > 0) continue; // rounding noise of the fit, not a term
             string variable = k switch { 0 => "", 1 => "x", 2 => "x²", 3 => "x³", _ => $"x^{k}" };
-            if (text.Length == 0) text.Append(Term(c[k], variable, first: true));
-            else text.Append(Term(c[k], variable, first: false));
+            if (text.Length == 0) text.Append(Term(c[k], variable, true, fmt));
+            else text.Append(Term(c[k], variable, false, fmt));
         }
         return text.Length == 0 ? "0" : text.ToString();
     }
 
-    private static string Term(double value, string variable, bool first)
+    private static string Term(double value, string variable, bool first, Func<double, string> fmt)
     {
-        if (variable.Length == 0) return first ? Number(value) : Sign(value);
-        string magnitude = Math.Abs(Math.Abs(value) - 1) < 5e-5 ? "" : Number(Math.Abs(value));
+        if (variable.Length == 0) return first ? fmt(value) : Sign(value, fmt);
+        string magnitude = Math.Abs(Math.Abs(value) - 1) < 5e-5 ? "" : fmt(Math.Abs(value));
         string sign = value < 0 ? (first ? "-" : " - ") : first ? "" : " + ";
         return sign + magnitude + variable;
     }
 
-    private static string Sign(double value) => value < 0 ? " - " + Number(-value) : " + " + Number(value);
+    private static string Sign(double value, Func<double, string> fmt) => value < 0 ? " - " + fmt(-value) : " + " + fmt(value);
 
     /// <summary>Five significant digits, without a trailing zero and without an exponent unless the number is tiny or huge.</summary>
     internal static string Number(double value)
