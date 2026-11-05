@@ -572,4 +572,35 @@ public class XlsxShapeTests
         Assert.Equal(0.4, ReadOne(Sp(Preset("hexagon", Gd("adj", 40000)))).Adjust1);
         Assert.Equal(0.3, ReadOne(Sp(Preset("star5", Gd("adj", 30000)))).Adjust1);
     }
+
+    [Fact]
+    public void Subpaths_of_one_path_are_one_filled_shape_with_holes()
+    {
+        string Pt(int x, int y) => $"<a:pt x=\"{x}\" y=\"{y}\"/>";
+        string Square(int a, int b) => $"<a:moveTo>{Pt(a, a)}</a:moveTo><a:lnTo>{Pt(b, a)}</a:lnTo><a:lnTo>{Pt(b, b)}</a:lnTo><a:lnTo>{Pt(a, b)}</a:lnTo><a:close/>";
+        string Custom(string paths) => Sp($"<a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"100\" cy=\"100\"/></a:xfrm><a:custGeom><a:avLst/><a:pathLst>{paths}</a:pathLst></a:custGeom>" + SolidRed);
+        var frame = ReadOne(Custom($"<a:path w=\"100\" h=\"100\">{Square(0, 100)}{Square(25, 75)}</a:path>"));
+        var path = Assert.Single(frame.Paths!);
+        var hole = Assert.Single(path.Rings!);
+        Assert.Equal((0.25, 0.25), hole[0]);
+        Assert.Equal((0.75, 0.75), hole[2]);
+        // Two path elements are two shapes; an open subpath cannot be a hole.
+        Assert.Equal(2, ReadOne(Custom($"<a:path w=\"100\" h=\"100\">{Square(0, 100)}</a:path><a:path w=\"100\" h=\"100\">{Square(25, 75)}</a:path>")).Paths!.Count);
+        Assert.Equal(2, ReadOne(Custom($"<a:path w=\"100\" h=\"100\">{Square(0, 100)}<a:moveTo>{Pt(10, 10)}</a:moveTo><a:lnTo>{Pt(50, 50)}</a:lnTo></a:path>")).Paths!.Count);
+    }
+
+    [Theory]
+    [InlineData("donut", 72, 72)]
+    [InlineData("frame", 4, 4)]
+    [InlineData("noSmoking", 72, 72)]
+    public void Donuts_frames_and_no_symbols_have_a_hole(string preset, int outer, int inner)
+    {
+        var shape = ReadOne(Sp(Preset(preset)));
+        var path = shape.Paths![0];
+        Assert.Equal(outer, path.Points.Count);
+        Assert.Equal(inner, Assert.Single(path.Rings!).Count);
+        var middle = path.Rings![0];
+        Assert.InRange(middle.Min(p => p.X), 0.01, 0.4);      // the hole lies inside the frame
+        Assert.InRange(middle.Max(p => p.X), 0.6, 0.99);
+    }
 }

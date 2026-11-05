@@ -658,10 +658,19 @@ internal static class XlsxDrawings
             }
             bool fill = (string?)path.Attribute("fill") != "none", stroke = (string?)path.Attribute("stroke") is not ("0" or "false");
             var points = new List<(double X, double Y)>();
+            var subpaths = new List<ShapePath>();
             void Flush(bool closed)
             {
-                if (points.Count >= 2) result.Add(new ShapePath(points.ToList(), closed, fill, stroke));
+                if (points.Count >= 2) subpaths.Add(new ShapePath(points.ToList(), closed, fill, stroke));
                 points.Clear();
+            }
+            // The subpaths of one path element are one shape to fill: closed ones inside each other are holes (the rings of a donut).
+            void Merge()
+            {
+                if (fill && subpaths.Count > 1 && subpaths.All(sp => sp.Closed && sp.Points.Count >= 3))
+                    result.Add(subpaths[0] with { Rings = subpaths.Skip(1).Select(sp => sp.Points).ToList() });
+                else result.AddRange(subpaths);
+                subpaths.Clear();
             }
             foreach (var command in path.Elements())
             {
@@ -712,6 +721,7 @@ internal static class XlsxDrawings
                 if (!valid) return null;
             }
             Flush(false);
+            Merge();
         }
         return result.Count > 0 ? result : null;
     }

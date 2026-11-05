@@ -84,7 +84,14 @@ public readonly record struct LineEnd(LineEndKind Kind, double Width = 3, double
 /// One path of a shape drawn as lines through its <paramref name="Points"/>, which are fractions of the shape's frame (curves are already
 /// sampled). Closed paths are filled; <paramref name="Fill"/> and <paramref name="Stroke"/> switch the fill and the outline off.
 /// </summary>
-public sealed record ShapePath(IReadOnlyList<(double X, double Y)> Points, bool Closed, bool Fill = true, bool Stroke = true);
+public sealed record ShapePath(IReadOnlyList<(double X, double Y)> Points, bool Closed, bool Fill = true, bool Stroke = true)
+{
+    /// <summary>
+    /// Further closed rings of the same path (its other subpaths), in the same fractions. They are filled together with <see cref="Points"/> by
+    /// the even-odd rule, so a ring inside another one is a hole (a donut), and each is outlined like the first.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<(double X, double Y)>>? Rings { get; init; }
+}
 
 public enum ShapeTextAnchor { Top, Middle, Bottom }
 

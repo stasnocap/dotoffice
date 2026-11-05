@@ -44,7 +44,7 @@ public sealed partial class SheetLayoutEngine
                 }
         }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
-        if (shape.SoftEdge >= 0.5 && shape.Geometry != ShapeGeometry.Line) EmitSoftEdged(shape, x, y, width, height, items);
+        if (shape.SoftEdge >= 0.5 && shape.Geometry != ShapeGeometry.Line && shape.Paths?.Any(p => p.Rings is not null) != true) EmitSoftEdged(shape, x, y, width, height, items);
         else EmitOutline(shape, x, y, width, height, items);
         if (flipped) items.Add(new PopItem());
         if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line) EmitShapeText(shape, x, y, width, height, items);
@@ -80,6 +80,34 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>
+    /// A closed outline stroked with each segment run on past its ends to the miter of the corner, so that no wedge is left open on the
+    /// outer side of a turn (the overlap falls on the inner side). Corners sharper than 120° keep a shorter reach.
+    /// </summary>
+    private static void EmitMiteredStroke(List<(double X, double Y)> points, double width, Color color, List<LayoutItem> items)
+    {
+        int n = points.Count;
+        if (n < 3) { EmitStroke(points, true, width, color, LineStyle.Solid, default, default, items); return; }
+        double Direction(int i) { var (a, b) = (points[i], points[(i + 1) % n]); return Math.Atan2(b.Y - a.Y, b.X - a.X); }
+        double Reach(int i, int j)
+        {
+            double turn = Math.Abs(Direction(j) - Direction(i));
+            if (turn > Math.PI) turn = 2 * Math.PI - turn;
+            return width / 2 * Math.Tan(Math.Min(turn, 2 * Math.PI / 3) / 2);
+        }
+        for (int i = 0; i < n; i++)
+        {
+            var (a, b) = (points[i], points[(i + 1) % n]);
+            double length = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+            if (length < 1e-9) continue;
+            double ux = (b.X - a.X) / length, uy = (b.Y - a.Y) / length, back = Reach((i + n - 1) % n, i), front = Reach(i, (i + 1) % n);
+            items.Add(new LineItem(a.X - ux * back, a.Y - uy * back, b.X + ux * front, b.Y + uy * front, width, color));
+        }
+    }
+
+    /// <summary>The first outline of a path and its further rings.</summary>
+    private static IEnumerable<IReadOnlyList<(double X, double Y)>> AllRings(ShapePath path) => path.Rings is { } more ? more.Prepend(path.Points) : [path.Points];
+
+    /// <summary>
     /// A glow: the outline stroked four times, from thin to as wide as the glow's radius reaches, each translucent, under the shape. Near the
     /// outline all four overlap and the glow is at its strongest; it fades out to the radius.
     /// </summary>
@@ -90,15 +118,35 @@ public sealed partial class SheetLayoutEngine
         double layerOpacity = 1 - Math.Pow(1 - Math.Min(glow.Opacity, 0.999), 1.0 / Layers);
         var outlines = new List<(List<(double X, double Y)> Points, bool Closed)>();
         if (shape.Paths is { } paths)
-            outlines.AddRange(paths.Where(p => p.Points.Count >= 2).Select(p => (p.Points.Select(q => (X: x + q.X * w, Y: y + q.Y * h)).ToList(), p.Closed)));
+            outlines.AddRange(paths.Where(p => p.Points.Count >= 2).SelectMany(p => AllRings(p).Select(r => (r.Select(q => (X: x + q.X * w, Y: y + q.Y * h)).ToList(), p.Closed))));
         else if (shape.Geometry == ShapeGeometry.Line) outlines.Add(([(x, y), (x + w, y + h)], false));
         else outlines.Add((Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList(), true));
+        // Over a filled shape the glow is clipped to the outside of its outline: the strokes' inner halves would show through a translucent
+        // fill. The clip is a frame well beyond the reach of the glow with the outlines of the filled parts cut out of it.
+        List<(double X, double Y)>? outside = null;
+        if (shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null || shape.FillImage is not null)
+        {
+            var cuts = new List<List<(double X, double Y)>>();
+            if (shape.Paths is { } filledPaths)
+                foreach (var path in filledPaths.Where(p => p.Fill && p.Points.Count >= 3 && (p.Closed || shape.Geometry == ShapeGeometry.Custom)))
+                    cuts.AddRange(AllRings(path).Select(r => r.Select(q => (X: x + q.X * w, Y: y + q.Y * h)).ToList()));
+            else if (shape.Geometry != ShapeGeometry.Line) cuts.Add(Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList());
+            if (cuts.Count > 0)
+            {
+                double m = 2 * glow.Radius + 20;
+                outside = [(x - m, y - m), (x + w + m, y - m), (x + w + m, y + h + m), (x - m, y + h + m)];
+                foreach (var cut in cuts) { outside.Add((double.NaN, double.NaN)); outside.AddRange(cut); }
+            }
+        }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
         for (int k = Layers; k >= 1; k--)
         {
-            items.Add(new PushItem(null, Opacity: layerOpacity));
+            items.Add(new PushItem(null, Opacity: layerOpacity) { ClipOutline = outside });
             foreach (var (points, closed) in outlines)
-                EmitStroke(points, closed, 2 * glow.Radius * k / Layers, glow.Color, LineStyle.Solid, default, default, items);
+            {
+                if (closed && outside is not null) EmitMiteredStroke(points, 2 * glow.Radius * k / Layers, glow.Color, items);
+                else EmitStroke(points, closed, 2 * glow.Radius * k / Layers, glow.Color, LineStyle.Solid, default, default, items);
+            }
             items.Add(new PopItem());
         }
         if (flipped) items.Add(new PopItem());
@@ -285,9 +333,21 @@ public sealed partial class SheetLayoutEngine
             {
                 var points = path.Points.Select(p => (X: x + p.X * w, Y: y + p.Y * h)).ToList();
                 if (points.Count < 2) continue;
-                if (path.Fill && points.Count >= 3 && (path.Closed || shape.Geometry == ShapeGeometry.Custom)) EmitFill(shape, points, x, y, w, h, false, items);
+                if (path.Fill && points.Count >= 3 && (path.Closed || shape.Geometry == ShapeGeometry.Custom))
+                {
+                    // Rings of the same path are one fill with holes: the outlines are joined with a separator (NaN) that the renderer fills even-odd.
+                    var filled = points;
+                    if (path.Rings is { Count: > 0 } more)
+                    {
+                        filled = new List<(double X, double Y)>(points);
+                        foreach (var ring in more) { filled.Add((double.NaN, double.NaN)); filled.AddRange(ring.Select(p => (X: x + p.X * w, Y: y + p.Y * h))); }
+                    }
+                    EmitFill(shape, filled, x, y, w, h, false, items);
+                }
                 if (shape.LineColor is not { } color || shape.LineWidth <= 0 || !path.Stroke) continue;
                 EmitStroke(points, path.Closed, strokeWidth, color, dash, path.Closed ? default : shape.HeadEnd, path.Closed ? default : shape.TailEnd, items);
+                foreach (var ring in path.Rings ?? [])
+                    EmitStroke(ring.Select(p => (X: x + p.X * w, Y: y + p.Y * h)).ToList(), true, strokeWidth, color, dash, default, default, items);
             }
             return;
         }
@@ -378,10 +438,18 @@ public sealed partial class SheetLayoutEngine
             HatchKind.Horizontal => [0], HatchKind.Vertical => [90], HatchKind.UpDiagonal => [-45], HatchKind.DownDiagonal => [45],
             HatchKind.Cross => [0, 90], HatchKind.DiagonalCross => [-45, 45], _ => [],
         };
+        // The point after each one on its own ring (the rings of a shape with holes are separated by NaN points).
+        var follows = new int[outline.Count];
+        for (int i = 0, ringStart = 0; i < outline.Count; i++)
+        {
+            if (double.IsNaN(outline[i].X)) { ringStart = i + 1; continue; }
+            follows[i] = i + 1 < outline.Count && !double.IsNaN(outline[i + 1].X) ? i + 1 : ringStart;
+        }
         foreach (double degrees in angles)
         {
             double radians = degrees * Math.PI / 180, dx = Math.Cos(radians), dy = Math.Sin(radians), nx = -dy, ny = dx; // direction and normal
-            double lo = outline.Min(p => p.X * nx + p.Y * ny), hi = outline.Max(p => p.X * nx + p.Y * ny);
+            var solid = outline.Where(p => !double.IsNaN(p.X)).ToList();
+            double lo = solid.Min(p => p.X * nx + p.Y * ny), hi = solid.Max(p => p.X * nx + p.Y * ny);
             double spacing = Math.Max(pattern.Spacing, (hi - lo) / 400), origin = x * nx + y * ny;
             for (double t = origin + Math.Ceiling((lo - origin) / spacing) * spacing; t <= hi; t += spacing)
             {
@@ -389,7 +457,8 @@ public sealed partial class SheetLayoutEngine
                 double probe = t + 1e-6; // keeps a line through a vertex from being counted twice
                 for (int i = 0; i < outline.Count; i++)
                 {
-                    var (a, b) = (outline[i], outline[(i + 1) % outline.Count]);
+                    if (double.IsNaN(outline[i].X)) continue;
+                    var (a, b) = (outline[i], outline[follows[i]]);
                     double ta = a.X * nx + a.Y * ny, tb = b.X * nx + b.Y * ny;
                     if ((ta - probe) * (tb - probe) >= 0) continue;
                     double u = (probe - ta) / (tb - ta);

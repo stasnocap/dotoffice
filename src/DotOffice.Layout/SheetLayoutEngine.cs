@@ -423,6 +423,7 @@ public sealed partial class SheetLayoutEngine
         {
             Clip = p.Clip is { } c ? (dx + c.X * scale, dy + c.Y * scale, c.Width * scale, c.Height * scale) : null,
             CenterX = dx + p.CenterX * scale, CenterY = dy + p.CenterY * scale,
+            ClipOutline = p.ClipOutline?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList(),
         },
         GradientItem g => g with { X = dx + g.X * scale, Y = dy + g.Y * scale, Width = g.Width * scale, Height = g.Height * scale, Clip = g.Clip?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         ImageItem i => i with { X = dx + i.X * scale, Y = dy + i.Y * scale, Width = i.Width * scale, Height = i.Height * scale, Clip = i.Clip?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },

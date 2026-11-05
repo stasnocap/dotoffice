@@ -427,6 +427,8 @@ internal static class ShowcaseXlsx
             OneCell(1, 19, 0, 0, 90, 80, Custom("Star", star, Fill("FFC000"), Line("7F6000", 1.5))) +
             OneCell(3, 19, 0, 0, 90, 80, Custom("Heart", heart, Gradient("FF7C80", "C00000", "<a:lin ang=\"5400000\"/>"), Line("7F0000", 1))) +
             OneCell(5, 19, 0, 0, 110, 60, Custom("Wave", wave, "", Line("2F5597", 2.5).Replace("</a:ln>", End("", "triangle") + "</a:ln>"))) +
+            OneCell(9, 19, 0, 0, 90, 80, Custom("Frame with a hole", $"<a:moveTo>{Pt(0, 0)}</a:moveTo><a:lnTo>{Pt(100, 0)}</a:lnTo><a:lnTo>{Pt(100, 100)}</a:lnTo><a:lnTo>{Pt(0, 100)}</a:lnTo><a:close/>" +
+                                                      $"<a:moveTo>{Pt(25, 25)}</a:moveTo><a:lnTo>{Pt(25, 75)}</a:lnTo><a:lnTo>{Pt(75, 75)}</a:lnTo><a:lnTo>{Pt(75, 25)}</a:lnTo><a:close/>", Fill("7030A0"), Line("3B1A55", 1.5))) +
             OneCell(7, 19, 0, 0, 100, 70, Custom("Star with text", star, Fill("DDEBF7"), Line("2F5597", 1.5), Text("Custom", "1F3864", bold: true))) +
             OneCell(1, 26, 0, 0, 90, 60, Shape("pentagon", "Pentagon", "2F5597", Line("1F3864"), Text("Pentagon", "FFFFFF", 900, bold: true))) +
             OneCell(3, 26, 0, 0, 90, 60, Shape("octagon", "Octagon", "C00000", Line("7F0000"), Text("Octagon", "FFFFFF", 900, bold: true))) +
@@ -453,7 +455,7 @@ internal static class ShowcaseXlsx
         "flowChartMerge", "flowChartDisplay", "flowChartOffpageConnector", "flowChartOr", "flowChartSummingJunction", "flowChartMagneticDisk",
         "leftBracket", "rightBracket", "leftBrace", "rightBrace", "can", "cube", "bevel", "foldedCorner",
         "heart", "lightningBolt", "sun", "moon", "smileyFace", "teardrop", "leftRightArrow", "upDownArrow",
-        "mathPlus", "mathMinus", "mathEqual", "snip1Rect", "snip2SameRect", "round1Rect", "round2SameRect", "pie", "chord", "arc", "blockArc",
+        "donut", "frame", "noSmoking", "mathPlus", "mathMinus", "mathEqual", "snip1Rect", "snip2SameRect", "round1Rect", "round2SameRect", "pie", "chord", "arc", "blockArc",
     ];
 
     private static string ShapePresetsSheet() => Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"9\" width=\"13\" customWidth=\"1\"/></cols>",
@@ -526,6 +528,10 @@ internal static class ShowcaseXlsx
         anchors.Append(OneCell(5, 37, 0, 0, 100, 60, Shape("rect", "Mirrored tiles", "", Line("404040", 1), Text("Mirrored tiles", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("", "<a:tile tx=\"0\" ty=\"0\" sx=\"30000\" sy=\"30000\" algn=\"tl\" flip=\"xy\"/>"))));
         anchors.Append(OneCell(3, 31, 0, 0, 100, 60, Shape("rect", "Translucent picture", "", Line("404040", 1), Text("Translucent picture", "000000", 900, bold: true, anchor: "b")).Replace("<a:noFill/>", Blip("<a:alphaModFix amt=\"45000\"/>", "<a:stretch><a:fillRect/></a:stretch>"))));
         anchors.Append(OneCell(5, 31, 0, 0, 100, 50, Shadowed("Glow", "ellipse", "5B9BD5", "<a:effectLst><a:glow rad=\"101600\"><a:srgbClr val=\"FFC000\"><a:alpha val=\"45000\"/></a:srgbClr></a:glow></a:effectLst>")));
+        // A glow outside a translucent picture fill: it must not show through the fill.
+        anchors.Append(OneCell(7, 25, 6, 6, 88, 44, Shape("ellipse", "Outside glow", "", Line("404040", 1), Text("Outside glow", "000000", 900, bold: true, anchor: "b") .Replace("</xdr:txBody>", "</xdr:txBody>"))
+            .Replace("<a:noFill/>", Blip("<a:alphaModFix amt=\"35000\"/>", "<a:stretch><a:fillRect/></a:stretch>"))
+            .Replace("</xdr:spPr>", "<a:effectLst><a:glow rad=\"127000\"><a:srgbClr val=\"ED7D31\"><a:alpha val=\"60000\"/></a:srgbClr></a:glow></a:effectLst></xdr:spPr>")));
         anchors.Append(OneCell(7, 31, 0, 0, 100, 50, Shadowed("Soft edges", "rect", "C00000", "<a:effectLst><a:softEdge rad=\"127000\"/></a:effectLst>")));
         string Child(string name, string fill, int x, int y, int cx, int cy) =>
             $"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"3\" name=\"{name}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>{Fill(fill)}</xdr:spPr>{Text(name, "FFFFFF", 900, bold: true)}</xdr:sp>";

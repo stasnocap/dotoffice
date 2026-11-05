@@ -9,6 +9,28 @@ namespace DotOffice.Converter;
 /// <summary>Paints laid-out pages onto PDF canvases, converting top-down layout space to PDF space once.</summary>
 internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warnings)
 {
+    /// <summary>
+    /// Adds a polygon to the current path; points that are NaN separate its rings (a shape with holes). True when there are several rings,
+    /// which are to be filled or clipped by the even-odd rule.
+    /// </summary>
+    private static bool PolygonPath(PdfCanvas canvas, IReadOnlyList<(double X, double Y)> points, double h)
+    {
+        bool rings = false, start = true;
+        foreach (var (x, y) in points)
+        {
+            if (double.IsNaN(x)) { canvas.ClosePath(); start = true; rings = true; continue; }
+            if (start) canvas.MoveTo(x, h - y); else canvas.LineTo(x, h - y);
+            start = false;
+        }
+        canvas.ClosePath();
+        return rings;
+    }
+
+    private static void ClipTo(PdfCanvas canvas, IReadOnlyList<(double X, double Y)> points, double h)
+    {
+        if (PolygonPath(canvas, points, h)) canvas.ClipEvenOdd(); else canvas.Clip();
+    }
+
     private readonly Dictionary<TrueTypeFont, PdfFont> _fonts = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ImageData, PdfImage?> _images = new(ReferenceEqualityComparer.Instance);
     private PdfDocument _pdf = new();
@@ -102,6 +124,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     canvas.SaveState();
                     if (push.Opacity < 1) canvas.SetAlpha(push.Opacity);
                     if (push.Clip is { } clip) canvas.Rectangle(clip.X, h - clip.Y - clip.Height, clip.Width, clip.Height).Clip();
+                    if (push.ClipOutline is { Count: >= 3 } outline) ClipTo(canvas, outline, h);
                     if (push.FlipH || push.FlipV)
                     {
                         // Mirror about the center first: the matrix is applied to the content before the rotation below.
@@ -149,12 +172,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                             return fillStops[^1].Color;
                         }
                         canvas.SaveState();
-                        if (gradient.Clip is { Count: >= 3 } rectClip)
-                        {
-                            canvas.MoveTo(rectClip[0].X, h - rectClip[0].Y);
-                            for (int k = 1; k < rectClip.Count; k++) canvas.LineTo(rectClip[k].X, h - rectClip[k].Y);
-                            canvas.ClosePath().Clip();
-                        }
+                        if (gradient.Clip is { Count: >= 3 } rectClip) ClipTo(canvas, rectClip, h);
                         else canvas.Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip();
                         const int bands = 48;
                         for (int band = bands; band >= 1; band--)
@@ -176,12 +194,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     }
                     else shading = _pdf.AddShading(PdfShading.Axial(cx - dx * half, h - (cy - dy * half), cx + dx * half, h - (cy + dy * half), stops));
                     canvas.SaveState();
-                    if (gradient.Clip is { Count: >= 3 } clipPolygon)
-                    {
-                        canvas.MoveTo(clipPolygon[0].X, h - clipPolygon[0].Y);
-                        for (int k = 1; k < clipPolygon.Count; k++) canvas.LineTo(clipPolygon[k].X, h - clipPolygon[k].Y);
-                        canvas.ClosePath().Clip();
-                    }
+                    if (gradient.Clip is { Count: >= 3 } clipPolygon) ClipTo(canvas, clipPolygon, h);
                     else canvas.Rectangle(gradient.X, h - gradient.Y - gradient.Height, gradient.Width, gradient.Height).Clip();
                     canvas.PaintShading(shading!).RestoreState();
                     break;
@@ -192,9 +205,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     break;
                 case PolygonItem { Points.Count: >= 3 } polygon:
                     Fill(polygon.Fill);
-                    canvas.MoveTo(polygon.Points[0].X, h - polygon.Points[0].Y);
-                    for (int k = 1; k < polygon.Points.Count; k++) canvas.LineTo(polygon.Points[k].X, h - polygon.Points[k].Y);
-                    canvas.ClosePath().Fill();
+                    if (PolygonPath(canvas, polygon.Points, h)) canvas.FillEvenOdd(); else canvas.Fill();
                     break;
                 case EllipseItem ellipse:
                 {
@@ -223,9 +234,8 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     {
                         if (image.Clip is { Count: >= 3 } imageClip)
                         {
-                            canvas.SaveState().MoveTo(imageClip[0].X, h - imageClip[0].Y);
-                            for (int k = 1; k < imageClip.Count; k++) canvas.LineTo(imageClip[k].X, h - imageClip[k].Y);
-                            canvas.ClosePath().Clip();
+                            canvas.SaveState();
+                            ClipTo(canvas, imageClip, h);
                         }
                         canvas.DrawImage(pdfImage, image.X, h - image.Y - image.Height, image.Width, image.Height);
                         if (image.Clip is { Count: >= 3 }) canvas.RestoreState();

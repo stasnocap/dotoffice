@@ -288,7 +288,7 @@ if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "
 fills_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Shape fills" ] && fills_page=$p; done
 fills_text=$(page_text "$fills_page")
-for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides" "Blurred shadow" "Picture fill" "Cut to an ellipse" "Rectangular" "Circular" "Tiled picture" "Mirrored tiles" "Translucent picture" "Glow" "Soft edges" "A rotated group" "Reflection" "Notched soft edges"; do
+for text in "ltUpDiag" "dkHorz" "wdDnDiag" "Style gradient 2" "Theme shadow" "Guides" "Blurred shadow" "Picture fill" "Cut to an ellipse" "Rectangular" "Circular" "Tiled picture" "Mirrored tiles" "Translucent picture" "Outside glow" "Glow" "Soft edges" "A rotated group" "Reflection" "Notched soft edges"; do
   [[ $fills_text == *"$text"* ]] || fail "missing shape text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape fills"; then fail "the shape fills sheet should not warn"; fi
@@ -296,6 +296,10 @@ qpdf --qdf --object-streams=disable "$pdf" fills-qdf.pdf
 # The rotated group turns both children (and their text) by 20 degrees: cos 20 = 0.9397, sin 20 = 0.342.
 qpdf "$pdf" --pages . "$fills_page" -- fills-page.pdf && qpdf --qdf --object-streams=disable fills-page.pdf fills-page-qdf.pdf
 [ "$(grep -ac "^0.9397 -0.342 0.342 0.9397 " fills-page-qdf.pdf || true)" -ge 2 ] || fail "the rotated group's children should be turned by 20 degrees"
+# The glow around the translucent shape and the custom frame with a hole are clipped and filled by the even-odd rule.
+[ "$(grep -ac '^W\* n$' fills-qdf.pdf || true)" -ge 4 ] || fail "the glow of a filled shape should be clipped to the outside of its outline (W* n)"
+qpdf "$pdf" --pages . "$path_page" -- paths-page.pdf && qpdf --qdf --object-streams=disable paths-page.pdf paths-page-qdf.pdf
+[ "$(grep -ac '^f\*$' paths-page-qdf.pdf || true)" -ge 1 ] || fail "a shape with a hole should be filled by the even-odd rule (f*)"
 hatches=$(grep -ac "^0.7725 0.3529 0.0667 RG$" fills-qdf.pdf || true)
 [ "$hatches" -ge 1 ] || fail "pattern fills should stroke hatch lines in the pattern color"
 # Shadows with a blur are nine faint copies that add up to their opacity (copy = 1 - (1 - alpha)^(1/9)): the drop shadow (40 %, 4 pt blur)

@@ -498,4 +498,45 @@ public class SheetShapeLayoutTests
         double cx = (polygon.Points.Min(p => p.X) + polygon.Points.Max(p => p.X)) / 2, cy = (polygon.Points.Min(p => p.Y) + polygon.Points.Max(p => p.Y)) / 2;
         Assert.Equal((left + 100, top + 65), (Math.Round(cx, 6), Math.Round(cy, 6)));
     }
+
+    [Fact]
+    public void A_glow_over_a_filled_shape_is_clipped_to_the_outside_of_the_outline()
+    {
+        var glow = new ShapeGlow(new Color(0, 176, 240), 0.4, 8);
+        var filled = Page(Shape(fill: Red) with { Glow = glow });
+        foreach (var layer in filled.Items.OfType<PushItem>().Where(p => p.Opacity < 1))
+        {
+            // A frame well around the shape, then the outline of the shape (its four corners) as a ring to cut out.
+            var clip = layer.ClipOutline!;
+            Assert.Equal(4 + 1 + 4, clip.Count);
+            Assert.True(double.IsNaN(clip[4].X));
+            Assert.True(clip[0].X < clip[5].X && clip[2].X > clip[7].X && clip[0].Y < clip[5].Y && clip[2].Y > clip[7].Y);   // the frame lies outside the ring
+        }
+        // Without a fill nothing covers the stroke's inner half, and nothing is cut out.
+        var hollow = Page(Shape(line: Blue) with { Glow = glow });
+        Assert.All(hollow.Items.OfType<PushItem>().Where(p => p.Opacity < 1), p => Assert.Null(p.ClipOutline));
+        // Its strokes are run on to the miter of the corners, so that the outer side of a corner has no gap.
+        var strokes = filled.Items.OfType<LineItem>().Where(l => l.Color == glow.Color && l.Width == 16).ToList();
+        Assert.Equal(4, strokes.Count);
+        var ringEdge = filled.Items.OfType<PushItem>().First(p => p.Opacity < 1).ClipOutline!.Skip(5).ToList();
+        double perimeter = 0;
+        for (int k = 0; k < 4; k++) perimeter += Math.Abs(ringEdge[(k + 1) % 4].X - ringEdge[k].X) + Math.Abs(ringEdge[(k + 1) % 4].Y - ringEdge[k].Y);
+        Assert.Equal(perimeter + 4 * 16, strokes.Sum(l => Math.Abs(l.X2 - l.X1) + Math.Abs(l.Y2 - l.Y1)), 6);   // each side grows by half the width at both ends
+    }
+
+    [Fact]
+    public void A_shape_with_holes_is_filled_as_one_compound_outline()
+    {
+        var ring = new ShapePath([(0, 0), (1, 0), (1, 1), (0, 1)], true) { Rings = [[(0.25, 0.25), (0.25, 0.75), (0.75, 0.75), (0.75, 0.25)]] };
+        var page = Page(Shape(ShapeGeometry.Custom, Red, Blue) with { Paths = [ring] });
+        var fill = Assert.Single(page.Items.OfType<PolygonItem>(), p => p.Fill == Red);
+        Assert.Equal(4 + 1 + 4, fill.Points.Count);
+        Assert.True(double.IsNaN(fill.Points[4].X) && double.IsNaN(fill.Points[4].Y));
+        Assert.Equal(8, page.Items.OfType<LineItem>().Count(l => l.Color == Blue));      // both rings are outlined
+        var hatched = Page(Shape(ShapeGeometry.Custom, null, null) with { Paths = [ring], FillPattern = new ShapePattern(HatchKind.Horizontal, Blue, Red, 10) });
+        // The hatch lines stop at the hole: none crosses the middle half of the frame.
+        var lines = hatched.Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        Assert.NotEmpty(lines);
+        Assert.Contains(lines, l => l.Y1 == l.Y2 && lines.Count(m => m.Y1 == l.Y1) >= 2);   // rows through the hole are cut in two pieces
+    }
 }

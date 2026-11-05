@@ -77,6 +77,20 @@ internal static class PresetPaths
             End(false, false);
         }
 
+        /// <summary>A path of several rings filled together by the even-odd rule: the ring inside another one is a hole.</summary>
+        public void Compound(params List<(double X, double Y)>[] rings)
+        {
+            var fractions = rings.Select(r => r.Select(p => (p.X / W, p.Y / H)).ToList()).ToList();
+            Result.Add(new ShapePath(fractions[0], true) { Rings = fractions.Skip(1).Cast<IReadOnlyList<(double X, double Y)>>().ToList() });
+        }
+
+        public static List<(double X, double Y)> EllipseRing(double cx, double cy, double rx, double ry)
+        {
+            var points = new List<(double X, double Y)>();
+            for (int k = 0; k < 72; k++) points.Add((cx + rx * Math.Cos(k * Pi / 36), cy + ry * Math.Sin(k * Pi / 36)));
+            return points;
+        }
+
         public void Ellipse(double cx, double cy, double rx, double ry, bool fill = true, bool stroke = true)
         {
             Begin(cx + rx, cy);
@@ -340,6 +354,33 @@ internal static class PresetPaths
             {
                 double r1 = ss * A("adj1", 16667, 0, 50000), r2 = ss * A("adj2", 0, 0, 50000);
                 b.Begin(r1, 0); b.Line(w - r1, 0); b.Arc(r1, r1, 270, 90); b.Line(w, h - r2); b.Arc(r2, r2, 0, 90); b.Line(r2, h); b.Arc(r2, r2, 90, 90); b.Line(0, r1); b.Arc(r1, r1, 180, 90); b.End();
+                break;
+            }
+
+            // Shapes with a hole.
+            case "donut":
+            {
+                double t = ss * A("adj", 25000, 0, 50000);
+                b.Compound(Builder.EllipseRing(w / 2, h / 2, w / 2, h / 2), Builder.EllipseRing(w / 2, h / 2, Math.Max(w / 2 - t, 0.01), Math.Max(h / 2 - t, 0.01)));
+                break;
+            }
+            case "frame":
+            {
+                double t = ss * A("adj1", 12500, 0, 50000);
+                b.Compound([(0, 0), (w, 0), (w, h), (0, h)], [(t, t), (w - t, t), (w - t, h - t), (t, h - t)]);
+                break;
+            }
+            case "noSmoking":
+            {
+                double t = ss * A("adj", 18750, 0, 50000 * h / ss);
+                double rx = Math.Max(w / 2 - t, 0.01), ry = Math.Max(h / 2 - t, 0.01);
+                b.Compound(Builder.EllipseRing(w / 2, h / 2, w / 2, h / 2), Builder.EllipseRing(w / 2, h / 2, rx, ry));
+                // The slash: a band across the inner circle from the top left to the bottom right, as thick as the ring.
+                double phi = Math.Max(Math.Asin(Math.Min(t / 2 / Math.Min(rx, ry), 1)), 0.01);
+                var slash = new List<(double X, double Y)>();
+                for (double a = Pi / 4 - phi; a <= Pi / 4 + phi + 1e-9; a += phi / 6) slash.Add((w / 2 + rx * Math.Cos(a), h / 2 + ry * Math.Sin(a)));
+                for (double a = 5 * Pi / 4 - phi; a <= 5 * Pi / 4 + phi + 1e-9; a += phi / 6) slash.Add((w / 2 + rx * Math.Cos(a), h / 2 + ry * Math.Sin(a)));
+                b.Poly(slash.ToArray());
                 break;
             }
 

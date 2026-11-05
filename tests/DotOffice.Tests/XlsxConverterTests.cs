@@ -172,4 +172,36 @@ public class XlsxConverterTests
         Assert.StartsWith("%PDF-", text);
         Assert.Contains("%%EOF", text);
     }
+
+    [Fact]
+    public async Task Shapes_with_holes_are_filled_even_odd_and_a_glow_is_clipped_even_odd()
+    {
+        string Pt(int x, int y) => $"<a:pt x=\"{x}\" y=\"{y}\"/>";
+        string Square(int a, int b) => $"<a:moveTo>{Pt(a, a)}</a:moveTo><a:lnTo>{Pt(b, a)}</a:lnTo><a:lnTo>{Pt(b, b)}</a:lnTo><a:lnTo>{Pt(a, b)}</a:lnTo><a:close/>";
+        string Shape(string geometry, string effects) =>
+            "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"S\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1270000\" cy=\"635000\"/></a:xfrm>" + geometry +
+            "<a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill>" + effects + "</xdr:spPr></xdr:sp>";
+        var frame = Shape($"<a:custGeom><a:avLst/><a:pathLst><a:path w=\"100\" h=\"100\">{Square(0, 100)}{Square(25, 75)}</a:path></a:pathLst></a:custGeom>", "");
+        var glowing = Shape("<a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom>", "<a:effectLst><a:glow rad=\"101600\"><a:srgbClr val=\"FFC000\"/></a:glow></a:effectLst>");
+        var xlsx = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: DrawingElement).AddDrawing(1, OneCellAnchor(1, 3, 100, 50, frame) + OneCellAnchor(5, 3, 100, 50, glowing));
+        var raw = await Convert(xlsx);
+        // The page content is deflated: look at the inflated streams.
+        var text = new StringBuilder();
+        var all = Encoding.Latin1.GetString(raw);
+        for (int at = all.IndexOf("stream\n", StringComparison.Ordinal); at >= 0; at = all.IndexOf("stream\n", at + 7, StringComparison.Ordinal))
+        {
+            int end = all.IndexOf("endstream", at, StringComparison.Ordinal);
+            if (end < 0) break;
+            try
+            {
+                using var inflated = new System.IO.Compression.ZLibStream(new MemoryStream(raw, at + 7, end - at - 7), System.IO.Compression.CompressionMode.Decompress);
+                using var reader = new StreamReader(inflated, Encoding.Latin1);
+                text.Append(reader.ReadToEnd()).Append('\n');
+            }
+            catch (InvalidDataException) { }
+        }
+        var pdf = text.ToString();
+        Assert.Matches(@"\nf\*\n", pdf);       // the frame with its hole
+        Assert.Matches(@"\nW\* n\n", pdf);     // the glow cut away inside the ellipse
+    }
 }

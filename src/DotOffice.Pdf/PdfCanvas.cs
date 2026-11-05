@@ -73,6 +73,9 @@ public sealed class PdfCanvas
     /// <summary>Intersects the clip with the current path (use inside <see cref="SaveState"/>/<see cref="RestoreState"/>).</summary>
     public PdfCanvas Clip() => Op("W n");
 
+    /// <summary>Like <see cref="Clip"/>, but by the even-odd rule: a ring inside another is cut out.</summary>
+    public PdfCanvas ClipEvenOdd() => Op("W* n");
+
     /// <summary>Multiplies the current transformation matrix; points map as x' = a·x + c·y + e, y' = b·x + d·y + f.</summary>
     public PdfCanvas Transform(double a, double b, double c, double d, double e, double f) =>
         Op($"{N(a)} {N(b)} {N(c)} {N(d)} {N(e)} {N(f)} cm");
@@ -85,6 +88,9 @@ public sealed class PdfCanvas
     }
     public PdfCanvas Stroke() => Op("S");
     public PdfCanvas Fill() => Op("f");
+
+    /// <summary>Fills by the even-odd rule: a ring inside another is left empty.</summary>
+    public PdfCanvas FillEvenOdd() => Op("f*");
     public PdfCanvas FillAndStroke() => Op("B");
 
     /// <summary>Draws a single line of text with its baseline starting at (x, y).</summary>

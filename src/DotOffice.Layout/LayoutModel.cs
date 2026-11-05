@@ -111,8 +111,15 @@ public sealed record ImageItem(double X, double Y, double Width, double Height, 
 public sealed record PushItem((double X, double Y, double Width, double Height)? Clip, double Rotation = 0, double CenterX = 0, double CenterY = 0, bool FlipH = false, bool FlipV = false, double Opacity = 1)
     : LayoutItem
 {
+    /// <summary>
+    /// A further clip by outlines (points that are NaN separate the rings): the group is painted where an odd number of the rings cover it, so
+    /// a big ring around a shape's outline clips to the outside of the shape.
+    /// </summary>
+    public IReadOnlyList<(double X, double Y)>? ClipOutline { get; init; }
+
     public override LayoutItem Offset(double dx, double dy) =>
-        this with { Clip = Clip is { } c ? (c.X + dx, c.Y + dy, c.Width, c.Height) : null, CenterX = CenterX + dx, CenterY = CenterY + dy };
+        this with { Clip = Clip is { } c ? (c.X + dx, c.Y + dy, c.Width, c.Height) : null, CenterX = CenterX + dx, CenterY = CenterY + dy,
+                    ClipOutline = ClipOutline?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
 /// <summary>Ends the innermost <see cref="PushItem"/> group.</summary>
