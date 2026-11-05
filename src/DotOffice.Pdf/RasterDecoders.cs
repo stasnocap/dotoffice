@@ -44,7 +44,8 @@ internal static class RasterDecoders
         bool topDown = height < 0;
         height = Math.Abs(height);
         CheckSize(width, height);
-        if (compression is not (0 or 3)) throw new NotSupportedException($"BMP compression {compression} is not supported.");
+        if (compression is not (0 or 1 or 2 or 3)) throw new NotSupportedException($"BMP compression {compression} is not supported.");
+        if (compression == 1 && bpp != 8 || compression == 2 && bpp != 4) throw new InvalidDataException("BMP RLE does not match its bit depth.");
         if (bpp is not (1 or 4 or 8 or 16 or 24 or 32)) throw new InvalidDataException($"BMP with {bpp} bits per pixel is not supported.");
 
         int paletteAt = 14 + headerSize;
@@ -65,6 +66,9 @@ internal static class RasterDecoders
             gMask = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(58));
             bMask = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(62));
         }
+
+        if (compression is 1 or 2)
+            return DecodeBmpRle(d, dataOffset, width, height, topDown, compression == 2, palette, paletteCount);
 
         long stride = ((long)width * bpp + 31) / 32 * 4;
         if (dataOffset < 0 || dataOffset + stride * height > d.Length) throw new InvalidDataException("BMP pixel data is truncated.");
@@ -105,6 +109,57 @@ internal static class RasterDecoders
             }
         }
         return new RasterImage(width, height, rgb, null);
+    }
+
+    /// <summary>RLE8/RLE4: encoded and absolute runs, end-of-line, end-of-bitmap and delta. Pixels never written stay transparent.</summary>
+    private static RasterImage DecodeBmpRle(byte[] d, int pos, int width, int height, bool topDown, bool rle4, byte[] palette, int paletteCount)
+    {
+        if (pos < 0 || pos > d.Length) throw new InvalidDataException("BMP pixel data is truncated.");
+        var rgb = new byte[width * height * 3];
+        var alpha = new byte[width * height];
+        int x = 0, y = 0;
+        void Put(int index)
+        {
+            if (x < width && y < height)
+            {
+                int row = topDown ? y : height - 1 - y;
+                int o = row * width + x;
+                if (index >= paletteCount) index = 0;
+                if (paletteCount > 0)
+                { rgb[o * 3] = palette[index * 3]; rgb[o * 3 + 1] = palette[index * 3 + 1]; rgb[o * 3 + 2] = palette[index * 3 + 2]; }
+                alpha[o] = 255;
+            }
+            x++;
+        }
+        bool done = false;
+        while (!done && pos + 1 < d.Length)
+        {
+            int n = d[pos++], v = d[pos++];
+            if (n > 0)
+            {
+                for (int i = 0; i < n; i++) Put(rle4 ? (i % 2 == 0 ? v >> 4 : v & 15) : v);
+                continue;
+            }
+            switch (v)
+            {
+                case 0: x = 0; y++; break;
+                case 1: done = true; break;
+                case 2:
+                    if (pos + 1 >= d.Length) { done = true; break; }
+                    x += d[pos++]; y += d[pos++];
+                    break;
+                default:
+                {
+                    int bytes = rle4 ? (v + 1) / 2 : v;
+                    if (pos + bytes > d.Length) throw new InvalidDataException("BMP pixel data is truncated.");
+                    for (int i = 0; i < v; i++)
+                        Put(rle4 ? (i % 2 == 0 ? d[pos + i / 2] >> 4 : d[pos + i / 2] & 15) : d[pos + i]);
+                    pos += (bytes + 1) & ~1;
+                    break;
+                }
+            }
+        }
+        return new RasterImage(width, height, rgb, alpha.Contains((byte)0) ? alpha : null);
     }
 
     private static byte Scale(uint value, uint mask)
@@ -295,8 +350,9 @@ internal static class RasterDecoders
         CheckSize(width, height);
         int bits = (int)One(258, 1), compression = (int)One(259, 1), photo = (int)One(262, 1);
         int spp = (int)One(277, 1), planar = (int)One(284, 1), predictor = (int)One(317, 1);
-        if (compression is not (1 or 32773)) throw new NotSupportedException($"TIFF compression {compression} is not supported.");
-        if (planar != 1 || predictor != 1) throw new NotSupportedException("Planar or predicted TIFF is not supported.");
+        if (compression is not (1 or 5 or 32773)) throw new NotSupportedException($"TIFF compression {compression} is not supported.");
+        if (planar != 1 || predictor is not (1 or 2)) throw new NotSupportedException("Planar TIFF or this predictor is not supported.");
+        if (predictor == 2 && bits != 8) throw new NotSupportedException("The horizontal predictor needs 8-bit samples.");
         if (photo is not (0 or 1 or 2 or 3)) throw new NotSupportedException($"TIFF photometric {photo} is not supported.");
         bool color = photo == 2;
         if (color && (bits != 8 || spp is not (3 or 4))) throw new NotSupportedException("Only 8-bit RGB TIFF is supported.");
@@ -319,6 +375,11 @@ internal static class RasterDecoders
                 strip[..n].CopyTo(raw.AsSpan((int)filled));
                 filled += n;
             }
+            else if (compression == 5)
+            {
+                var n = TiffLzw(strip, raw.AsSpan((int)filled));
+                filled += n;
+            }
             else
             {
                 int i = 0;
@@ -336,6 +397,9 @@ internal static class RasterDecoders
             }
         }
         if (filled < total) throw new InvalidDataException("TIFF pixel data is truncated.");
+        if (predictor == 2)
+            for (int y = 0; y < height; y++)
+                for (int k = spp; k < width * spp; k++) raw[(long)y * rowBytes + k] += raw[(long)y * rowBytes + k - spp];
 
         var rgb = new byte[width * height * 3];
         byte[]? alpha = color && spp == 4 ? new byte[width * height] : null;
@@ -367,5 +431,51 @@ internal static class RasterDecoders
                 }
             }
         return new RasterImage(width, height, rgb, alpha);
+    }
+
+    /// <summary>TIFF LZW: MSB-first codes, 9–12 bits, with the "early change" (width grows one code sooner than in GIF).</summary>
+    private static int TiffLzw(ReadOnlySpan<byte> data, Span<byte> output)
+    {
+        var prefix = new short[4096];
+        var suffix = new byte[4096];
+        var length = new int[4096];
+        for (int i = 0; i < 256; i++) { suffix[i] = (byte)i; length[i] = 1; prefix[i] = -1; }
+        int next = 258, size = 9, prev = -1, written = 0;
+        long bits = 0; int bitCount = 0, pos = 0;
+        while (true)
+        {
+            while (bitCount < size && pos < data.Length) { bits = bits << 8 | data[pos++]; bitCount += 8; }
+            if (bitCount < size) break;
+            int code = (int)(bits >> (bitCount - size)) & ((1 << size) - 1);
+            bitCount -= size;
+            if (code == 257) break;
+            if (code == 256) { size = 9; next = 258; prev = -1; continue; }
+            if (prev == -1)
+            {
+                if (code > 255) throw new InvalidDataException("Corrupt TIFF LZW data.");
+                if (written >= output.Length) break;
+                output[written++] = (byte)code;
+                prev = code;
+                continue;
+            }
+            if (code > next || code == next && next >= 4096) throw new InvalidDataException("Corrupt TIFF LZW data.");
+            // The string for `code`; the not-yet-defined code (next) is string(prev) + its own first byte.
+            int source = code < next ? code : prev;
+            int len = length[source] + (code < next ? 0 : 1);
+            int cur = source;
+            for (int k = length[source]; k > 0; k--, cur = prefix[cur])
+                if (written + k - 1 < output.Length) output[written + k - 1] = suffix[cur];
+            int first = written < output.Length ? output[written] : 0;
+            if (code == next && written + len - 1 < output.Length) output[written + len - 1] = (byte)first;
+            if (next < 4096)
+            {
+                prefix[next] = (short)prev; suffix[next] = (byte)first; length[next] = length[prev] + 1; next++;
+                if (next >= (1 << size) - 1 && size < 12) size++;
+            }
+            written += Math.Min(len, output.Length - written);
+            prev = code;
+            if (written >= output.Length) break;
+        }
+        return written;
     }
 }

@@ -748,17 +748,21 @@ internal static class ShowcaseXlsx
             Absolute(300, 260, 90, 56, Pic("Absolute")) +                                                                         // measured from A1
             OneCell(1, 28, 4, 2, 90, 56, Pic("Bitmap", embed: "rId2")) +                                                          // BMP
             OneCell(4, 28, 4, 2, 90, 56, Pic("Animated-format GIF", embed: "rId3")) +                                            // GIF with a transparent corner
+            OneCell(1, 33, 4, 2, 90, 56, Pic("RLE-compressed bitmap", embed: "rId4")) +                                           // BMP, RLE8
+            OneCell(4, 33, 4, 2, 90, 56, Pic("LZW TIFF", embed: "rId5")) +                                                      // TIFF, LZW with the horizontal predictor
             TwoCell(1, 17, 4, 24, Pic("Across the page break")) +                                                                  // continues on the next page
             "<xdr:oneCellAnchor>" + Marker("from", 6, 17) + "<xdr:ext cx=\"1270000\" cy=\"635000\"/><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"9\" name=\"Freeform\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:custGeom/></xdr:spPr></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>";
         Entry(zip, $"xl/drawings/drawing{sheetNumber}.xml", $"<xdr:wsDr xmlns:xdr=\"{DrawingNs}\" xmlns:a=\"{DmlNs}\" xmlns:r=\"{Rel}\">{anchors}</xdr:wsDr>");
         Entry(zip, $"xl/drawings/_rels/drawing{sheetNumber}.xml.rels",
-            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/></Relationships>");
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}image\" Target=\"../media/image1.png\"/><Relationship Id=\"rId2\" Type=\"{RelType}image\" Target=\"../media/image2.bmp\"/><Relationship Id=\"rId3\" Type=\"{RelType}image\" Target=\"../media/image3.gif\"/><Relationship Id=\"rId4\" Type=\"{RelType}image\" Target=\"../media/image4.bmp\"/><Relationship Id=\"rId5\" Type=\"{RelType}image\" Target=\"../media/image5.tif\"/></Relationships>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}drawing\" Target=\"../drawings/drawing{sheetNumber}.xml\"/></Relationships>");
         using (var media = zip.CreateEntry("xl/media/image1.png").Open()) media.Write(ShowcaseDocx.GradientPng(160, 100));
         using (var media = zip.CreateEntry("xl/media/image2.bmp").Open()) media.Write(GradientBmp(90, 56));
         using (var media = zip.CreateEntry("xl/media/image3.gif").Open()) media.Write(CheckerGif(48, 32));
-        content.Append("<Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"bmp\" ContentType=\"image/bmp\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/>");
+        using (var media = zip.CreateEntry("xl/media/image4.bmp").Open()) media.Write(RleBmp(72, 40));
+        using (var media = zip.CreateEntry("xl/media/image5.tif").Open()) media.Write(LzwTiff(64, 40));
+        content.Append("<Default Extension=\"tif\" ContentType=\"image/tiff\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"bmp\" ContentType=\"image/bmp\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/>");
     }
 
     /// <summary>A 24-bit bottom-up BMP: red grows to the right, blue towards the top.</summary>
@@ -781,6 +785,85 @@ internal static class ShowcaseXlsx
             // BMP rows run bottom-up: the first row written is the bottom of the picture.
             w.Write(row);
         }
+        return ms.ToArray();
+    }
+
+    /// <summary>An 8-bit RLE-compressed BMP: four diagonal color bands, one run per band and row (rows run bottom-up).</summary>
+    private static byte[] RleBmp(int width, int height)
+    {
+        var data = new List<byte>();
+        for (int y = height - 1; y >= 0; y--)
+        {
+            int x = 0;
+            while (x < width)
+            {
+                int band = (x + y) / 18 % 4, run = 1;
+                while (x + run < width && (x + run + y) / 18 % 4 == band && run < 255) run++;
+                data.Add((byte)run); data.Add((byte)band);
+                x += run;
+            }
+            data.Add(0); data.Add(y == 0 ? (byte)1 : (byte)0);   // end of line; end of bitmap after the last row
+        }
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        int offset = 54 + 16;
+        w.Write("BM"u8.ToArray()); w.Write(offset + data.Count); w.Write(0); w.Write(offset);
+        w.Write(40); w.Write(width); w.Write(height); w.Write((short)1); w.Write((short)8); w.Write(1); w.Write(data.Count); w.Write(0); w.Write(0); w.Write(4); w.Write(0);
+        w.Write(new byte[] { 40, 40, 200, 0, 40, 160, 40, 0, 200, 80, 40, 0, 40, 200, 240, 0 }); // BGRA
+        w.Write(data.ToArray());
+        return ms.ToArray();
+    }
+
+    /// <summary>An RGB TIFF compressed with LZW (MSB-first codes, early change) and the horizontal predictor.</summary>
+    private static byte[] LzwTiff(int width, int height)
+    {
+        var pixels = new byte[width * height * 3];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                int o = (y * width + x) * 3;
+                pixels[o] = (byte)(255 * x / width); pixels[o + 1] = (byte)(255 * y / height); pixels[o + 2] = (byte)(x / 8 % 2 == y / 8 % 2 ? 220 : 60);
+            }
+        var diff = (byte[])pixels.Clone();
+        for (int y = 0; y < height; y++)
+            for (int k = width * 3 - 1; k >= 3; k--) diff[y * width * 3 + k] -= diff[y * width * 3 + k - 3];
+
+        var bits = new List<bool>();
+        int size = 9, next = 258;
+        void Put(int code) { for (int i = size - 1; i >= 0; i--) bits.Add((code >> i & 1) != 0); }
+        var table = new Dictionary<(int, byte), int>();
+        Put(256);
+        int cur = diff[0];
+        for (int i = 1; i < diff.Length; i++)
+        {
+            if (table.TryGetValue((cur, diff[i]), out var code)) { cur = code; continue; }
+            Put(cur);
+            table[(cur, diff[i])] = next++;
+            if (next > (1 << size) - 1 && size < 12) size++;
+            if (next == 4094) { Put(256); size = 9; next = 258; table.Clear(); }
+            cur = diff[i];
+        }
+        Put(cur);
+        next++;
+        if (next > (1 << size) - 1 && size < 12) size++;
+        Put(257);
+        var strip = new byte[(bits.Count + 7) / 8];
+        for (int i = 0; i < bits.Count; i++) if (bits[i]) strip[i / 8] |= (byte)(0x80 >> i % 8);
+
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        int ifd = 8 + strip.Length + (strip.Length & 1);
+        w.Write("II"u8.ToArray()); w.Write((short)42); w.Write(ifd);
+        w.Write(strip); if ((strip.Length & 1) != 0) w.Write((byte)0);
+        var entries = new (short Tag, short Type, int Count, int Value)[]
+        {
+            (256, 3, 1, width), (257, 3, 1, height), (258, 3, 3, ifd + 2 + 11 * 12 + 4), (259, 3, 1, 5), (262, 3, 1, 2),
+            (273, 4, 1, 8), (277, 3, 1, 3), (278, 3, 1, height), (279, 4, 1, strip.Length), (284, 3, 1, 1), (317, 3, 1, 2),
+        };
+        w.Write((short)entries.Length);
+        foreach (var (tag, type, count, value) in entries) { w.Write(tag); w.Write(type); w.Write(count); w.Write(value); }
+        w.Write(0);
+        w.Write(new short[] { 8, 8, 8 }.SelectMany(BitConverter.GetBytes).ToArray());
         return ms.ToArray();
     }
 
@@ -823,6 +906,7 @@ internal static class ShowcaseXlsx
         rows.Append(Row(26, Str("A26", "Right: mirrored horizontally (flipH), then vertically (flipV)", Default)));
         rows.Append(Row(27, Str("A27", "End of the sheet", Default)));
         rows.Append(Row(29, Str("A29", "BMP, GIF:", Default)));
+        rows.Append(Row(33, Str("A33", "RLE BMP, LZW TIFF:", Default)));
         var cols = "<cols><col min=\"1\" max=\"12\" width=\"13\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +

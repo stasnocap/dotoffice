@@ -48,6 +48,23 @@ public class XlsxConverterTests
     }
 
     [Fact]
+    public async Task Rle_bitmaps_are_drawn_and_emf_pictures_keep_the_placeholder_warning()
+    {
+        // 2x1 RLE8 bitmap: a run of two pixels of palette entry 1, end of bitmap.
+        byte[] rle = [.. "BM"u8, 66, 0, 0, 0, 0, 0, 0, 0, 62, 0, 0, 0, 40, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 0,
+            1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 255, 0, 2, 1, 0, 1];
+        var emf = new byte[88];
+        emf[0] = 1; emf[40] = 0x20; emf[41] = 0x45; emf[42] = 0x4D; emf[43] = 0x46;
+        var warnings = new ConversionWarningList();
+        var xlsx = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: DrawingElement)
+            .AddDrawing(1, TwoCellAnchor(0, 1, 2, 3, Pic("rId1")) + TwoCellAnchor(3, 1, 5, 3, Pic("rId2")), rle, emf);
+        await Convert(xlsx, warnings);
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code == "pdf.image-invalid");
+        Assert.Single(warnings.Warnings, w => w.Code == "pdf.image-format");
+    }
+
+    [Fact]
     public async Task Surfaces_reader_warnings()
     {
         var warnings = new ConversionWarningList();

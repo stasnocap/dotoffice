@@ -37,12 +37,48 @@ public class RasterDecoderTests
     }
 
     [Fact]
-    public void Bmp_with_rle_is_rejected_and_truncated_data_is_invalid()
+    public void Bmp_with_unknown_compression_is_rejected_and_truncated_data_is_invalid()
     {
-        var rle = Bmp(8, 1, 1, new byte[4], [0, 0, 0, 0]);
-        rle[30] = 1;
-        Assert.Throws<NotSupportedException>(() => RasterDecoders.DecodeBmp(rle));
+        var jpeg = Bmp(8, 1, 1, new byte[4], [0, 0, 0, 0]);
+        jpeg[30] = 4;
+        Assert.Throws<NotSupportedException>(() => RasterDecoders.DecodeBmp(jpeg));
         Assert.Throws<InvalidDataException>(() => RasterDecoders.DecodeBmp(Bmp(24, 5, 5, [], [0, 0])));
+    }
+
+    private static byte[] BmpRle(int bpp, int w, int h, byte[] palette, byte[] data, bool negativeHeight = false)
+    {
+        var bmp = Bmp(bpp, w, negativeHeight ? -h : h, palette, data);
+        bmp[30] = (byte)(bpp == 8 ? 1 : 2);
+        return bmp;
+    }
+
+    [Fact]
+    public void Bmp_rle8_runs_absolute_runs_and_deltas()
+    {
+        var palette = new byte[] { 0, 0, 0, 0, 0, 0, 255, 0, 0, 255, 0, 0 }; // black, red, green (BGRA)
+        // Row 0 (bottom): 3 x red, absolute run of green,black (padded), end of line;
+        // row 1 (top): delta skips 1 pixel, then 1 x green; end of bitmap.
+        byte[] data = [3, 1, 0, 2, 2, 0, 0, 0, 0, 2, 1, 0, 1, 2, 0, 1];
+        var r = RasterDecoders.DecodeBmp(BmpRle(8, 3, 2, palette, data));
+        Assert.Equal((3, 2), (r.Width, r.Height));
+        // Top row: pixel 0 never written (transparent), pixel 1 skipped by the delta, pixel 2 = green? Delta (1,0) lands on x=1.
+        Assert.NotNull(r.Alpha);
+        Assert.Equal(new byte[] { 0, 255, 0, 255, 255, 255 }, r.Alpha);
+        Assert.Equal([0, 255, 0], r.Rgb[3..6]); // top row, x = 1 is green
+        Assert.Equal([255, 0, 0, 255, 0, 0, 255, 0, 0], r.Rgb[9..18]); // bottom row: three reds
+    }
+
+    [Fact]
+    public void Bmp_rle4_uses_nibbles_and_top_down_order()
+    {
+        var palette = new byte[] { 0, 0, 0, 0, 0, 0, 255, 0 }; // black, red
+        // 4 pixels alternating red,black from one byte 0x10: run of 4 -> 1,0,1,0; end of bitmap.
+        var r = RasterDecoders.DecodeBmp(BmpRle(4, 4, 1, palette, [4, 0x10, 0, 1], negativeHeight: true));
+        Assert.Equal([255, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0, 0], r.Rgb);
+        // Absolute run of 3 nibbles (0x12 0x30) -> 1,2->clamped to 0,3->0.
+        var a = RasterDecoders.DecodeBmp(BmpRle(4, 3, 1, palette, [0, 3, 0x10, 0x20, 0, 1]));
+        Assert.Equal([255, 0, 0, 0, 0, 0, 0, 0, 0], a.Rgb);
+        Assert.Throws<InvalidDataException>(() => RasterDecoders.DecodeBmp(BmpRle(4, 3, 1, palette, [0, 8, 0x10])));
     }
 
     /// <summary>A GIF whose LZW stream emits a clear code before every pixel (valid, if inefficient).</summary>
@@ -115,13 +151,14 @@ public class RasterDecoderTests
         Assert.Equal([0, 255, 0, 0, 255, 0, 0, 255, 0], r.Rgb);
     }
 
-    private static byte[] Tiff(int w, int h, int photo, int spp, byte[] strip, int compression = 1, int bits = 8, ushort[]? map = null, bool bigEndian = false)
+    private static byte[] Tiff(int w, int h, int photo, int spp, byte[] strip, int compression = 1, int bits = 8, ushort[]? map = null, bool bigEndian = false, int predictor = 1)
     {
         var entries = new List<(int Tag, int Type, int Count, long Value)>
         {
             (256, 3, 1, w), (257, 3, 1, h), (258, 3, 1, bits), (259, 3, 1, compression), (262, 3, 1, photo),
             (273, 4, 1, 0), (277, 3, 1, spp), (279, 4, 1, strip.Length),
         };
+        if (predictor != 1) entries.Add((317, 3, 1, predictor));
         int ifdAt = 8 + strip.Length;
         int dirSize = 2 + (entries.Count + (map != null ? 1 : 0)) * 12 + 4;
         int mapAt = ifdAt + dirSize;
@@ -164,7 +201,58 @@ public class RasterDecoderTests
         Assert.Equal([0x10, 0x10, 0x10, 1, 2, 3], r.Rgb);
         var a = RasterDecoders.DecodeTiff(Tiff(1, 1, 2, 4, [1, 2, 3, 99]));
         Assert.Equal([99], a.Alpha);
-        Assert.Throws<NotSupportedException>(() => RasterDecoders.DecodeTiff(Tiff(1, 1, 2, 3, [1, 2, 3], compression: 5)));
+        Assert.Throws<NotSupportedException>(() => RasterDecoders.DecodeTiff(Tiff(1, 1, 2, 3, [1, 2, 3], compression: 7)));
+    }
+
+    /// <summary>A TIFF LZW encoder (MSB-first, early change), as libtiff writes it.</summary>
+    private static byte[] TiffLzwEncode(byte[] input)
+    {
+        var bits = new List<bool>();
+        int size = 9, next = 258;
+        void Put(int code) { for (int i = size - 1; i >= 0; i--) bits.Add((code >> i & 1) != 0); }
+        var table = new Dictionary<(int, byte), int>();
+        Put(256);
+        int cur = input[0];
+        for (int i = 1; i < input.Length; i++)
+        {
+            if (table.TryGetValue((cur, input[i]), out var code)) { cur = code; continue; }
+            Put(cur);
+            table[(cur, input[i])] = next++;
+            if (next > (1 << size) - 1 && size < 12) size++;
+            if (next == 4094) { Put(256); size = 9; next = 258; table.Clear(); }
+            cur = input[i];
+        }
+        Put(cur);
+        next++;
+        if (next > (1 << size) - 1 && size < 12) size++;
+        Put(257);
+        var bytes = new byte[(bits.Count + 7) / 8];
+        for (int i = 0; i < bits.Count; i++) if (bits[i]) bytes[i / 8] |= (byte)(0x80 >> i % 8);
+        return bytes;
+    }
+
+    [Fact]
+    public void Tiff_lzw_is_msb_first_with_early_change_and_survives_table_growth()
+    {
+        // 100 x 40 RGB of pseudo-random bytes: the table passes 511, 1023 and 2047 and is cleared once.
+        var rng = new Random(7);
+        var pixels = new byte[100 * 40 * 3];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(rng.Next(4) * 60);
+        var r = RasterDecoders.DecodeTiff(Tiff(100, 40, 2, 3, TiffLzwEncode(pixels), compression: 5));
+        Assert.Equal(pixels, r.Rgb);
+
+        // The textbook case: codes "7 7 7 8 8 7 7 6 6" -> repeated runs use the not-yet-defined code (KwKwK).
+        var small = new byte[] { 10, 10, 10, 10, 10, 10, 20, 20, 20 };
+        Assert.Equal(small, RasterDecoders.DecodeTiff(Tiff(3, 1, 2, 3, TiffLzwEncode(small), compression: 5)).Rgb);
+    }
+
+    [Fact]
+    public void Tiff_horizontal_predictor_adds_the_left_neighbour()
+    {
+        var r = RasterDecoders.DecodeTiff(Tiff(3, 1, 2, 3, [10, 20, 30, 1, 2, 3, 1, 2, 3], predictor: 2));
+        Assert.Equal([10, 20, 30, 11, 22, 33, 12, 24, 36], r.Rgb);
+        var lzw = RasterDecoders.DecodeTiff(Tiff(2, 1, 1, 1, TiffLzwEncode([100, 5]), compression: 5, predictor: 2));
+        Assert.Equal([100, 100, 100, 105, 105, 105], lzw.Rgb);
     }
 
     [Fact]
