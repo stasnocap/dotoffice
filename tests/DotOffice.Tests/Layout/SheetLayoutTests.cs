@@ -399,6 +399,21 @@ public class SheetOverflowTests
     }
 
     [Fact]
+    public void Fill_alignment_repeats_the_text_as_often_as_it_fits()
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, Text("ab", HorizontalAlignment.Fill)), (1, 0, Text("ab", HorizontalAlignment.Left)));
+        sheet.ColumnWidths[0] = 100;
+        var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToList();
+        var filled = items.Where(t => t.Baseline < items.Max(i => i.Baseline) - 1).ToList();
+        string repeated = string.Concat(filled.Select(t => t.Text));
+        Assert.True(repeated.Length >= 6 && repeated.Length % 2 == 0, repeated);
+        Assert.Equal(string.Concat(Enumerable.Repeat("ab", repeated.Length / 2)), repeated);
+        Assert.True(filled.Max(Right) <= sheet.PageSetup.Margins.Left + 100 + 0.1); // it never spills
+        var plain = items.Except(filled).ToList();
+        Assert.Equal("ab", string.Concat(plain.Select(t => t.Text)));
+    }
+
+    [Fact]
     public void Right_aligned_text_spills_to_the_left()
     {
         var sheet = SheetLayoutTests.Sheet((0, 1, Text(Long, HorizontalAlignment.Right)));
@@ -605,6 +620,25 @@ public class SheetHeaderFooterTests
         }
         Assert.Contains("One", Joined(doc.Pages[1], aboveY: 40));
         Assert.Contains("Two", Joined(doc.Pages[2], aboveY: 40));
+    }
+
+    [Fact]
+    public void A_sheet_can_restart_the_page_numbering_and_later_sheets_continue_from_it()
+    {
+        var workbook = new Workbook();
+        var first = WithText("One");
+        first.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("", "&P/&N", "") };
+        var second = WithText("Two", 80); // two pages
+        second.PageSetup.Footer = first.PageSetup.Footer;
+        second.PageSetup.UseFirstPageNumber = true;
+        second.PageSetup.FirstPageNumber = 7;
+        var third = WithText("Three");
+        third.PageSetup.Footer = first.PageSetup.Footer;
+        workbook.Sheets.Add(first);
+        workbook.Sheets.Add(second);
+        workbook.Sheets.Add(third);
+        var doc = SheetLayoutTests.Layout(workbook);
+        Assert.Equal(["1/4", "7/4", "8/4", "9/4"], doc.Pages.Select(page => Joined(page, belowY: 740)));
     }
 
     [Fact]

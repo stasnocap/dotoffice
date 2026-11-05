@@ -469,15 +469,36 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private static (double, double) In(double w, double h) => (w * 72, h * 72);
     private static (double, double) Mm(double w, double h) => (w * 72 / 25.4, h * 72 / 25.4);
 
-    /// <summary>Portrait sizes in points for the SpreadsheetML paperSize ids that have a fixed, well-known size.</summary>
+    /// <summary>
+    /// Portrait sizes in points for every SpreadsheetML <c>paperSize</c> id that names a fixed size (the ids of the Windows
+    /// <c>DEVMODE</c> list). The "rotated" ids stand for the same sheet turned sideways: the page's own orientation decides, so they
+    /// take the size of their upright twin.
+    /// </summary>
     private static readonly Dictionary<int, (double Width, double Height)> PaperSizes = new()
     {
         [1] = In(8.5, 11), [2] = In(8.5, 11), [3] = In(11, 17), [4] = In(17, 11), [5] = In(8.5, 14), [6] = In(5.5, 8.5),
         [7] = In(7.25, 10.5), [8] = Mm(297, 420), [9] = Mm(210, 297), [10] = Mm(210, 297), [11] = Mm(148, 210),
         [12] = Mm(257, 364), [13] = Mm(182, 257), [14] = In(8.5, 13), [15] = Mm(215, 275), [16] = In(10, 14),
-        [17] = In(11, 17), [18] = In(8.5, 11), [19] = In(3.875, 8.875), [20] = In(4.125, 9.5), [27] = Mm(110, 220),
-        [28] = Mm(162, 229), [29] = Mm(324, 458), [30] = Mm(229, 324), [31] = Mm(114, 162), [36] = Mm(250, 353),
-        [37] = Mm(176, 250), [38] = Mm(125, 176), [66] = Mm(420, 594), [67] = Mm(105, 148),
+        [17] = In(11, 17), [18] = In(8.5, 11), [19] = In(3.875, 8.875), [20] = In(4.125, 9.5), [21] = In(4.5, 10.375),
+        [22] = In(4.75, 11), [23] = In(5, 11.5), [24] = In(17, 22), [25] = In(22, 34), [26] = In(34, 44), [27] = Mm(110, 220),
+        [28] = Mm(162, 229), [29] = Mm(324, 458), [30] = Mm(229, 324), [31] = Mm(114, 162), [32] = Mm(114, 229),
+        [33] = Mm(250, 353), [34] = Mm(176, 250), [35] = Mm(125, 176), [36] = Mm(110, 230), [37] = In(3.875, 7.5),
+        [38] = In(3.625, 6.5), [39] = In(14.875, 11), [40] = In(8.5, 12), [41] = In(8.5, 13), [42] = Mm(250, 353),
+        [43] = Mm(100, 148), [44] = In(9, 11), [45] = In(10, 11), [46] = In(11, 15), [47] = Mm(220, 220),
+        [50] = In(9.5, 12), [51] = In(9.5, 15), [52] = In(11.69, 18), [53] = In(9.27, 12.69), [54] = In(8.5, 11),
+        [55] = Mm(210, 297), [56] = In(9.275, 12), [57] = Mm(227, 356), [58] = Mm(305, 487), [59] = In(8.5, 12.69),
+        [60] = Mm(210, 330), [61] = Mm(148, 210), [62] = Mm(182, 257), [63] = Mm(322, 445), [64] = Mm(174, 235),
+        [65] = Mm(201, 276), [66] = Mm(420, 594), [67] = Mm(297, 420), [68] = Mm(322, 445), [69] = Mm(148, 200),
+        [70] = Mm(105, 148), [71] = Mm(240, 332), [72] = Mm(216, 277), [73] = Mm(120, 235), [74] = Mm(90, 205),
+        [75] = In(8.5, 11), [76] = Mm(297, 420), [77] = Mm(210, 297), [78] = Mm(148, 210), [79] = Mm(257, 364),
+        [80] = Mm(182, 257), [81] = Mm(100, 148), [82] = Mm(148, 200), [83] = Mm(105, 148), [84] = Mm(240, 332),
+        [85] = Mm(216, 277), [86] = Mm(120, 235), [87] = Mm(90, 205), [88] = Mm(128, 182), [89] = Mm(128, 182),
+        [90] = In(11, 12), [91] = Mm(105, 235), [92] = Mm(105, 235), [93] = Mm(146, 215), [94] = Mm(97, 151),
+        [95] = Mm(97, 151), [96] = Mm(102, 165), [97] = Mm(102, 176), [98] = Mm(125, 176), [99] = Mm(110, 208),
+        [100] = Mm(110, 220), [101] = Mm(120, 230), [102] = Mm(160, 230), [103] = Mm(120, 309), [104] = Mm(229, 324),
+        [105] = Mm(324, 458), [106] = Mm(146, 215), [107] = Mm(97, 151), [108] = Mm(97, 151), [109] = Mm(102, 165),
+        [110] = Mm(102, 176), [111] = Mm(125, 176), [112] = Mm(110, 208), [113] = Mm(110, 220), [114] = Mm(120, 230),
+        [115] = Mm(160, 230), [116] = Mm(120, 309), [117] = Mm(229, 324), [118] = Mm(324, 458),
     };
 
     private void ReadPageSetup(XmlReader r, Worksheet sheet, bool fitToPage)
@@ -501,6 +522,11 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             setup.FitToHeight = Math.Max(r.IntAttr("fitToHeight") ?? 1, 0);
         }
         setup.PageOrderOverThenDown = r.GetAttribute("pageOrder") == "overThenDown";
+        if (r.BoolAttr("useFirstPageNumber") && r.IntAttr("firstPageNumber") is { } firstNumber)
+        {
+            setup.UseFirstPageNumber = true;
+            setup.FirstPageNumber = firstNumber;
+        }
         setup.Comments = r.GetAttribute("cellComments") switch { "atEnd" => CommentPrinting.AtEnd, "asDisplayed" => CommentPrinting.AsDisplayed, _ => CommentPrinting.None };
         if (setup.Comments == CommentPrinting.AsDisplayed)
             Options.Warnings.Warn("xlsx.comments", $"Sheet '{sheet.Name}' prints its comments as displayed on the sheet; they are listed at the end instead.");

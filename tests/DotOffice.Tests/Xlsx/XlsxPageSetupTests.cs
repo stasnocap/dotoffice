@@ -29,7 +29,16 @@ public class XlsxPageSetupTests
     [InlineData(14, 612, 936)]
     [InlineData(12, 728.5, 1031.81)]
     [InlineData(66, 1190.55, 1683.78)]
-    [InlineData(67, 297.64, 419.53)]
+    [InlineData(67, 841.89, 1190.55)] // A3 transverse
+    [InlineData(21, 324, 747)]        // #11 envelope
+    [InlineData(33, 708.66, 1000.63)] // ISO B4 envelope
+    [InlineData(36, 311.81, 651.97)]  // Italy envelope
+    [InlineData(37, 279, 540)]        // Monarch envelope
+    [InlineData(50, 684, 864)]        // Letter extra
+    [InlineData(70, 297.64, 419.53)]  // A6
+    [InlineData(77, 595.28, 841.89)]  // A4 rotated: the page's orientation decides
+    [InlineData(93, 413.86, 609.45)]  // PRC 16K
+    [InlineData(118, 918.43, 1298.27)] // PRC #10 rotated
     public void Reads_paper_sizes(int paper, double width, double height)
     {
         var setup = Read(tail: $"<pageSetup paperSize=\"{paper}\"/>").PageSetup;
@@ -52,7 +61,7 @@ public class XlsxPageSetupTests
     public void Warns_about_unknown_paper_sizes()
     {
         var warnings = new ConversionWarningList();
-        var setup = Read(tail: "<pageSetup paperSize=\"99\"/>", warnings: warnings).PageSetup;
+        var setup = Read(tail: "<pageSetup paperSize=\"150\"/>", warnings: warnings).PageSetup;
         Assert.Equal(612, setup.PageWidth);
         Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.paper-size");
     }
@@ -129,4 +138,29 @@ public class XlsxPageSetupTests
 
     private static HeaderFooterParts XlsxContextProbe(string text) =>
         Read(tail: $"<headerFooter><oddHeader>{text.Replace("&", "&amp;")}</oddHeader></headerFooter>").PageSetup.Header.Odd;
+
+    [Fact]
+    public void Every_listed_paper_size_id_is_known_and_the_gaps_are_not()
+    {
+        foreach (int id in Enumerable.Range(1, 118).Where(i => i is not (48 or 49)))
+        {
+            var warnings = new ConversionWarningList();
+            var setup = Read(tail: $"<pageSetup paperSize=\"{id}\"/>", warnings: warnings).PageSetup;
+            Assert.Empty(warnings.Warnings);
+            Assert.True(setup.PageWidth > 100 && setup.PageHeight > 100, $"paper size {id}");
+        }
+        var unknown = new ConversionWarningList();
+        Read(tail: "<pageSetup paperSize=\"48\"/>", warnings: unknown);
+        Assert.Single(unknown.Warnings);
+    }
+
+    [Fact]
+    public void The_first_page_number_is_read_only_when_it_is_used()
+    {
+        var used = Read(tail: "<pageSetup firstPageNumber=\"5\" useFirstPageNumber=\"1\"/>").PageSetup;
+        Assert.True(used.UseFirstPageNumber);
+        Assert.Equal(5, used.FirstPageNumber);
+        var unused = Read(tail: "<pageSetup firstPageNumber=\"5\"/>").PageSetup;
+        Assert.False(unused.UseFirstPageNumber);
+    }
 }

@@ -50,10 +50,14 @@ public sealed partial class SheetLayoutEngine
         if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(612, 792));
 
         // Page numbers continue across sheets, so headers and footers wait until the total is known.
+        // A sheet may restart the numbering at its own first page number; the pages after it continue from there.
+        int number = 1;
         for (int i = 0; i < records.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EmitHeaderFooter(records[i], i + 1, records.Count, workbook);
+            var setup = records[i].Sheet.PageSetup;
+            if (records[i].IndexInSheet == 0 && setup.UseFirstPageNumber) number = setup.FirstPageNumber;
+            EmitHeaderFooter(records[i], number++, records.Count, workbook);
         }
         return document;
     }
@@ -1269,6 +1273,18 @@ public sealed partial class SheetLayoutEngine
                 double hashWidth = Math.Max(Itemizer.Measure(hash, "#", style.Font.FontSize, style.Font, false), 0.1);
                 text = new string('#', Math.Max(1, (int)(textWidth / hashWidth)));
                 block = _engine.BuildBlock(cell, text, textWidth);
+            }
+
+            if (style.HorizontalAlignment == HorizontalAlignment.Fill && !wrap && block.Width > 0.01 && block.Width <= textWidth + Epsilon && text.Length > 0)
+            {
+                // Fill alignment repeats the text as often as it fits the cell.
+                int copies = (int)Math.Floor((textWidth + Epsilon) / block.Width);
+                while (copies > 1)
+                {
+                    var repeated = _engine.BuildBlock(cell, string.Concat(Enumerable.Repeat(text, copies)), textWidth);
+                    if (repeated.Width <= textWidth + Epsilon) { block = repeated; break; }
+                    copies--;
+                }
             }
 
             var alignment = AlignmentOf(cell);

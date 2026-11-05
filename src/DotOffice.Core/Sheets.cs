@@ -262,6 +262,11 @@ public sealed class SheetPageSetup
 
     public double FooterDistance { get; set; } = 21.6;
 
+    /// <summary>The number the sheet's first page gets (<c>firstPageNumber</c>) when <see cref="UseFirstPageNumber"/> is set; otherwise numbering continues.</summary>
+    public int FirstPageNumber { get; set; } = 1;
+
+    public bool UseFirstPageNumber { get; set; }
+
     /// <summary>The ranges to print, each as its own page set, in order; empty means the used range.</summary>
     public List<CellRange> PrintAreas { get; } = [];
 

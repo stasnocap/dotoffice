@@ -13,15 +13,28 @@ pages=$(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}')
 pdftotext -layout "$pdf" all.txt
 
 # The footer counts pages across the whole workbook: every "Page N of M" has M = total, and page p says "Page p of M".
-grep -qF "Page $pages of $pages" all.txt || fail "missing: Page $pages of $pages"
+# The last sheet ("Numbering") restarts the numbering at 20 and has its own footer, so it is left out of this loop.
+numbering=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Numbering" ] && numbering=$((numbering + 1)); done
+[ "$numbering" = 1 ] || fail "the numbering sheet should be one page, found $numbering"
+last=$((pages - numbering))
+grep -qF "Page $last of $pages" all.txt || fail "missing: Page $last of $pages"
 bad=$(grep -oE 'Page [0-9]+ of [0-9]+' all.txt | grep -vE " of $pages\$" || true)
 [ -z "$bad" ] || fail "footer total is not $pages: $bad"
-for p in $(seq 1 "$pages"); do
+for p in $(seq 1 "$last"); do
   [[ $(page_text "$p") =~ Page\ $p\ of\ $pages ]] || fail "page $p does not say 'Page $p of $pages'"
 done
 
+# The "Numbering" sheet: first page number 20 (useFirstPageNumber), A6 paper (297.6 x 419.5 pt), fill alignment repeats the text.
+number_page=$pages
+[[ $(page_text "$number_page") == *"Counted 20 of $pages"* ]] || fail "the numbering sheet should say 'Counted 20 of $pages'"
+pdfinfo -f "$number_page" -l "$number_page" "$pdf" | grep -E "^Page +$number_page size:" | grep -qE "297\.[0-9]+ x 419\.[0-9]+" || fail "the numbering sheet should be A6"
+number_text=$(page_text "$number_page")
+[[ $number_text == *"-=-=-="* ]] || fail "the fill-aligned '-=' should be repeated"
+[[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
+
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"

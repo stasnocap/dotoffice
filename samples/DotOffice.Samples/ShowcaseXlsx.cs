@@ -20,7 +20,7 @@ internal static class ShowcaseXlsx
     private const int Default = 0, Title = 1, Header = 2, Money = 3, Percent = 4, IsoDate = 5, Time = 6, Accounting = 7, Wrap = 8,
         Right = 9, Center = 10, Indent = 11, Boxed = 12, Scientific = 13, Percent2 = 14, LongDate = 15, Bold = 16,
         Rot45 = 17, Rot90 = 18, RotDown = 19, Stacked = 20, RotWrap = 21, GradLinear = 22, GradDiagonal = 23, GradVertical = 24, GradCenter = 25, GradCorner = 26,
-        Fraction1 = 27, Fraction2 = 28, Eighths = 29, IndexedRed = 30;
+        Fraction1 = 27, Fraction2 = 28, Eighths = 29, IndexedRed = 30, FillAlign = 31;
 
     public const string HiddenMarker = "HIDDENSHEETMARKER";
 
@@ -48,6 +48,7 @@ internal static class ShowcaseXlsx
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
+            ("Numbering", NumberingSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
             ("Limits", Limits(), "hidden"),
         };
@@ -118,7 +119,7 @@ internal static class ShowcaseXlsx
         "<borders count=\"3\"><border><left/><right/><top/><bottom/><diagonal/></border>" +
         "<border><left/><right/><top/><bottom style=\"medium\"><color rgb=\"FF1F3864\"/></bottom><diagonal/></border>" +
         "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border></borders>" +
-        "<cellXfs count=\"31\">" +
+        "<cellXfs count=\"32\">" +
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                       // 0 default
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"2\" borderId=\"0\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 1 title
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"3\" borderId=\"1\"><alignment horizontal=\"center\"/></xf>" +                                                   // 2 header
@@ -150,6 +151,7 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"169\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 28 # ??/??
         "<xf numFmtId=\"170\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 29 # ?/8
         "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
+        "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment horizontal=\"fill\"/></xf>" +                                                  // 31 fill alignment
         "</cellXfs>" +
         "<dxfs count=\"6\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
@@ -594,6 +596,15 @@ internal static class ShowcaseXlsx
     {
         var rows = Row(1, Str("A1", "Paper sizes", Bold)) + Row(3, Str("A3", "This sheet is printed on A3 paper (paperSize 8)."));
         return Sheet("", rows, "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"8\"/>" + HeaderFooter);
+    }
+
+    /// <summary>A6 paper (paperSize 70), page numbering restarted at 20, and fill alignment repeating a text across its cell.</summary>
+    private static string NumberingSheet()
+    {
+        var rows = Row(1, Str("A1", "Numbering, A6 paper and fill alignment", Bold)) + Row(3, Str("A3", "-=", FillAlign)) + Row(4, Str("A4", "ab", FillAlign));
+        return Sheet("<cols><col min=\"1\" max=\"1\" width=\"30\" customWidth=\"1\"/></cols>", rows,
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"70\" firstPageNumber=\"20\" useFirstPageNumber=\"1\"/>" +
+            "<headerFooter><oddHeader>&amp;C&amp;A</oddHeader><oddFooter>&amp;CCounted &amp;P of &amp;N</oddFooter></headerFooter>");
     }
 
     private static string GradientSheet()
