@@ -37,6 +37,7 @@ internal static class ShowcaseXlsx
             ("Gradients", GradientSheet(), "visible"),
             ("Pictures", PicturesSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
+            ("Paper", PaperSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -282,6 +283,12 @@ internal static class ShowcaseXlsx
         rows.Append(Row(4, Str("A4", "Rows grow to fit rotated headings; the text is clipped at the cell edges.")));
         var cols = "<cols><col min=\"1\" max=\"4\" width=\"12\" customWidth=\"1\"/><col min=\"5\" max=\"5\" width=\"22\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter);
+    }
+
+    private static string PaperSheet()
+    {
+        var rows = Row(1, Str("A1", "Paper sizes", Bold)) + Row(3, Str("A3", "This sheet is printed on A3 paper (paperSize 8)."));
+        return Sheet("", rows, "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"8\"/>" + HeaderFooter);
     }
 
     private static string GradientSheet()

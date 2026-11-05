@@ -355,23 +355,29 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         setup.FooterDistance = Inches("footer", 0.3);
     }
 
+    private static (double, double) In(double w, double h) => (w * 72, h * 72);
+    private static (double, double) Mm(double w, double h) => (w * 72 / 25.4, h * 72 / 25.4);
+
+    /// <summary>Portrait sizes in points for the SpreadsheetML paperSize ids that have a fixed, well-known size.</summary>
+    private static readonly Dictionary<int, (double Width, double Height)> PaperSizes = new()
+    {
+        [1] = In(8.5, 11), [2] = In(8.5, 11), [3] = In(11, 17), [4] = In(17, 11), [5] = In(8.5, 14), [6] = In(5.5, 8.5),
+        [7] = In(7.25, 10.5), [8] = Mm(297, 420), [9] = Mm(210, 297), [10] = Mm(210, 297), [11] = Mm(148, 210),
+        [12] = Mm(257, 364), [13] = Mm(182, 257), [14] = In(8.5, 13), [15] = Mm(215, 275), [16] = In(10, 14),
+        [17] = In(11, 17), [18] = In(8.5, 11), [19] = In(3.875, 8.875), [20] = In(4.125, 9.5), [27] = Mm(110, 220),
+        [28] = Mm(162, 229), [29] = Mm(324, 458), [30] = Mm(229, 324), [31] = Mm(114, 162), [36] = Mm(250, 353),
+        [37] = Mm(176, 250), [38] = Mm(125, 176), [66] = Mm(420, 594), [67] = Mm(105, 148),
+    };
+
     private void ReadPageSetup(XmlReader r, Worksheet sheet, bool fitToPage)
     {
         var setup = sheet.PageSetup;
         double width, height;
-        switch (r.IntAttr("paperSize") ?? 1)
+        if (PaperSizes.TryGetValue(r.IntAttr("paperSize") ?? 1, out var paper)) (width, height) = paper;
+        else
         {
-            case 1: (width, height) = (612, 792); break;
-            case 3: (width, height) = (792, 1224); break;
-            case 5: (width, height) = (612, 1008); break;
-            case 7: (width, height) = (522, 756); break;
-            case 8: (width, height) = (841.89, 1190.55); break;
-            case 9: (width, height) = (595.28, 841.89); break;
-            case 11: (width, height) = (419.53, 595.28); break;
-            default:
-                Options.Warnings.Warn("xlsx.paper-size", $"Sheet '{sheet.Name}' uses an unsupported paper size; Letter is used instead.");
-                (width, height) = (612, 792);
-                break;
+            Options.Warnings.Warn("xlsx.paper-size", $"Sheet '{sheet.Name}' uses an unsupported paper size; Letter is used instead.");
+            (width, height) = (612, 792);
         }
         bool landscape = r.GetAttribute("orientation") == "landscape";
         setup.Orientation = landscape ? Orientation.Landscape : Orientation.Portrait;

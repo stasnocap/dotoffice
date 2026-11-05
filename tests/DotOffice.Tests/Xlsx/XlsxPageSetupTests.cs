@@ -25,6 +25,11 @@ public class XlsxPageSetupTests
     [InlineData(8, 841.89, 1190.55)]
     [InlineData(9, 595.28, 841.89)]
     [InlineData(11, 419.53, 595.28)]
+    [InlineData(3, 792, 1224)]
+    [InlineData(14, 612, 936)]
+    [InlineData(12, 728.5, 1031.81)]
+    [InlineData(66, 1190.55, 1683.78)]
+    [InlineData(67, 297.64, 419.53)]
     public void Reads_paper_sizes(int paper, double width, double height)
     {
         var setup = Read(tail: $"<pageSetup paperSize=\"{paper}\"/>").PageSetup;

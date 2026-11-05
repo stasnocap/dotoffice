@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Paper"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -102,3 +102,10 @@ bad=$(grep -ac '^1 0.7804 0.8078 rg$' conditional-qdf.pdf || true)
 [ "$bad" -ge 4 ] || fail "expected four cellIs fills, found $bad"
 curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
 [ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"
+
+# Paper sizes: the "Paper" sheet is A3 (842 x 1191 pt), every other sheet is A4 or Letter.
+for p in $(seq 1 "$pages"); do
+  if [ "$(header_of "$p")" = "Paper" ]; then
+    pdfinfo -f "$p" -l "$p" "$pdf" | grep -E "^Page +$p size:" | grep -qE "(841|842)\.[0-9]+ x (1190|1191)" || fail "the Paper sheet should be A3"
+  fi
+done
