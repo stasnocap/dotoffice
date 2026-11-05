@@ -109,6 +109,13 @@ public class XlsxPageSetupTests
     }
 
     [Fact]
+    public void Header_footer_scaling_follows_scaleWithDoc_and_defaults_to_on()
+    {
+        Assert.True(Read(tail: "<headerFooter><oddFooter>x</oddFooter></headerFooter>").PageSetup.HeaderFooterScaleWithDocument);
+        Assert.False(Read(tail: "<headerFooter scaleWithDoc=\"0\"><oddFooter>x</oddFooter></headerFooter>").PageSetup.HeaderFooterScaleWithDocument);
+    }
+
+    [Fact]
     public void Splits_header_and_footer_sections()
     {
         var setup = Read(tail: "<headerFooter><oddHeader>&amp;L&amp;\"Arial,Bold\"Left&amp;CCenter &amp;A&amp;RRight</oddHeader><oddFooter>Page &amp;P of &amp;N</oddFooter></headerFooter>").PageSetup;

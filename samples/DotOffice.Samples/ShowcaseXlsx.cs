@@ -48,6 +48,7 @@ internal static class ShowcaseXlsx
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
             ("Comments", CommentsSheet(), "visible"),
+            ("Titles", TitlesSheet(), "visible"),
             ("Numbering", NumberingSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
             ("Limits", Limits(), "hidden"),
@@ -95,7 +96,9 @@ internal static class ShowcaseXlsx
         Entry(zip, "xl/workbook.xml",
             $"<workbook xmlns=\"{Main}\" xmlns:r=\"{Rel}\"><sheets>{sheetEntries}</sheets>" +
             "<definedNames><definedName name=\"Limit\">Limits!$A$1</definedName><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"1\">'Long table'!$1:$2</definedName>" +
-            $"<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Areas")}\">Areas!$A$1:$C$3,Areas!$E$5:$F$7,Areas!$A$10:$B$11</definedName></definedNames></workbook>");
+            $"<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Areas")}\">Areas!$A$1:$C$3,Areas!$E$5:$F$7,Areas!$A$10:$B$11</definedName>" +
+            $"<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Titles")}\">Titles!$A$5:$B$124</definedName>" +
+            $"<definedName name=\"_xlnm.Print_Titles\" localSheetId=\"{sheets.FindIndex(x => x.Name == "Titles")}\">Titles!$1:$1</definedName></definedNames></workbook>");
         Entry(zip, "xl/styles.xml", Styles);
     }
 
@@ -599,6 +602,16 @@ internal static class ShowcaseXlsx
     }
 
     /// <summary>A6 paper (paperSize 70), page numbering restarted at 20, and fill alignment repeating a text across its cell.</summary>
+    /// <summary>The print area starts at row 5; row 1 lies outside it and is printed on every page anyway. The page is scaled to 60 % and so is its footer.</summary>
+    private static string TitlesSheet()
+    {
+        var rows = new StringBuilder(Row(1, Str("A1", "Print title outside the area", Bold) + Str("B1", "Repeats on every page", Bold)));
+        rows.Append(Row(2, Str("A2", "Rows 2 to 4 are not printed")));
+        for (int r = 5; r <= 124; r++) rows.Append(Row(r, Str($"A{r}", $"Titled row {r}") + Str($"B{r}", $"value {r * 3}")));
+        return Sheet("<cols><col min=\"1\" max=\"2\" width=\"28\" customWidth=\"1\"/></cols>", rows.ToString(),
+            "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" scale=\"60\"/>" + HeaderFooter);
+    }
+
     private static string NumberingSheet()
     {
         var rows = Row(1, Str("A1", "Numbering, A6 paper and fill alignment", Bold)) + Row(3, Str("A3", "-=", FillAlign)) + Row(4, Str("A4", "ab", FillAlign));

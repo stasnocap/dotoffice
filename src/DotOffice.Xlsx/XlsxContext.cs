@@ -536,6 +536,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     {
         bool different = r.BoolAttr("differentFirst");
         bool oddEven = r.BoolAttr("differentOddEven");
+        setup.HeaderFooterScaleWithDocument = r.GetAttribute("scaleWithDoc") is not ("0" or "false");
         var texts = new Dictionary<string, string>();
         if (r.IsEmptyElement) { r.Read(); return; }
         int depth = r.Depth;

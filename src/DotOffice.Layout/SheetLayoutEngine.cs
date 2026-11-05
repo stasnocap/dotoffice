@@ -63,7 +63,7 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>A page of a sheet, kept until headers and footers can be drawn.</summary>
-    private sealed record PageRecord(LayoutPage Page, Worksheet Sheet, int IndexInSheet);
+    private sealed record PageRecord(LayoutPage Page, Worksheet Sheet, int IndexInSheet, double Scale = 1);
 
     // ------------------------------------------------------------------ headers and footers
 
@@ -78,7 +78,7 @@ public sealed partial class SheetLayoutEngine
         var header = Pick(setup.Header, first, number);
         var footer = Pick(setup.Footer, first, number);
         if (header.IsEmpty && footer.IsEmpty) return;
-        var context = new FieldContext(number, total, record.Sheet.Name, workbook.Title ?? "");
+        var context = new FieldContext(number, total, record.Sheet.Name, workbook.Title ?? "", setup.HeaderFooterScaleWithDocument ? record.Scale : 1);
         var page = record.Page;
         double left = setup.Margins.Left, right = page.Width - setup.Margins.Right;
 
@@ -115,7 +115,7 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
-    private readonly record struct FieldContext(int Page, int Pages, string Sheet, string File);
+    private readonly record struct FieldContext(int Page, int Pages, string Sheet, string File, double Scale = 1);
 
     private sealed record HeaderLine(Line Line, double Width, double Size, FontMetrics Metrics);
 
@@ -130,8 +130,10 @@ public sealed partial class SheetLayoutEngine
         void Flush()
         {
             if (buffer.Length == 0) return;
-            runs.Add((buffer.ToString(), props));
-            maxSize = Math.Max(maxSize, props.FontSize);
+            // With scaleWithDoc the text is as large as the page scale makes it.
+            var scaled = context.Scale == 1 ? props : props with { FontSize = props.FontSize * context.Scale };
+            runs.Add((buffer.ToString(), scaled));
+            maxSize = Math.Max(maxSize, scaled.FontSize);
             buffer.Clear();
         }
 
@@ -496,11 +498,20 @@ public sealed partial class SheetLayoutEngine
 
             var columns = Enumerable.Range(_range.FirstColumn, _range.ColumnCount).Where(c => _sheet.ColumnWidth(c) > 0).ToList();
             ComputeRowHeights();
+            if (_setup.TitleRows is { } outside && outside.From < _range.FirstRow)
+                ComputeRowHeights(outside.From, Math.Min(outside.To, _range.FirstRow - 1));
             var rows = Enumerable.Range(_range.FirstRow, _range.RowCount).Where(r => RowHeight(r) > 0).ToList();
             if (columns.Count == 0 || rows.Count == 0) return;
 
-            var titleColumns = _setup.TitleColumns is { } tc ? columns.Where(c => c >= tc.From && c <= tc.To).ToList() : [];
-            var titleRows = _setup.TitleRows is { } tr ? rows.Where(r => r >= tr.From && r <= tr.To).ToList() : [];
+            // Print titles that lie before the print range are printed in front of every page, as Excel does; those after it are not.
+            var titleColumns = _setup.TitleColumns is { } tc
+                ? Enumerable.Range(tc.From, Math.Max(Math.Min(tc.To, _range.FirstColumn - 1) - tc.From + 1, 0)).Where(c => _sheet.ColumnWidth(c) > 0)
+                    .Concat(columns.Where(c => c >= tc.From && c <= tc.To)).ToList()
+                : [];
+            var titleRows = _setup.TitleRows is { } tr
+                ? Enumerable.Range(tr.From, Math.Max(Math.Min(tr.To, _range.FirstRow - 1) - tr.From + 1, 0)).Where(r => RowHeight(r) > 0)
+                    .Concat(rows.Where(r => r >= tr.From && r <= tr.To)).ToList()
+                : [];
 
             double pageWidth = _setup.PageWidth - _setup.Margins.Left - _setup.Margins.Right;
             double pageHeight = _setup.PageHeight - _setup.Margins.Top - _setup.Margins.Bottom;
@@ -786,16 +797,18 @@ public sealed partial class SheetLayoutEngine
         // ---- row heights
 
         /// <summary>Rows without an explicit height grow to fit wrapped or large text.</summary>
-        private void ComputeRowHeights()
+        private void ComputeRowHeights() => ComputeRowHeights(_range.FirstRow, _range.LastRow);
+
+        private void ComputeRowHeights(int firstRow, int lastRow)
         {
             var byRow = new Dictionary<int, List<int>>();
             foreach (var (row, column) in _sheet.Cells.Keys)
             {
-                if (!_range.Contains(row, column)) continue;
+                if (row < firstRow || row > lastRow || column < _range.FirstColumn || column > _range.LastColumn) continue;
                 if (!byRow.TryGetValue(row, out var list)) byRow[row] = list = [];
                 list.Add(column);
             }
-            for (int row = _range.FirstRow; row <= _range.LastRow; row++)
+            for (int row = firstRow; row <= lastRow; row++)
             {
                 if (_sheet.HiddenRows.Contains(row)) continue;
                 if (_sheet.RowHeights.TryGetValue(row, out var explicitHeight))
@@ -974,7 +987,7 @@ public sealed partial class SheetLayoutEngine
                 offsetY += Math.Max(0, (_setup.PageHeight - _setup.Margins.Top - _setup.Margins.Bottom - bandHeight * scale) / 2);
             foreach (var item in items) page.Items.Add(Transform(item, offsetX, offsetY, scale));
             _document.Pages.Add(page);
-            _records.Add(new PageRecord(page, _sheet, _sheetPages++));
+            _records.Add(new PageRecord(page, _sheet, _sheetPages++, scale));
         }
 
         private static readonly Color White = new(255, 255, 255);

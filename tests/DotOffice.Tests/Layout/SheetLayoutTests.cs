@@ -536,6 +536,41 @@ public class SheetPaginationTests
     }
 
     [Fact]
+    public void Title_rows_before_the_print_area_are_printed_on_every_page_of_it()
+    {
+        var sheet = Grid(120, 1);
+        sheet.PageSetup.TitleRows = (0, 0);
+        sheet.PageSetup.PrintAreas.Add(new CellRange(10, 0, 109, 0));
+        var pages = Pages(sheet);
+        Assert.True(pages.Length >= 2);
+        foreach (var page in pages) Assert.StartsWith("r0c0 r", page);
+        Assert.StartsWith("r0c0 r10c0", pages[0]);
+        Assert.DoesNotContain("r1c0", string.Join(" ", pages));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(string.Join(" ", pages), @"\br109c0\b"));
+    }
+
+    [Fact]
+    public void Title_rows_after_the_print_area_are_not_repeated()
+    {
+        var sheet = Grid(60, 1);
+        sheet.PageSetup.TitleRows = (50, 50);
+        sheet.PageSetup.PrintAreas.Add(new CellRange(0, 0, 40, 0));
+        Assert.DoesNotContain("r50c0", string.Join(" ", Pages(sheet)));
+    }
+
+    [Fact]
+    public void Title_columns_before_the_print_area_are_printed_on_every_column_band()
+    {
+        var sheet = Grid(2, 14);
+        sheet.PageSetup.TitleColumns = (0, 0);
+        sheet.PageSetup.PrintAreas.Add(new CellRange(0, 3, 1, 13));
+        var pages = Pages(sheet);
+        Assert.True(pages.Length >= 2);
+        foreach (var page in pages) Assert.Contains("r0c0", page);
+        Assert.DoesNotContain("r0c1 ", string.Join(" ", pages) + " ");
+    }
+
+    [Fact]
     public void Title_columns_repeat_on_every_column_band()
     {
         var sheet = Grid(2, 12);
@@ -654,6 +689,21 @@ public class SheetHeaderFooterTests
     }
 
     [Fact]
+    public void Headers_and_footers_scale_with_the_page_unless_scaleWithDoc_is_off()
+    {
+        double Size(bool scaleWithDoc)
+        {
+            var sheet = WithText("S");
+            sheet.PageSetup.Scale = 0.5;
+            sheet.PageSetup.HeaderFooterScaleWithDocument = scaleWithDoc;
+            sheet.PageSetup.Footer = new HeaderFooterText { Odd = new HeaderFooterParts("", "foot", "") };
+            return SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().First(t => t.Text == "foot").FontSize;
+        }
+        Assert.Equal(11, Size(false), 3);
+        Assert.Equal(5.5, Size(true), 3);
+    }
+
+    [Fact]
     public void Footers_sit_above_the_bottom_edge_and_headers_below_the_top_edge()
     {
         var sheet = WithText("S");
@@ -704,13 +754,13 @@ public class SheetHeaderFooterTests
     }
 
     [Fact]
-    public void Header_and_footer_are_not_scaled_with_the_sheet()
+    public void Header_and_footer_are_scaled_with_the_sheet_by_default_but_not_the_sheet_text_twice()
     {
         var sheet = WithText("S");
         sheet.PageSetup.Scale = 0.5;
         sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "head", "") };
         var items = SheetLayoutTests.Layout(sheet).Pages[0].Items.OfType<TextItem>().ToDictionary(t => t.Text);
-        Assert.Equal(11, items["head"].FontSize);
+        Assert.Equal(5.5, items["head"].FontSize, 3);
         Assert.Equal(5, items["S0"].FontSize);
     }
 }

@@ -258,6 +258,9 @@ public sealed class SheetPageSetup
 
     public Thickness Margins { get; set; } = new(54, 50.4, 54, 50.4);
 
+    /// <summary>Headers and footers are scaled with the page scale (<c>scaleWithDoc</c>, on by default).</summary>
+    public bool HeaderFooterScaleWithDocument { get; set; } = true;
+
     public double HeaderDistance { get; set; } = 21.6;
 
     public double FooterDistance { get; set; } = 21.6;

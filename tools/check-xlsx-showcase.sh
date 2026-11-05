@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Charts" "More charts" "Chart options" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -215,6 +215,25 @@ for text in "Columns and a line on a second axis" "Smoothed and straight lines" 
   [[ $opt_text == *"$text"* ]] || fail "missing chart text: $text"
 done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Chart options"; then fail "the chart options sheet should not warn"; fi
+
+# Print titles outside the print area: row 1 sits above the area (A5:B124) and is repeated on every page of it; rows 2-4 are not printed.
+title_pages=0
+for p in $(seq 1 "$pages"); do
+  [ "$(header_of "$p")" = "Titles" ] || continue
+  title_pages=$((title_pages + 1))
+  t=$(page_text "$p")
+  [[ $t == *"Print title outside the area"* ]] || fail "page $p of the Titles sheet lacks the repeated title row"
+  [[ $t != *"Rows 2 to 4"* ]] || fail "rows outside the print area were printed on page $p"
+done
+[ "$title_pages" -ge 2 ] || fail "the Titles sheet should need two pages, found $title_pages"
+# The footer follows the 60 % page scale: it is smaller than the 11 pt footers of the other sheets.
+size_of() { local words; words=$(pdftotext -bbox -f "$1" -l "$1" "$pdf" -); printf '%s\n' "$words" | awk '/>Page</ { match($0, /yMin="[0-9.]+"/); a = substr($0, RSTART + 6, RLENGTH - 7); match($0, /yMax="[0-9.]+"/); b = substr($0, RSTART + 6, RLENGTH - 7); print b - a; exit }'; }
+for p in $(seq 1 "$pages"); do
+  [ "$(header_of "$p")" = "Titles" ] && titles_page=$p
+  [ "$(header_of "$p")" = "Comments" ] && comments_page=$p
+done
+small=$(size_of "$titles_page"); big=$(size_of "$comments_page")
+awk -v a="$small" -v b="$big" 'BEGIN { exit !(a < b * 0.8) }' || fail "the Titles footer ($small) should be smaller than a normal footer ($big)"
 
 # Print areas: the three areas of the "Areas" sheet are three separate pages, and nothing outside them is printed.
 area_pages=0
