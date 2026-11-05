@@ -36,6 +36,7 @@ internal sealed class CfParser
     {
         "AND", "OR", "NOT", "XOR", "IF", "IFERROR", "MOD", "ROW", "COLUMN", "ISBLANK", "ISNUMBER", "ISTEXT", "ISERROR", "ISEVEN", "ISODD",
         "ABS", "INT", "ROUND", "LEN", "LEFT", "RIGHT", "SEARCH", "FIND", "SUM", "MIN", "MAX", "AVERAGE", "COUNT", "COUNTA", "COUNTIF", "TRUE", "FALSE",
+        "SUMPRODUCT", "VLOOKUP", "HLOOKUP", "INDEX", "MATCH", "OFFSET", "INDIRECT",
     };
 
     private readonly string _text;
@@ -153,6 +154,24 @@ internal sealed class CfParser
             _i++;
             return ReferenceOn(sheet);
         }
+        if (char.IsAsciiDigit(c) || c == '$' && _i + 1 < _text.Length && char.IsAsciiDigit(_text[_i + 1]))
+        {
+            // A whole-row range such as 1:3 or $2:$2 (digits only on both sides of the colon).
+            int j = _i + (c == '$' ? 1 : 0), rowStart = j;
+            while (j < _text.Length && char.IsAsciiDigit(_text[j])) j++;
+            int afterColon = j + 1 < _text.Length && _text[j] == ':' ? j + 1 + (_text[j + 1] == '$' ? 1 : 0) : -1;
+            if (afterColon > 0 && afterColon < _text.Length && char.IsAsciiDigit(_text[afterColon]))
+            {
+                int k = afterColon;
+                while (k < _text.Length && char.IsAsciiDigit(_text[k])) k++;
+                if (int.TryParse(_text.AsSpan(rowStart, j - rowStart), out var first) && int.TryParse(_text.AsSpan(afterColon, k - afterColon), out var last) && first >= 1 && last >= 1
+                    && first <= CellReference.MaxRows && last <= CellReference.MaxRows)
+                {
+                    _i = k;
+                    return new CfRange(new CfRef(first - 1, true, 0, true), new CfRef(last - 1, true, CellReference.MaxColumns - 1, true));
+                }
+            }
+        }
         if (char.IsAsciiDigit(c) || c == '.') return new CfConst(ReadNumber());
         if (char.IsAsciiLetter(c) || c is '$' or '_')
         {
@@ -181,7 +200,20 @@ internal sealed class CfParser
             if (word.Equals("TRUE", StringComparison.OrdinalIgnoreCase)) return new CfConst(true);
             if (word.Equals("FALSE", StringComparison.OrdinalIgnoreCase)) return new CfConst(false);
             var from = Reference(word, null);
-            if (from is null) return Name(word);
+            if (from is null)
+            {
+                // A whole-column range: A:A or $B:$D.
+                if (_i < _text.Length && _text[_i] == ':' && WholeColumn(word) is { } firstColumn)
+                {
+                    int save = _i++;
+                    int s2 = _i;
+                    while (_i < _text.Length && (char.IsAsciiLetter(_text[_i]) || _text[_i] == '$')) _i++;
+                    if (WholeColumn(_text[s2.._i]) is { } lastColumn)
+                        return new CfRange(new CfRef(0, true, firstColumn.Column, firstColumn.Absolute), new CfRef(CellReference.MaxRows - 1, true, lastColumn.Column, lastColumn.Absolute));
+                    _i = save;
+                }
+                return Name(word);
+            }
             return Range(from, null);
         }
         throw new NotSupportedException($"Unexpected '{c}' in formula.");
@@ -239,6 +271,15 @@ internal sealed class CfParser
             sb.Append(_text[_i++]);
         }
         throw new NotSupportedException("Unterminated sheet name.");
+    }
+
+    /// <summary>The column of a word made of letters only (optionally after a '$'), as in <c>$A</c>; null for anything else.</summary>
+    private static (int Column, bool Absolute)? WholeColumn(string word)
+    {
+        bool absolute = word.StartsWith('$');
+        var letters = absolute ? word[1..] : word;
+        if (letters.Length is 0 or > 3 || !letters.All(char.IsAsciiLetter)) return null;
+        return CellReference.TryParse(letters + "1", out _, out var column) ? (column, absolute) : null;
     }
 
     private static CfRef? Reference(string word, string? sheet)
@@ -390,13 +431,13 @@ internal static class CfEvaluator
         };
     }
 
-    private static object Binary(CfBinary b, CfContext ctx)
+    private static object Binary(CfBinary b, CfContext ctx) => BinaryValues(b.Op, Evaluate(b.Left, ctx), Evaluate(b.Right, ctx));
+
+    private static object BinaryValues(string op, object left, object right)
     {
-        var left = Evaluate(b.Left, ctx);
-        var right = Evaluate(b.Right, ctx);
         if (left is CfError) return left;
         if (right is CfError) return right;
-        switch (b.Op)
+        switch (op)
         {
             case "=": return Compare(left, right) == 0;
             case "<>": return Compare(left, right) != 0;
@@ -407,7 +448,7 @@ internal static class CfEvaluator
             case "&": return ToText(left) + ToText(right);
         }
         if (ToNumber(left) is not { } x || ToNumber(right) is not { } y) return CfError.Value;
-        double result = b.Op switch
+        double result = op switch
         {
             "+" => x + y,
             "-" => x - y,
@@ -416,13 +457,14 @@ internal static class CfEvaluator
             "^" => Math.Pow(x, y),
             _ => double.NaN,
         };
-        if (double.IsNaN(result)) return b.Op == "/" ? CfError.DivisionByZero : CfError.Value;
+        if (double.IsNaN(result)) return op == "/" ? CfError.DivisionByZero : CfError.Value;
         return double.IsInfinity(result) ? CfError.Value : result;
     }
 
     /// <summary>The values an argument stands for: all cells of a range (inside the bounds) or the single value.</summary>
     private static IEnumerable<object> Values(CfExpr arg, CfContext ctx)
     {
+        if (arg is CfCall && ReferenceOf(arg, ctx) is { } referenced) arg = referenced;
         if (arg is CfRange range)
         {
             var (r1, c1) = ctx.Resolve(range.From);
@@ -585,9 +627,76 @@ internal static class CfEvaluator
                     default: return numbers.Count == 0 ? CfError.DivisionByZero : numbers.Average();
                 }
             }
+            case "OFFSET":
+            case "INDIRECT":
+                return ReferenceOf(call, ctx) is { } pointed ? ValueAtReference(pointed, ctx) : CfError.Value;
+            case "SUMPRODUCT":
+            {
+                if (args.Count == 0) return CfError.Value;
+                var arrays = new List<object[,]>();
+                foreach (var arg in args)
+                {
+                    var array = ArrayOf(arg, ctx);
+                    if (array is null) return CfError.Value;
+                    arrays.Add(array);
+                }
+                int rows = arrays[0].GetLength(0), columns = arrays[0].GetLength(1);
+                if (arrays.Any(a => a.GetLength(0) != rows || a.GetLength(1) != columns)) return CfError.Value;
+                double sum = 0;
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < columns; c++)
+                    {
+                        double product = 1;
+                        foreach (var array in arrays)
+                        {
+                            if (array[r, c] is CfError error) return error;
+                            product *= array[r, c] is double d ? d : 0; // text and booleans count as zero
+                        }
+                        sum += product;
+                    }
+                return sum;
+            }
+            case "INDEX":
+            {
+                if (!Needs(2, 3) || ArrayOf(args[0], ctx) is not { } grid) return CfError.Value;
+                if (Num(1) is not { } rowNumber || (args.Count == 3 && Num(2) is null)) return CfError.Value;
+                int row = (int)rowNumber, column = args.Count == 3 ? (int)Num(2)! : 0;
+                int rows = grid.GetLength(0), columns = grid.GetLength(1);
+                if (args.Count == 2 && (rows == 1 || columns == 1))
+                {
+                    // One row or one column: the single index counts along it.
+                    int at = row - 1;
+                    return at >= 0 && at < Math.Max(rows, columns) ? (rows == 1 ? grid[0, at] : grid[at, 0]) : CfError.Value;
+                }
+                if (args.Count == 2) column = 1;
+                return row >= 1 && row <= rows && column >= 1 && column <= columns ? grid[row - 1, column - 1] : CfError.Value;
+            }
+            case "MATCH":
+            {
+                if (!Needs(2, 3) || ArrayOf(args[1], ctx) is not { } grid || (grid.GetLength(0) != 1 && grid.GetLength(1) != 1)) return CfError.Value;
+                var key = Arg(0);
+                if (key is CfError) return key;
+                double type = args.Count == 3 ? Num(2) ?? 1 : 1;
+                var list = grid.Cast<object>().ToList();
+                return LookupPosition(key, list, type == 0 ? 0 : type > 0 ? 1 : -1) is { } position ? position + 1.0 : CfError.NotAvailable;
+            }
+            case "VLOOKUP":
+            case "HLOOKUP":
+            {
+                if (!Needs(3, 4) || ArrayOf(args[1], ctx) is not { } table || Num(2) is not { } index) return CfError.Value;
+                var key = Arg(0);
+                if (key is CfError) return key;
+                bool vertical = call.Name == "VLOOKUP";
+                int length = vertical ? table.GetLength(0) : table.GetLength(1), width = vertical ? table.GetLength(1) : table.GetLength(0);
+                if (index < 1 || index > width) return CfError.Value;
+                bool exact = args.Count == 4 && Arg(3) is var approximate && !IsTrue(approximate is double or bool ? approximate : true);
+                var firsts = Enumerable.Range(0, length).Select(i => vertical ? table[i, 0] : table[0, i]).ToList();
+                if (LookupPosition(key, firsts, exact ? 0 : 1) is not { } found) return CfError.NotAvailable;
+                return vertical ? table[found, (int)index - 1] : table[(int)index - 1, found];
+            }
             case "COUNTIF":
             {
-                if (!Needs(2, 2) || args[0] is not CfRange) return CfError.Value;
+                if (!Needs(2, 2) || !(args[0] is CfRange || ReferenceOf(args[0], ctx) is CfRange)) return CfError.Value;
                 var criteria = Arg(1);
                 if (criteria is CfError) return criteria;
                 var matches = Criteria(criteria);
@@ -600,6 +709,141 @@ internal static class CfEvaluator
             }
         }
         return CfError.Value;
+    }
+
+    // ---- references and arrays
+
+    /// <summary>
+    /// The reference (absolute, as a <see cref="CfRef"/> or <see cref="CfRange"/>) that an expression stands for: a reference as it
+    /// resolves for the current cell, or what OFFSET and INDIRECT point to. Null when the expression is no reference.
+    /// </summary>
+    private static CfExpr? ReferenceOf(CfExpr expr, CfContext ctx)
+    {
+        CfRef Absolute(CfRef r)
+        {
+            var (row, column) = ctx.Resolve(r);
+            return new CfRef(row, true, column, true, r.Sheet);
+        }
+        switch (expr)
+        {
+            case CfRef r: return Absolute(r);
+            case CfRange range: return new CfRange(Absolute(range.From), Absolute(range.To));
+            case CfCall { Name: "OFFSET" } call when call.Args.Count is >= 3 and <= 5:
+            {
+                if (ReferenceOf(call.Args[0], ctx) is not { } baseReference) return null;
+                double? Number(int i) => i < call.Args.Count ? ToNumber(Evaluate(call.Args[i], ctx)) : null;
+                var (from, to) = baseReference is CfRange b ? (b.From, b.To) : ((CfRef)baseReference, (CfRef)baseReference);
+                if (Number(1) is not { } rows || Number(2) is not { } columns) return null;
+                int top = Math.Min(from.Row, to.Row), left = Math.Min(from.Column, to.Column);
+                int height = call.Args.Count > 3 && Number(3) is { } h ? (int)h : Math.Abs(to.Row - from.Row) + 1;
+                int width = call.Args.Count > 4 && Number(4) is { } w ? (int)w : Math.Abs(to.Column - from.Column) + 1;
+                int row = top + (int)rows, column = left + (int)columns;
+                if (height < 1 || width < 1 || row < 0 || column < 0 || row + height > CellReference.MaxRows || column + width > CellReference.MaxColumns) return null;
+                var first = new CfRef(row, true, column, true, from.Sheet);
+                return height == 1 && width == 1 ? first : new CfRange(first, new CfRef(row + height - 1, true, column + width - 1, true, from.Sheet));
+            }
+            case CfCall { Name: "INDIRECT" } call when call.Args.Count is 1 or 2:
+            {
+                if (Evaluate(call.Args[0], ctx) is not string text) return null;
+                if (call.Args.Count == 2 && !IsTrue(Evaluate(call.Args[1], ctx))) return null; // R1C1 text
+                CfExpr parsed;
+                try { parsed = CfParser.Parse(text); }
+                catch (NotSupportedException) { return null; }
+                // Text points at fixed places: it does not move with the cell the formula is evaluated for.
+                static CfRef Fixed(CfRef r) => new(r.Row, true, r.Column, true, r.Sheet);
+                return parsed switch { CfRef r => Fixed(r), CfRange range => new CfRange(Fixed(range.From), Fixed(range.To)), _ => null };
+            }
+            default: return null;
+        }
+    }
+
+    /// <summary>The value at an absolute reference (the top-left cell of a range).</summary>
+    private static object ValueAtReference(CfExpr reference, CfContext ctx)
+    {
+        var cell = reference is CfRange range ? range.From : (CfRef)reference;
+        var (row, column) = (cell.Row, cell.Column);
+        if (reference is CfRange r) (row, column) = (Math.Min(r.From.Row, r.To.Row), Math.Min(r.From.Column, r.To.Column));
+        if (cell.Sheet is null) return ctx.CellAt(row, column);
+        return ctx.Sheets?.Invoke(cell.Sheet) is { } other ? other.CellAt(row, column) : CfError.Value;
+    }
+
+    /// <summary>
+    /// The values an expression stands for as a grid: a range or the result of OFFSET/INDIRECT, a single value, or the cell-by-cell
+    /// result of arithmetic and comparisons over those (a scalar is repeated across the grid). Null when the sizes do not match.
+    /// </summary>
+    private static object[,]? ArrayOf(CfExpr expr, CfContext ctx)
+    {
+        if (expr is CfCall && ReferenceOf(expr, ctx) is { } referenced) expr = referenced;
+        switch (expr)
+        {
+            case CfRef or CfRange:
+            {
+                var (cellAt, sheetName) = (ctx.CellAt, (expr as CfRef ?? ((CfRange)expr).From).Sheet);
+                if (sheetName is not null)
+                {
+                    if (ctx.Sheets?.Invoke(sheetName) is not { } other) return new object[,] { { CfError.Value } };
+                    cellAt = other.CellAt;
+                }
+                var (from, to) = expr is CfRange range ? (ctx.Resolve(range.From), ctx.Resolve(range.To)) : (ctx.Resolve((CfRef)expr), ctx.Resolve((CfRef)expr));
+                int r0 = Math.Min(from.Row, to.Row), r1 = Math.Max(from.Row, to.Row), c0 = Math.Min(from.Column, to.Column), c1 = Math.Max(from.Column, to.Column);
+                if (r0 < 0 || c0 < 0) return null;
+                if (((long)r1 - r0 + 1) * (c1 - c0 + 1) > MaxRangeCells)
+                {
+                    // A whole column or row: only the part the sheet can hold values in.
+                    var limit = sheetName is null ? ctx.Bounds : ctx.Sheets?.Invoke(sheetName)?.Bounds;
+                    if (limit is not { } bounds) return null;
+                    (r0, r1, c0, c1) = (Math.Max(r0, bounds.FirstRow), Math.Min(r1, bounds.LastRow), Math.Max(c0, bounds.FirstColumn), Math.Min(c1, bounds.LastColumn));
+                    if (r0 > r1 || c0 > c1 || ((long)r1 - r0 + 1) * (c1 - c0 + 1) > MaxRangeCells) return null;
+                }
+                var grid = new object[r1 - r0 + 1, c1 - c0 + 1];
+                for (int r = r0; r <= r1; r++)
+                    for (int c = c0; c <= c1; c++) grid[r - r0, c - c0] = cellAt(r, c);
+                return grid;
+            }
+            case CfUnary u:
+            {
+                if (ArrayOf(u.Operand, ctx) is not { } inner) return null;
+                var result = new object[inner.GetLength(0), inner.GetLength(1)];
+                for (int r = 0; r < inner.GetLength(0); r++)
+                    for (int c = 0; c < inner.GetLength(1); c++)
+                        result[r, c] = inner[r, c] is CfError ? inner[r, c] : ToNumber(inner[r, c]) is { } n ? u.Op == '-' ? -n : n / 100 : CfError.Value;
+                return result;
+            }
+            case CfBinary b:
+            {
+                if (ArrayOf(b.Left, ctx) is not { } left || ArrayOf(b.Right, ctx) is not { } right) return null;
+                int rows = Math.Max(left.GetLength(0), right.GetLength(0)), columns = Math.Max(left.GetLength(1), right.GetLength(1));
+                bool Fits(object[,] a) => (a.GetLength(0) == rows || a.GetLength(0) == 1) && (a.GetLength(1) == columns || a.GetLength(1) == 1);
+                if (!Fits(left) || !Fits(right)) return null;
+                var result = new object[rows, columns];
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < columns; c++)
+                        result[r, c] = BinaryValues(b.Op, left[left.GetLength(0) == 1 ? 0 : r, left.GetLength(1) == 1 ? 0 : c], right[right.GetLength(0) == 1 ? 0 : r, right.GetLength(1) == 1 ? 0 : c]);
+                return result;
+            }
+            default:
+                return new[,] { { Evaluate(expr, ctx) } };
+        }
+    }
+
+    /// <summary>
+    /// The position of <paramref name="key"/> in <paramref name="list"/>: 0 finds the first equal item; 1 the last item not greater (ascending
+    /// data); -1 the last item not less (descending data). Only items of the same kind (number or text) are compared. Null when absent.
+    /// </summary>
+    private static int? LookupPosition(object key, List<object> list, int mode)
+    {
+        if (key is CfBlank) return null;
+        int? found = null;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var item = list[i];
+            if (item is CfError || item is CfBlank || Rank(item) != Rank(key)) continue;
+            int cmp = Compare(item, key);
+            if (mode == 0) { if (cmp == 0) return i; }
+            else if (mode > 0 ? cmp <= 0 : cmp >= 0) found = i;
+            else if (found is not null) break; // sorted data: nothing further can match
+        }
+        return found;
     }
 
     /// <summary>A COUNTIF criterion: a value, or text such as <c>"&gt;5"</c> / <c>"&lt;&gt;x"</c>; text compares without regard to case.</summary>

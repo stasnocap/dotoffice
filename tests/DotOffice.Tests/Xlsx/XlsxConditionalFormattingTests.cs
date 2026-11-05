@@ -469,7 +469,7 @@ public class XlsxConditionalFormattingTests
 
         var tail = ConditionalFormatting("A1", CfRule("unknownKind", 1, "", "", 0)) +
                    ConditionalFormatting("A2", IconSet(2, "7Faces", Thresholds(0, 20, 40, 60, 80))) +
-                   ConditionalFormatting("A1:A2", Expression("SUMPRODUCT(A1:A2)>1", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
+                   ConditionalFormatting("A1:A2", Expression("TEXT(A1,\"0\")=\"1\"", 3, 0), Expression("Other!A1>1", 4, 0), CellIs("greaterThan", "1", 5, 0));
         var sheet = Read(Column("A", 1, 2), tail, warnings: warnings);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.conditional-formatting", warning.Code);
@@ -512,7 +512,7 @@ public class XlsxConditionalFormattingTests
     public void X14_only_rules_with_unsupported_content_warn()
     {
         var warnings = new ConversionWarningList();
-        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>SUMPRODUCT(A1:A2)&gt;1</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
+        var rule = "<x14:cfRule type=\"expression\" priority=\"1\" id=\"{00000000-0000-0000-0000-00000000000B}\"><xm:f>TEXT(A1,&quot;0&quot;)=&quot;1&quot;</xm:f><x14:dxf><font><b/></font></x14:dxf></x14:cfRule>";
         Read(Column("A", 1), X14Block("A1", rule), warnings: warnings);
         Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
     }
@@ -625,7 +625,7 @@ public class XlsxConditionalFormattingTests
     [Fact]
     public void Names_that_are_not_plain_references_and_unknown_names_are_reported_as_unsupported()
     {
-        var names = "<definedName name=\"Dynamic\">OFFSET(Lists!$A$1,0,0,2,1)</definedName>";
+        var names = "<definedName name=\"Dynamic\">TEXT(Lists!$A$1,&quot;0&quot;)</definedName>";
         var (main, _, warnings) = ReadTwo(Column("A", 1, 10), ConditionalFormatting("A1:A2", Expression("A1>MAX(Dynamic)", 1, 0), Expression("A1>Nothing", 2, 1)), Row(1, C("A1", "4")), names);
         Assert.Equal("", FilledRows(main));
         Assert.Contains("expression", Assert.Single(warnings.Warnings).Message);
@@ -716,5 +716,108 @@ public class XlsxConditionalFormattingTests
         var small = sheet.Cells[(0, 0)].DataBar!;
         Assert.Equal(1.0, small.End, 6); // the base is at the right edge
         Assert.True(small.Start > 0.5);
+    }
+
+    // ---- lookup and reference functions
+
+    /// <summary>A1:A4 = 10, 20, 30, 40; B1:B4 = 1, 2, 3, 4; C1:C4 = x, y, x, y.</summary>
+    private static string Table =>
+        string.Concat(Enumerable.Range(0, 4).Select(i => Row(i + 1, C($"A{i + 1}", $"{(i + 1) * 10}") + C($"B{i + 1}", $"{i + 1}") + Inline($"C{i + 1}", i % 2 == 0 ? "x" : "y"))));
+
+    private static string Filled(string formula, string range = "A1:A4", ConversionWarningList? warnings = null) =>
+        FilledRows(Read(Table, ConditionalFormatting(range, Expression(formula, 1, 0)), warnings: warnings));
+
+    [Theory]
+    [InlineData("SUMPRODUCT(($C$1:$C$4=$C1)*($A$1:$A$4))>40", "A2,A4")]            // y: 20 + 40
+    [InlineData("SUMPRODUCT($A$1:$A$4,$B$1:$B$4)=300", "A1,A2,A3,A4")]            // 10 + 40 + 90 + 160
+    [InlineData("SUMPRODUCT(--($B$1:$B$4>2))=2", "A1,A2,A3,A4")]
+    [InlineData("SUMPRODUCT($A$1:$A$4,$B$1:$B$3)=0", "")]                        // sizes differ: #VALUE!
+    [InlineData("SUMPRODUCT(($A$1:$A$4>15)*($C$1:$C$4=\"x\"))=1", "A1,A2,A3,A4")]
+    public void SUMPRODUCT_multiplies_arrays_and_counts_comparisons(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("VLOOKUP($A1,$A$1:$B$4,2,FALSE)>2", "A3,A4")]
+    [InlineData("VLOOKUP(25,$A$1:$B$4,2)=2", "A1,A2,A3,A4")]                      // approximate: last first-column value <= 25 is 20
+    [InlineData("ISERROR(VLOOKUP(25,$A$1:$B$4,2,FALSE))", "A1,A2,A3,A4")]
+    [InlineData("ISERROR(VLOOKUP(5,$A$1:$B$4,2))", "A1,A2,A3,A4")]                // smaller than everything: #N/A
+    [InlineData("ISERROR(VLOOKUP(10,$A$1:$B$4,3,FALSE))", "A1,A2,A3,A4")]         // column outside the table
+    [InlineData("HLOOKUP(2,$A$1:$B$2,2,FALSE)=20", "")]                           // row 1 holds 10 and 1: no 2 as a header… A2 is 20, B1 is 1
+    public void VLOOKUP_and_HLOOKUP_find_exact_and_approximate_matches(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("INDEX($B$1:$B$4,MATCH($A1,$A$1:$A$4,0))>2", "A3,A4")]
+    [InlineData("MATCH(25,$A$1:$A$4,1)=2", "A1,A2,A3,A4")]
+    [InlineData("ISERROR(MATCH(25,$A$1:$A$4,0))", "A1,A2,A3,A4")]
+    [InlineData("MATCH(25,$A$1:$A$4,-1)=1", "")]                                  // descending order expected: nothing is >= 25 after the first
+    [InlineData("INDEX($A$1:$B$4,3,2)=3", "A1,A2,A3,A4")]
+    [InlineData("INDEX($A$1:$A$4,ROW())>20", "A3,A4")]
+    [InlineData("MATCH(\"y\",$C$1:$C$4,0)=2", "A1,A2,A3,A4")]
+    [InlineData("ISERROR(INDEX($A$1:$A$4,9))", "A1,A2,A3,A4")]
+    public void INDEX_and_MATCH_look_values_up_by_position(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("OFFSET($A$1,ROW()-1,1)>2", "A3,A4")]                              // the cell to the right
+    [InlineData("SUM(OFFSET($A$1,0,0,2,1))=30", "A1,A2,A3,A4")]                    // a 2 x 1 range
+    [InlineData("OFFSET(A1,1,0)>25", "A2,A3")]                                     // relative base: the cell below
+    [InlineData("ISERROR(OFFSET($A$1,-1,0))", "A1,A2,A3,A4")]
+    [InlineData("INDIRECT(\"B\"&ROW())>2", "A3,A4")]
+    [InlineData("SUM(INDIRECT(\"B1:B4\"))=10", "A1,A2,A3,A4")]
+    [InlineData("INDIRECT(\"S!A\"&ROW())>20", "A3,A4")]
+    [InlineData("ISERROR(INDIRECT(\"not a cell\"))", "A1,A2,A3,A4")]
+    [InlineData("COUNTIF(OFFSET($C$1,0,0,4,1),\"x\")=2", "A1,A2,A3,A4")]
+    public void OFFSET_and_INDIRECT_point_at_cells_by_position_or_text(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("COUNTIF($C:$C,$C1)=2", "A1,A2,A3,A4")]
+    [InlineData("COUNTIF($C:$C,\"x\")=3", "")]
+    [InlineData("SUM($B:$B)=10", "A1,A2,A3,A4")]
+    [InlineData("SUMPRODUCT(($C:$C=\"x\")*($A:$A))=40", "A1,A2,A3,A4")]
+    [InlineData("SUM($1:$1)=11", "A1,A2,A3,A4")]                                   // 10 + 1 + a text cell
+    public void Whole_column_and_row_references_are_read_within_the_used_range(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    // ---- x14 data bars without a main-namespace rule, and cells outside the used range
+
+    [Fact]
+    public void A_data_bar_that_exists_only_in_the_x14_extension_is_drawn()
+    {
+        var warnings = new ConversionWarningList();
+        var bar = "<x14:cfRule type=\"dataBar\" priority=\"1\" id=\"{00000000-0000-0000-0000-0000000000AA}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\" border=\"1\">" +
+                  X14Cfvo("autoMin") + X14Cfvo("autoMax") + "<x14:borderColor rgb=\"FF0000FF\"/><x14:negativeFillColor rgb=\"FFFF0000\"/></x14:dataBar></x14:cfRule>";
+        var sheet = Read(Column("A", 10, 20, 40), X14Block("A1:A3", bar), warnings: warnings);
+        Assert.Empty(warnings.Warnings);
+        var first = sheet.Cells[(0, 0)].DataBar!;
+        var last = sheet.Cells[(2, 0)].DataBar!;
+        Assert.False(last.Gradient);
+        Assert.Equal(Hex("0000FF"), last.BorderColor);
+        Assert.Equal(0, first.End, 6);   // the extension's minLength/maxLength of 0 and 100 apply
+        Assert.Equal(1, last.End, 6);
+        Assert.True(first.End < sheet.Cells[(1, 0)].DataBar!.End && sheet.Cells[(1, 0)].DataBar!.End < last.End);
+    }
+
+    [Fact]
+    public void An_x14_data_bar_with_too_few_limits_is_reported()
+    {
+        var warnings = new ConversionWarningList();
+        Read(Column("A", 1), X14Block("A1", "<x14:cfRule type=\"dataBar\" priority=\"1\" id=\"{00000000-0000-0000-0000-0000000000AB}\"><x14:dataBar>" + X14Cfvo("autoMin") + "</x14:dataBar></x14:cfRule>"), warnings: warnings);
+        Assert.Contains("dataBar", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
+    public void Formatting_reaches_empty_cells_only_inside_the_used_range_or_a_print_area()
+    {
+        var tail = ConditionalFormatting("A1:A30", Expression("TRUE", 1, 0));
+        // Like Excel, which prints only the used range, a fill on empty cells below the data is not drawn.
+        Assert.Equal("A1,A2,A3", FilledRows(Read(Column("A", 1, 2, 3), tail)));
+        // A print area asks for those cells: they get their fill.
+        var names = "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">S!$A$1:$A$8</definedName>";
+        Assert.Equal("A1,A2,A3,A4,A5,A6,A7,A8", FilledRows(Read(Column("A", 1, 2, 3), tail, definedNames: names)));
+        // A whole-column print area is cut at the last used cell, so a whole-column rule does not paint a million rows.
+        var wholeColumn = "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">S!$A:$A</definedName>";
+        Assert.Equal("A1,A2,A3", FilledRows(Read(Column("A", 1, 2, 3), ConditionalFormatting("A:A", Expression("TRUE", 1, 0)), definedNames: wholeColumn)));
     }
 }

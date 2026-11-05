@@ -152,19 +152,7 @@ internal static class ConditionalFormatting
             if ((string?)rule.Attribute("id") is not { } id) continue;
             var bar = rule.Elements().FirstOrDefault(e => e.Name.LocalName == "dataBar");
             if (bar is null) continue;
-            sheet.Extensions[id] = new DataBarExtension(
-                Gradient: (string?)bar.Attribute("gradient") is not ("0" or "false"),
-                MinLength: Number(bar, "minLength"),
-                MaxLength: Number(bar, "maxLength"),
-                NegativeColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeFillColor")),
-                NegativeSameAsPositive: (string?)bar.Attribute("negativeBarColorSameAsPositive") is "1" or "true",
-                Border: (string?)bar.Attribute("border") is "1" or "true",
-                BorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "borderColor")),
-                NegativeBorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeBorderColor")),
-                NegativeBorderSameAsPositive: (string?)bar.Attribute("negativeBarBorderColorSameAsPositive") is not ("0" or "false"),
-                AxisPosition: (string?)bar.Attribute("axisPosition") is "middle" or "none" ? (string)bar.Attribute("axisPosition")! : "automatic",
-                AxisColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "axisColor")),
-                RightToLeft: (string?)bar.Attribute("direction") == "rightToLeft");
+            sheet.Extensions[id] = ReadDataBarExtension(bar, resolve);
         }
         foreach (var rule in extList.Descendants().Where(e => e.Name.LocalName == "cfRule" && (string?)e.Attribute("type") == "iconSet"))
         {
@@ -173,6 +161,20 @@ internal static class ConditionalFormatting
             if (picks.Count > 0) sheet.IconExtensions[id] = picks;
         }
     }
+
+    private static DataBarExtension ReadDataBarExtension(XElement bar, Func<XElement?, Color?> resolve) => new(
+        Gradient: (string?)bar.Attribute("gradient") is not ("0" or "false"),
+        MinLength: Number(bar, "minLength"),
+        MaxLength: Number(bar, "maxLength"),
+        NegativeColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeFillColor")),
+        NegativeSameAsPositive: (string?)bar.Attribute("negativeBarColorSameAsPositive") is "1" or "true",
+        Border: (string?)bar.Attribute("border") is "1" or "true",
+        BorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "borderColor")),
+        NegativeBorderColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "negativeBorderColor")),
+        NegativeBorderSameAsPositive: (string?)bar.Attribute("negativeBarBorderColorSameAsPositive") is not ("0" or "false"),
+        AxisPosition: (string?)bar.Attribute("axisPosition") is "middle" or "none" ? (string)bar.Attribute("axisPosition")! : "automatic",
+        AxisColor: resolve(bar.Elements().FirstOrDefault(e => e.Name.LocalName == "axisColor")),
+        RightToLeft: (string?)bar.Attribute("direction") == "rightToLeft");
 
     private static List<(string Set, int Id)> CustomIconPicks(XElement? iconSet) =>
         iconSet?.Elements().Where(e => e.Name.LocalName == "cfIcon")
@@ -209,7 +211,13 @@ internal static class ConditionalFormatting
             foreach (var rule in block.Elements().Where(e => e.Name.LocalName == "cfRule"))
             {
                 var type = (string?)rule.Attribute("type") ?? "";
-                if (type == "dataBar" || (string?)rule.Attribute("id") is { } id && linked.Contains(id)) continue;
+                if (type == "dataBar")
+                {
+                    // A data bar that has a rule in the main namespace is described there; one that exists only here is read from the extension.
+                    if ((string?)rule.Attribute("id") is not { } barId || !linked.Contains(barId)) AddX14DataBar(rule, ranges, sheet, resolve);
+                    continue;
+                }
+                if ((string?)rule.Attribute("id") is { } id && linked.Contains(id)) continue;
                 var main = new XElement("cfRule", rule.Attributes().Where(a => a.Name.LocalName != "id" && !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
                 foreach (var child in rule.Elements())
                 {
@@ -220,12 +228,7 @@ internal static class ConditionalFormatting
                         case "iconSet":
                         {
                             var icons = new XElement("iconSet", child.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
-                            foreach (var cfvo in child.Elements().Where(e => e.Name.LocalName == "cfvo"))
-                            {
-                                var converted = new XElement("cfvo", cfvo.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
-                                if (cfvo.Elements().FirstOrDefault(e => e.Name.LocalName == "f") is { } f) converted.SetAttributeValue("val", f.Value);
-                                icons.Add(converted);
-                            }
+                            foreach (var cfvo in child.Elements().Where(e => e.Name.LocalName == "cfvo")) icons.Add(MainCfvo(cfvo));
                             foreach (var pick in child.Elements().Where(e => e.Name.LocalName == "cfIcon"))
                                 icons.Add(new XElement("cfIcon", pick.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value))));
                             main.Add(icons);
@@ -236,6 +239,29 @@ internal static class ConditionalFormatting
                 AddRule(main, ranges, sheet, resolve);
             }
         }
+    }
+
+    private static XElement MainCfvo(XElement cfvo)
+    {
+        var converted = new XElement("cfvo", cfvo.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
+        if (cfvo.Elements().FirstOrDefault(e => e.Name.LocalName == "f") is { } f) converted.SetAttributeValue("val", f.Value);
+        return converted;
+    }
+
+    /// <summary>A data bar written only as <c>x14:cfRule</c>: its limits and lengths become a main-namespace rule, the rest is its extension.</summary>
+    private static void AddX14DataBar(XElement rule, List<CellRange> ranges, CfSheet sheet, Func<XElement?, Color?> resolve)
+    {
+        var bar = rule.Elements().FirstOrDefault(e => e.Name.LocalName == "dataBar");
+        if (bar is null) return;
+        var main = new XElement("dataBar", bar.Attributes().Where(a => a.Name.LocalName is "minLength" or "maxLength" or "showValue" && !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value)));
+        foreach (var cfvo in bar.Elements().Where(e => e.Name.LocalName == "cfvo")) main.Add(MainCfvo(cfvo));
+        if (bar.Elements().FirstOrDefault(e => e.Name.LocalName == "fillColor") is { } fill)
+            main.Add(new XElement("color", fill.Attributes().Where(a => !a.IsNamespaceDeclaration).Select(a => new XAttribute(a.Name.LocalName, a.Value))));
+        var priority = (string?)rule.Attribute("priority");
+        var cfRule = new XElement("cfRule", new XAttribute("type", "dataBar"), new XAttribute("priority", priority ?? int.MaxValue.ToString(CultureInfo.InvariantCulture)), main);
+        int before = sheet.Rules.Count;
+        AddRule(cfRule, ranges, sheet, resolve);
+        if (sheet.Rules.Count > before) sheet.Rules[^1].Extension = ReadDataBarExtension(bar, resolve);
     }
 
     private const string X14Namespace = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";

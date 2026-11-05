@@ -45,6 +45,7 @@ internal static class ShowcaseXlsx
             ("Chart extras", ChartExtrasSheet(), "visible"),
             ("Conditional", ConditionalSheet(), "visible"),
             ("Conditional links", ConditionalLinksSheet(), "visible"),
+            ("Conditional lookups", ConditionalLookupsSheet(), "visible"),
             ("Pivot", PivotSheet("Pivot table cached cells (no pivot style: nothing to warn about)"), "visible"),
             ("Pivot styled", PivotSheet("Pivot table with a pivot style (reported)"), "visible"),
             ("Paper", PaperSheet(), "visible"),
@@ -984,6 +985,40 @@ internal static class ShowcaseXlsx
                     DataBarExt("BBBBBBBB-0000-0000-0000-000000000004", "G4:G10", "direction=\"rightToLeft\"", "") +
                     "</x14:conditionalFormattings></ext></extLst>");
         var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"7\" width=\"16\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), tail.ToString());
+    }
+
+    /// <summary>Rules that use lookup and reference functions, whole-column references and a data bar that exists only as an Excel 2010 extension.</summary>
+    private static string ConditionalLookupsSheet()
+    {
+        const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        string[] names = ["Ann", "Bob", "Cy", "Ann", "Dee", "Bob", "Eli"];
+        double[] scores = [72, 35, 58, 40, 91, 66, 24];
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Conditional formatting with lookups, whole columns and an x14-only data bar", Bold)));
+        rows.Append(Row(3, Str("A3", "Name: repeats", Header) + Str("B3", "Score: x14 bar", Header) + Str("C3", "VLOOKUP > 60", Header) + Str("D3", "Name total > 100", Header) +
+                           Str("E3", "INDEX/MATCH", Header) + Str("F3", "OFFSET > 60", Header) + Str("G3", "INDIRECT < 30", Header)));
+        for (int i = 0; i < names.Length; i++)
+        {
+            int r = 4 + i;
+            rows.Append(Row(r, Str($"A{r}", names[i]) + Num($"B{r}", scores[i]) + Num($"C{r}", scores[i]) + Num($"D{r}", scores[i]) + Num($"E{r}", scores[i]) + Num($"F{r}", scores[i]) + Num($"G{r}", scores[i])));
+        }
+        rows.Append(Row(12, Str("A12", "Repeated names (whole-column COUNTIF), scores of repeated names add up, Dee's score is looked up by MATCH.")));
+        string Rule(string sqref, int dxf, int priority, string formula) =>
+            $"<conditionalFormatting sqref=\"{sqref}\"><cfRule type=\"expression\" dxfId=\"{dxf}\" priority=\"{priority}\"><formula>{SecurityElement.Escape(formula)}</formula></cfRule></conditionalFormatting>";
+        var tail = new StringBuilder();
+        tail.Append(Rule("A4:A10", 4, 1, "COUNTIF($A:$A,A4)>1"));
+        tail.Append(Rule("C4:C10", 1, 2, "VLOOKUP($A4,$A$4:$B$10,2,FALSE)>60"));
+        tail.Append(Rule("D4:D10", 3, 3, "SUMPRODUCT(($A$4:$A$10=$A4)*($B$4:$B$10))>100"));
+        tail.Append(Rule("E4:E10", 1, 4, "INDEX($B$4:$B$10,MATCH(\"Dee\",$A$4:$A$10,0))=B4"));
+        tail.Append(Rule("F4:F10", 0, 5, "OFFSET(F4,0,-4)>60"));
+        tail.Append(Rule("G4:G10", 5, 6, "INDIRECT(\"B\"&ROW())<30"));
+        tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
+        tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
+                    "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" priority=\"7\" id=\"{CCCCCCCC-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\" border=\"1\">" +
+                    "<x14:cfvo type=\"num\"><xm:f>0</xm:f></x14:cfvo><x14:cfvo type=\"num\"><xm:f>100</xm:f></x14:cfvo><x14:borderColor rgb=\"FF2E75B6\"/></x14:dataBar></x14:cfRule><xm:sqref>B4:B10</xm:sqref></x14:conditionalFormatting>" +
+                    "</x14:conditionalFormattings></ext></extLst>");
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"7\" width=\"18\" customWidth=\"1\"/></cols>";
         return Sheet(cols, rows.ToString(), tail.ToString());
     }
 

@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -143,6 +143,15 @@ for color in "1 0.7804 0.8078" "0.7765 0.9373 0.8078" "1 0.9216 0.6118"; do
 done
 grep -aq '^0.498 0 0 rg$' links-qdf.pdf || fail "the data-bar axis color is missing"
 if grep -E "warning xlsx\.conditional" "$log"; then fail "the conditional links should not warn"; fi
+
+# Conditional lookups: the lookup functions, the whole-column COUNTIF and the x14-only data bar apply without a warning; the bar and
+# the repeated-name format (bold italic dark red, numFmt aside) are in the page content.
+lookup_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Conditional lookups" ] && lookup_page=$p; done
+[ "$lookup_page" != 0 ] || fail "no page for the conditional lookups sheet"
+if grep -E "warning xlsx\.conditional" "$log"; then fail "the conditional lookups should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" lookups-qdf.pdf
+grep -aq "^0.1804 0.4588 0.7137 RG$" lookups-qdf.pdf || fail "the x14-only data bar border color (2E75B6) is missing"
 
 # Shapes: drawn as vector content on a single page (themed blue fill, group parts, a dashed outline), with their text, and not reported.
 shape_pages=0; shape_page=0
