@@ -608,6 +608,12 @@ internal static class CfEvaluator
                 var haystack = ToText(Arg(1));
                 int start = args.Count > 2 ? (Num(2) is { } s && s >= 1 && s <= haystack.Length + 1 ? (int)s - 1 : -1) : 0;
                 if (start < 0) return CfError.Value;
+                // SEARCH (not FIND) reads * and ? in the text it looks for as wildcards, with ~ to take them literally.
+                if (call.Name == "SEARCH" && needle.AsSpan().IndexOfAny('*', '?', '~') >= 0)
+                {
+                    var found = Wildcard(needle, anchored: false).Match(haystack, start);
+                    return found.Success ? (double)(found.Index + 1) : CfError.Value;
+                }
                 int at = haystack.IndexOf(needle, start, call.Name == "SEARCH" ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
                 return at < 0 ? CfError.Value : (double)(at + 1);
             }
@@ -1138,9 +1144,12 @@ internal static class CfEvaluator
     {
         if (key is CfBlank) return null;
         int? found = null;
+        // An exact lookup of text may use wildcards, as in MATCH(…,0) and VLOOKUP(…,FALSE).
+        var pattern = mode == 0 && key is string text && text.AsSpan().IndexOfAny('*', '?') >= 0 ? Wildcard(text) : null;
         for (int i = 0; i < list.Count; i++)
         {
             var item = list[i];
+            if (pattern is not null) { if (item is string candidate && pattern.IsMatch(candidate)) return i; continue; }
             if (item is CfError || item is CfBlank || Rank(item) != Rank(key)) continue;
             int cmp = Compare(item, key);
             if (mode == 0) { if (cmp == 0) return i; }
@@ -1151,9 +1160,9 @@ internal static class CfEvaluator
     }
 
     /// <summary>A criterion with <c>*</c> (any run of characters) and <c>?</c> (any one character); <c>~</c> escapes either.</summary>
-    private static System.Text.RegularExpressions.Regex Wildcard(string text)
+    private static System.Text.RegularExpressions.Regex Wildcard(string text, bool anchored = true)
     {
-        var pattern = new System.Text.StringBuilder("^");
+        var pattern = new System.Text.StringBuilder(anchored ? "^" : "");
         for (int i = 0; i < text.Length; i++)
         {
             char c = text[i];
@@ -1162,7 +1171,7 @@ internal static class CfEvaluator
             else if (c == '?') pattern.Append('.');
             else pattern.Append(System.Text.RegularExpressions.Regex.Escape(c.ToString()));
         }
-        return new System.Text.RegularExpressions.Regex(pattern.Append('$').ToString(), System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return new System.Text.RegularExpressions.Regex((anchored ? pattern.Append('$') : pattern).ToString(), System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     /// <summary>A COUNTIF criterion: a value, or text such as <c>"&gt;5"</c> / <c>"&lt;&gt;x"</c>; text compares without regard to case.</summary>

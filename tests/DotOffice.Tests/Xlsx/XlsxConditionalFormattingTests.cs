@@ -785,6 +785,41 @@ public class XlsxConditionalFormattingTests
     private const string All = "A1,A2,A3,A4";
 
     [Theory]
+    [InlineData("MATCH(\"y*\",$C$1:$C$4,0)=2", All)]                    // * is any run of characters
+    [InlineData("MATCH(\"?\",$C$1:$C$4,0)=1", All)]                     // ? is one character
+    [InlineData("MATCH(\"??\",$C$1:$C$4,0)>0", "")]                     // no two-character entry
+    [InlineData("MATCH(\"~*\",$C$1:$C$4,0)>0", "")]                     // an escaped * is a plain character
+    [InlineData("MATCH(\"X\",$C$1:$C$4,0)=1", All)]                     // without regard to case
+    [InlineData("VLOOKUP(\"y*\",$C$1:$C$4,1,FALSE)=\"y\"", All)]
+    [InlineData("ISNUMBER(MATCH(\"z*\",$C$1:$C$4,0))", "")]
+    [InlineData("SEARCH(\"b?d\",\"abcde\")=2", All)]
+    [InlineData("SEARCH(\"a*e\",\"xaxxe\")=2", All)]
+    [InlineData("SEARCH(\"~?\",\"a?b\")=2", All)]
+    [InlineData("SEARCH(\"c*\",\"abcde\",4)", "")]                      // from the fourth character on there is no c
+    [InlineData("FIND(\"?\",\"a?b\")=2", All)]                         // FIND takes the characters literally
+    [InlineData("ISERROR(FIND(\"b?d\",\"abcde\"))", All)]
+    [InlineData("COUNTIF($C$1:$C$4,\"~*\")=0", All)]
+    public void Wildcards_work_in_exact_lookups_and_in_SEARCH_but_not_in_FIND(string formula, string expected) =>
+        Assert.Equal(expected, Filled(formula));
+
+    [Theory]
+    [InlineData("Doubled>3", All, "S!$B$2*2")]                                    // a name that is a formula: B2 = 2
+    [InlineData("A1<Total", "A1,A2", "SUM(S!$B$1:$B$4)*3")]                        // 30: 10 and 20 are below it
+    [InlineData("A1=Below", "A1", "OFFSET(S!$A$1,1,0)-10")]                         // A2 less 10 is 10
+    [InlineData("A1<=Both", "A1,A2", "IF(S!$B$1>0,20,5)")]
+    [InlineData("COUNTIF($C$1:$C$4,Pattern)=2", All, "\"x*\"")]                  // a name for text with a wildcard
+    [InlineData("LEN(Pattern)=2", All, "\"x*\"")]
+    public void Names_that_stand_for_formulas_not_just_references_are_evaluated(string formula, string expected, string definition)
+    {
+        string name = formula.Contains("Doubled") ? "Doubled" : formula.Contains("Total") ? "Total" : formula.Contains("Below") ? "Below" : formula.Contains("Both") ? "Both" : "Pattern";
+        var warnings = new ConversionWarningList();
+        var sheet = Read(Table, ConditionalFormatting("A1:A4", Expression(formula, 1, 0)), warnings: warnings,
+            definedNames: $"<definedName name=\"{name}\">{System.Security.SecurityElement.Escape(definition)}</definedName>");
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal(expected, FilledRows(sheet));
+    }
+
+    [Theory]
     [InlineData("SUMIF($C$1:$C$4,\"x\",$A$1:$A$4)=40", All)]
     [InlineData("SUMIF($A$1:$A$4,\">15\")=90", All)]
     [InlineData("SUMIF($C$1:$C$4,$C1,$A$1:$A$4)>40", "A2,A4")]                      // y: 20 + 40
