@@ -126,6 +126,26 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     Fill(rect.Fill);
                     canvas.Rectangle(rect.X, h - rect.Y - rect.Height, rect.Width, rect.Height).Fill();
                     break;
+                case PolygonItem { Points.Count: >= 3 } polygon:
+                    Fill(polygon.Fill);
+                    canvas.MoveTo(polygon.Points[0].X, h - polygon.Points[0].Y);
+                    for (int k = 1; k < polygon.Points.Count; k++) canvas.LineTo(polygon.Points[k].X, h - polygon.Points[k].Y);
+                    canvas.ClosePath().Fill();
+                    break;
+                case EllipseItem ellipse:
+                {
+                    // Four Bézier arcs approximate the ellipse (kappa = 4/3 (√2 − 1)).
+                    const double kappa = 0.5522847498;
+                    double rx = ellipse.Width / 2, ry = ellipse.Height / 2, cx = ellipse.X + rx, cy = h - ellipse.Y - ry;
+                    Fill(ellipse.Fill);
+                    canvas.MoveTo(cx + rx, cy)
+                          .CurveTo(cx + rx, cy + kappa * ry, cx + kappa * rx, cy + ry, cx, cy + ry)
+                          .CurveTo(cx - kappa * rx, cy + ry, cx - rx, cy + kappa * ry, cx - rx, cy)
+                          .CurveTo(cx - rx, cy - kappa * ry, cx - kappa * rx, cy - ry, cx, cy - ry)
+                          .CurveTo(cx + kappa * rx, cy - ry, cx + rx, cy - kappa * ry, cx + rx, cy)
+                          .ClosePath().Fill();
+                    break;
+                }
                 case LineItem line:
                     Stroke(line.Color);
                     canvas.SetLineWidth(line.Width);

@@ -114,7 +114,18 @@ public enum CellValueKind { Text, Number, Bool, Error }
 /// <summary>One formatted run of a rich-text cell; its <see cref="Font"/> is fully resolved (cell font plus the run's overrides).</summary>
 public sealed record CellTextRun(string Text, RunProperties Font);
 
-public sealed class Cell
+/// <summary>
+/// A conditional-format data bar: the bar spans <see cref="Start"/> to <see cref="End"/> (fractions of the cell width, left to right).
+/// Gradient bars fade from the full color at their base (the end next to the axis) to a light tint.
+/// </summary>
+public sealed record CellDataBar(double Start, double End, Color Color, bool Gradient, bool Negative = false);
+
+public enum IconShape { ArrowUp, ArrowSideways, ArrowDown, Circle, Check, Exclamation, Cross }
+
+/// <summary>A conditional-format icon drawn at the left of the cell.</summary>
+public sealed record CellIcon(IconShape Shape, Color Color);
+
+public sealed record Cell
 {
     /// <summary>The display text, with number/date formatting already applied.</summary>
     public string Text { get; init; } = "";
@@ -130,6 +141,15 @@ public sealed class Cell
     public CellStyle Style { get; init; } = CellStyle.Default;
 
     public CellValueKind Kind { get; init; }
+
+    /// <summary>The raw numeric value (before number formatting) of number cells; null for everything else.</summary>
+    public double? Value { get; init; }
+
+    /// <summary>A conditional-format data bar drawn behind the text, if any.</summary>
+    public CellDataBar? DataBar { get; init; }
+
+    /// <summary>A conditional-format icon; the text is shifted right by the icon's width.</summary>
+    public CellIcon? Icon { get; init; }
 }
 
 /// <summary>A color stop of a gradient: <see cref="Position"/> runs from 0 to 1.</summary>

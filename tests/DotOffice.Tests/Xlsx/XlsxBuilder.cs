@@ -191,6 +191,54 @@ internal sealed class XlsxBuilder
         s.Write(Encoding.UTF8.GetBytes(content));
     }
 
+    // ------------------------------------------------------------ conditional formatting helpers
+
+    public const string X14Ns = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+
+    /// <summary>The styles.xml parts (everything but cellXfs) conditional-formatting tests share: one default font, fill and border, and the given dxfs.</summary>
+    public static string StylesWithDxfs(params string[] dxfs) =>
+        "<fonts><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills><fill><patternFill patternType=\"none\"/></fill></fills>" +
+        "<borders><border/></borders><cellXfs><xf fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellXfs>" +
+        $"<dxfs count=\"{dxfs.Length}\">{string.Concat(dxfs)}</dxfs>";
+
+    /// <summary>A dxf with a solid fill (bgColor, as Excel writes it) and optionally font properties.</summary>
+    public static string Dxf(string? fill = null, string font = "", string border = "", string numFmt = "") =>
+        $"<dxf>{(font.Length == 0 ? "" : $"<font>{font}</font>")}{numFmt}" +
+        (fill is null ? "" : $"<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF{fill}\"/><bgColor rgb=\"FF{fill}\"/></patternFill></fill>") +
+        $"{(border.Length == 0 ? "" : $"<border>{border}</border>")}</dxf>";
+
+    /// <summary>A <c>conditionalFormatting</c> element (for the sheet's tail).</summary>
+    public static string ConditionalFormatting(string sqref, params string[] rules) =>
+        $"<conditionalFormatting sqref=\"{sqref}\">{string.Concat(rules)}</conditionalFormatting>";
+
+    public static string CfRule(string type, int priority, string attributes = "", string inner = "", int? dxfId = null, bool stopIfTrue = false) =>
+        $"<cfRule type=\"{type}\" priority=\"{priority}\"{(dxfId is null ? "" : $" dxfId=\"{dxfId}\"")}{(stopIfTrue ? " stopIfTrue=\"1\"" : "")} {attributes}>{inner}</cfRule>";
+
+    public static string CellIs(string op, string operand, int priority, int dxfId, string? second = null, bool stopIfTrue = false) =>
+        CfRule("cellIs", priority, $"operator=\"{op}\"", $"<formula>{operand}</formula>{(second is null ? "" : $"<formula>{second}</formula>")}", dxfId, stopIfTrue);
+
+    public static string Expression(string formula, int priority, int dxfId, bool stopIfTrue = false) =>
+        CfRule("expression", priority, "", $"<formula>{System.Security.SecurityElement.Escape(formula)}</formula>", dxfId, stopIfTrue);
+
+    public static string Cfvo(string type, string? value = null) => $"<cfvo type=\"{type}\"{(value is null ? "" : $" val=\"{value}\"")}/>";
+
+    public static string Rgb(string hex) => $"<color rgb=\"FF{hex}\"/>";
+
+    /// <summary>A data bar rule; <paramref name="extensionId"/> links it to the extension written by <see cref="DataBarExtension"/>.</summary>
+    public static string DataBar(int priority, string color = "638EC6", string min = "<cfvo type=\"min\"/>", string max = "<cfvo type=\"max\"/>",
+        string attributes = "", string? extensionId = null) =>
+        CfRule("dataBar", priority, "", $"<dataBar {attributes}>{min}{max}{Rgb(color)}</dataBar>" +
+            (extensionId is null ? "" : $"<extLst><ext uri=\"{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}\" xmlns:x14=\"{X14Ns}\"><x14:id>{extensionId}</x14:id></ext></extLst>"));
+
+    /// <summary>The worksheet <c>extLst</c> holding the Excel 2010 half of data bar rules (id, gradient flag, other attributes).</summary>
+    public static string DataBarExtension(string id, bool gradient, string attributes = "", string children = "") =>
+        $"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14Ns}\"><x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\">" +
+        $"<x14:cfRule type=\"dataBar\" id=\"{id}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"{(gradient ? 1 : 0)}\" {attributes}>" +
+        $"<x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/>{children}</x14:dataBar></x14:cfRule><xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
+
+    public static string IconSet(int priority, string name, string thresholds, string attributes = "") =>
+        CfRule("iconSet", priority, "", $"<iconSet iconSet=\"{name}\" {attributes}>{thresholds}</iconSet>");
+
     // ------------------------------------------------------------ small markup helpers
 
     public static string Row(int row, params string[] cells) => $"<row r=\"{row}\">{string.Concat(cells)}</row>";

@@ -18,6 +18,8 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     private readonly List<RichString> _sharedStrings = [];
     private List<CellFormat> _formats = [];
     private Func<System.Xml.Linq.XElement?, Color?> _resolveColor = _ => null;
+    private List<Dxf> _dxfs = [];
+    private CfSheet _conditional = new();
     private long _cellCount;
 
     public OpcPackage Package { get; } = package;
@@ -70,11 +72,14 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
             var sheet = new Worksheet(entry.Name) { Visibility = entry.Visibility };
             _sheetWarnings.Clear();
+            _conditional = new CfSheet();
             using (var r = Package.OpenXml(rel.Target))
                 ReadWorksheet(r, sheet);
             ReadDrawing(sheet, rel.Target);
             WarnAboutDeferredFeatures(sheet, rel.Target);
             ApplyDefinedNames(sheet, index, names);
+            ConditionalFormatting.Apply(sheet, _conditional, new ConditionalFormatting.Environment(_dxfs, Date1904),
+                message => WarnOnce(sheet, "xlsx.conditional-formatting", message));
             workbook.Sheets.Add(sheet);
         }
         return workbook;
@@ -174,6 +179,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         var table = XlsxStyles.Read(styles, theme, Options.Warnings);
         _formats = table.Formats;
         _resolveColor = table.Resolve;
+        _dxfs = table.Dxfs;
     }
 
     private CellFormat FormatOf(string? styleAttribute) =>
@@ -293,9 +299,12 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                     _drawingRelationship = r.RelationshipId();
                     r.Read();
                     break;
-                case "conditionalFormatting":
-                    WarnOnce(sheet, "xlsx.conditional-formatting", "uses conditional formatting, which is not applied.");
-                    r.Skip();
+                case "conditionalFormatting" when IsMainNamespace(r.NamespaceURI):
+                    // The x14 conditionalFormatting elements inside extLst are not rules of the main namespace; they are read with the extension list.
+                    ConditionalFormatting.ReadBlock((System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r), _conditional, _resolveColor);
+                    break;
+                case "extLst" when IsMainNamespace(r.NamespaceURI):
+                    ConditionalFormatting.ReadExtensions((System.Xml.Linq.XElement)System.Xml.Linq.XNode.ReadFrom(r), _conditional, _resolveColor);
                     break;
                 case "pageSetUpPr":
                     fitToPage = r.BoolAttr("fitToPage");
@@ -334,6 +343,9 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
         }
     }
+
+    private static bool IsMainNamespace(string uri) =>
+        uri is "http://schemas.openxmlformats.org/spreadsheetml/2006/main" or "http://purl.oclc.org/ooxml/spreadsheetml/main";
 
     private static void ReadMargins(XmlReader r, SheetPageSetup setup)
     {
@@ -691,7 +703,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
                 if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number))
                 {
                     var shown = NumberFormat.Parse(CodeOf(format)).FormatNumber(number, Date1904);
-                    return new Cell { Text = shown.Text, Kind = CellValueKind.Number, Style = WithColor(style, shown.Color) };
+                    return new Cell { Text = shown.Text, Kind = CellValueKind.Number, Style = WithColor(style, shown.Color), Value = number };
                 }
                 return value.Length == 0 ? BuildEmpty(format) : new Cell { Text = value, Kind = CellValueKind.Text, Style = style };
         }

@@ -35,6 +35,7 @@ internal static class ShowcaseXlsx
             ("Rotation", RotationSheet(), "visible"),
             ("Gradients", GradientSheet(), "visible"),
             ("Pictures", PicturesSheet(), "visible"),
+            ("Conditional", ConditionalSheet(), "visible"),
             ("Secret", Hidden(), "hidden"),
         };
 
@@ -122,7 +123,15 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"6\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 24 vertical
         "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"7\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 25 from center
         "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"8\" borderId=\"2\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>" +                                // 26 from corner
-        "</cellXfs></styleSheet>";
+        "</cellXfs>" +
+        "<dxfs count=\"5\">" +
+        "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
+        "<dxf><font><color rgb=\"FF006100\"/></font><fill><patternFill><bgColor rgb=\"FFC6EFCE\"/></patternFill></fill></dxf>" +                       // 1 good
+        "<dxf><fill><patternFill><bgColor rgb=\"FFDDEBF7\"/></patternFill></fill></dxf>" +                                                              // 2 zebra
+        "<dxf><font><b/><color rgb=\"FF9C5700\"/></font><fill><patternFill><bgColor rgb=\"FFFFEB9C\"/></patternFill></fill>" +
+        "<border><bottom style=\"thin\"><color rgb=\"FF9C5700\"/></bottom></border></dxf>" +                                                          // 3 top
+        "<dxf><font><b/><i/><u/><color rgb=\"FFC00000\"/></font><numFmt numFmtId=\"167\" formatCode=\"0.0&quot; (!)&quot;\"/></dxf>" +                  // 4 duplicate
+        "</dxfs></styleSheet>";
 
     // ------------------------------------------------------------------ cell helpers
 
@@ -329,6 +338,57 @@ internal static class ShowcaseXlsx
         return Sheet(cols, rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\"/>" + HeaderFooter +
             "<rowBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"20\" max=\"16383\" man=\"1\"/></rowBreaks><drawing r:id=\"rId1\"/>");
+    }
+
+    // ------------------------------------------------------------------ conditional formatting
+
+    private static string ConditionalSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Conditional formatting", Bold)));
+        string[] headers = ["Scores", "Zebra", "Top 3", "Above average", "Duplicates", "Color scale", "Data bar", "Solid bar", "Arrows", "Lights", "Symbols"];
+        var header = new StringBuilder();
+        for (int c = 0; c < headers.Length; c++) header.Append(Str($"{ColumnName(c)}3", headers[c], Header));
+        rows.Append(Row(3, header.ToString()));
+
+        double[] scores = [5, 18, 32, 47, 51, 63, 72, 88, 94, 100];
+        double[] mixed = [12, 7, 33, 18, 25, 3, 40, 21, 9, 15];
+        double[] signed = [-40, -10, 0, 15, 30, 60, -25, 80, 45, 100];
+        string[] colors = ["red", "blue", "red", "green", "blue", "red", "black", "green", "gold", "teal"];
+        for (int i = 0; i < 10; i++)
+        {
+            int r = 4 + i;
+            rows.Append(Row(r,
+                Num($"A{r}", scores[i]) + Str($"B{r}", $"Stripe {i + 1}") + Num($"C{r}", mixed[i]) + Num($"D{r}", mixed[i]) + Str($"E{r}", colors[i]) +
+                Num($"F{r}", scores[i]) + Num($"G{r}", scores[i]) + Num($"H{r}", signed[i]) + Num($"I{r}", scores[i]) + Num($"J{r}", scores[i]) + Num($"K{r}", scores[i])));
+        }
+        rows.Append(Row(15, Str("A15", "Priority, stopIfTrue and relative formulas decide which format wins; fills, fonts, borders and number formats come from the rules.")));
+
+        const string Percents = "<cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/>";
+        const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        var tail = new StringBuilder();
+        tail.Append("<conditionalFormatting sqref=\"A4:A13\">" +
+                    "<cfRule type=\"cellIs\" dxfId=\"1\" priority=\"1\" operator=\"lessThan\"><formula>20</formula></cfRule>" +
+                    "<cfRule type=\"cellIs\" dxfId=\"0\" priority=\"2\" operator=\"greaterThan\"><formula>70</formula></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"B4:B13\"><cfRule type=\"expression\" dxfId=\"2\" priority=\"3\"><formula>MOD(ROW(),2)=0</formula></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"C4:C13\"><cfRule type=\"top10\" dxfId=\"3\" priority=\"4\" rank=\"3\"/></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"D4:D13\"><cfRule type=\"aboveAverage\" dxfId=\"1\" priority=\"5\"/></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"E4:E13\"><cfRule type=\"duplicateValues\" dxfId=\"4\" priority=\"6\"/></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"F4:F13\"><cfRule type=\"colorScale\" priority=\"7\"><colorScale><cfvo type=\"min\"/><cfvo type=\"percentile\" val=\"50\"/><cfvo type=\"max\"/>" +
+                    "<color rgb=\"FFF8696B\"/><color rgb=\"FFFFEB84\"/><color rgb=\"FF63BE7B\"/></colorScale></cfRule></conditionalFormatting>");
+        tail.Append("<conditionalFormatting sqref=\"G4:G13\"><cfRule type=\"dataBar\" priority=\"8\"><dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FF638EC6\"/></dataBar></cfRule></conditionalFormatting>");
+        tail.Append($"<conditionalFormatting sqref=\"H4:H13\"><cfRule type=\"dataBar\" priority=\"9\"><dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FF5B9BD5\"/></dataBar>" +
+                    $"<extLst><ext uri=\"{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}\" xmlns:x14=\"{X14}\"><x14:id>{{AAAAAAAA-0000-0000-0000-000000000001}}</x14:id></ext></extLst></cfRule></conditionalFormatting>");
+        tail.Append($"<conditionalFormatting sqref=\"I4:I13\"><cfRule type=\"iconSet\" priority=\"10\"><iconSet iconSet=\"3Arrows\">{Percents}</iconSet></cfRule></conditionalFormatting>");
+        tail.Append($"<conditionalFormatting sqref=\"J4:J13\"><cfRule type=\"iconSet\" priority=\"11\"><iconSet iconSet=\"3TrafficLights1\">{Percents}</iconSet></cfRule></conditionalFormatting>");
+        tail.Append($"<conditionalFormatting sqref=\"K4:K13\"><cfRule type=\"iconSet\" priority=\"12\"><iconSet iconSet=\"3Symbols\">{Percents}</iconSet></cfRule></conditionalFormatting>");
+        tail.Append("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>" + HeaderFooter);
+        tail.Append($"<extLst><ext uri=\"{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}\" xmlns:x14=\"{X14}\" xmlns:xm=\"http://schemas.microsoft.com/office/excel/2006/main\"><x14:conditionalFormattings>" +
+                    "<x14:conditionalFormatting><x14:cfRule type=\"dataBar\" id=\"{AAAAAAAA-0000-0000-0000-000000000001}\"><x14:dataBar minLength=\"0\" maxLength=\"100\" gradient=\"0\">" +
+                    "<x14:cfvo type=\"autoMin\"/><x14:cfvo type=\"autoMax\"/><x14:negativeFillColor rgb=\"FFC00000\"/></x14:dataBar></x14:cfRule><xm:sqref>H4:H13</xm:sqref></x14:conditionalFormatting>" +
+                    "</x14:conditionalFormattings></ext></extLst>");
+        var cols = "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"11\" width=\"13\" customWidth=\"1\"/></cols>";
+        return Sheet(cols, rows.ToString(), tail.ToString());
     }
 
     private static string Hidden() =>

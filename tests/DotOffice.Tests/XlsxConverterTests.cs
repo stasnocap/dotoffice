@@ -37,7 +37,7 @@ public class XlsxConverterTests
     public async Task Surfaces_reader_warnings()
     {
         var warnings = new ConversionWarningList();
-        await Convert(new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"cellIs\" priority=\"1\"/></conditionalFormatting>"), warnings);
+        await Convert(new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")), tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"1\"/></conditionalFormatting>"), warnings);
         Assert.Contains(warnings.Warnings, w => w.Code == "xlsx.conditional-formatting");
     }
 
@@ -126,5 +126,19 @@ public class XlsxConverterTests
         var warning = Assert.Single(warnings.Warnings, w => w.Code.StartsWith("xlsx."));
         Assert.Equal("xlsx.drawing", warning.Code);
         Assert.Contains("shape", warning.Message);
+    }
+
+    [Fact]
+    public async Task Conditional_formatting_icons_and_bars_reach_the_pdf_without_warnings()
+    {
+        var warnings = new ConversionWarningList();
+        var rows = Row(1, C("A1", "1")) + Row(2, C("A2", "5")) + Row(3, C("A3", "9"));
+        var tail = ConditionalFormatting("A1:A3", CfRule("iconSet", 1, "", "<iconSet iconSet=\"3Symbols\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/></iconSet>")) +
+                   ConditionalFormatting("B1:B3", Expression("TRUE", 2, 0));
+        var pdf = await Convert(new XlsxBuilder { Styles = StylesWithDxfs(Dxf("FF0000")) }.AddSheet("S", rows, tail: tail), warnings);
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code.StartsWith("xlsx.", StringComparison.Ordinal));
+        var text = Encoding.Latin1.GetString(pdf);
+        Assert.StartsWith("%PDF-", text);
+        Assert.Contains("%%EOF", text);
     }
 }

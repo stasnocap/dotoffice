@@ -68,8 +68,8 @@ public class XlsxWarningTests
     public void Conditional_formatting_warns_once_per_sheet_and_data_validations_do_not_warn()
     {
         var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")),
-            tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"cellIs\" priority=\"1\"/></conditionalFormatting>" +
-                  "<conditionalFormatting sqref=\"B1\"><cfRule type=\"cellIs\" priority=\"2\"/></conditionalFormatting>" +
+            tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"1\"/></conditionalFormatting>" +
+                  "<conditionalFormatting sqref=\"B1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"2\"/></conditionalFormatting>" +
                   "<dataValidations count=\"1\"><dataValidation sqref=\"A1\"/></dataValidations>");
         Assert.Equal(["xlsx.conditional-formatting"], Codes(builder));
     }
@@ -78,7 +78,7 @@ public class XlsxWarningTests
     public void Elements_after_conditional_formatting_are_still_read()
     {
         var builder = new XlsxBuilder().AddSheet("S", Row(1, C("A1", "1")),
-            tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"cellIs\" priority=\"1\"/></conditionalFormatting><mergeCells count=\"1\"><mergeCell ref=\"A1:B1\"/></mergeCells>");
+            tail: "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"1\"/></conditionalFormatting><mergeCells count=\"1\"><mergeCell ref=\"A1:B1\"/></mergeCells>");
         var wb = XlsxReader.Read(builder.BuildStream());
         Assert.Single(wb.Sheets[0].Merges);
     }

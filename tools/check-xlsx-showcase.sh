@@ -21,7 +21,7 @@ for p in $(seq 1 "$pages"); do
 done
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -90,3 +90,15 @@ first_n=$(pdfimages -list -f "${pic_pages[0]}" -l "${pic_pages[0]}" "$pdf" | awk
 [ "$first_n" -ge 5 ] || fail "expected at least five pictures on the first page of the pictures sheet, found $first_n"
 grep -E "warning xlsx\.drawing" "$log" | grep -qi "shape" || fail "the shape in the drawing should still be reported"
 if grep -E "warning xlsx\.drawing" "$log" | grep -qi "picture\b.*not rendered\|images"; then fail "pictures must not be reported as unsupported"; fi
+
+# Conditional formatting: the rules are applied (not reported), and what they draw is in the page content (fills, curves for the
+# round icons). pdftotext cannot see colors, so the content streams are decompressed with qpdf and counted.
+for text in "Conditional formatting" "Color scale" "Solid bar" "Symbols" "stopIfTrue"; do grep -qF -- "$text" all.txt || fail "missing conditional text: $text"; done
+if grep -E "warning xlsx\.conditional-formatting" "$log"; then fail "supported conditional formatting should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" conditional-qdf.pdf
+zebra=$(grep -ac '^0.8667 0.9216 0.9686 rg$' conditional-qdf.pdf || true)
+[ "$zebra" -ge 5 ] || fail "expected five zebra stripes from the expression rule, found $zebra"
+bad=$(grep -ac '^1 0.7804 0.8078 rg$' conditional-qdf.pdf || true)
+[ "$bad" -ge 4 ] || fail "expected four cellIs fills, found $bad"
+curves=$(grep -ac ' c$' conditional-qdf.pdf || true)
+[ "$curves" -ge 80 ] || fail "expected at least 20 round icons (four curves each), found $curves curves"

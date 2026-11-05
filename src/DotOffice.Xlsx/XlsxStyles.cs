@@ -11,6 +11,24 @@ internal sealed record CellFormat(CellStyle Style, int NumberFormatId, string? N
     public static CellFormat Default { get; } = new(CellStyle.Default, 0, null);
 }
 
+/// <summary>
+/// A differential format (<c>dxf</c>) of conditional formatting. Every property is optional: only what the dxf mentions overrides the cell.
+/// </summary>
+internal sealed record Dxf
+{
+    public bool? Bold { get; init; }
+    public bool? Italic { get; init; }
+    public UnderlineStyle? Underline { get; init; }
+    public bool? Strike { get; init; }
+    public Color? FontColor { get; init; }
+    public Color? Fill { get; init; }
+    public Border? Left { get; init; }
+    public Border? Right { get; init; }
+    public Border? Top { get; init; }
+    public Border? Bottom { get; init; }
+    public string? NumberFormat { get; init; }
+}
+
 /// <summary>Colors of the workbook theme, indexed the way SpreadsheetML refers to them (0 = lt1, 1 = dk1, 2 = lt2, 3 = dk2, 4–9 accents, 10–11 links).</summary>
 internal sealed class XlsxTheme
 {
@@ -71,7 +89,7 @@ internal static class XlsxStyles
     ];
 
     /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
-    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve);
+    public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs);
 
     public static Result Read(XmlReader reader, XlsxTheme theme, IConversionWarningSink? warnings)
     {
@@ -81,7 +99,8 @@ internal static class XlsxStyles
         var palette = new Color?[LegacyPalette.Length];
         for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(LegacyPalette[i]);
         Color? Resolve(XElement? color) => ResolveColor(color, theme, palette);
-        if (root is null) return new Result(formats, Resolve);
+        var dxfs = new List<Dxf>();
+        if (root is null) return new Result(formats, Resolve, dxfs);
 
         ReadPalette(root, palette);
 
@@ -144,7 +163,53 @@ internal static class XlsxStyles
             string? code = numberFormats.GetValueOrDefault(numFmtId);
             formats.Add(new CellFormat(style, numFmtId, code));
         }
-        return new Result(formats, Resolve);
+        foreach (var dxf in Children(Child(root, "dxfs"), "dxf")) dxfs.Add(ReadDxf(dxf, numberFormats, Resolve));
+        return new Result(formats, Resolve, dxfs);
+    }
+
+    private static Dxf ReadDxf(XElement dxf, Dictionary<int, string> numberFormats, Func<XElement?, Color?> resolve)
+    {
+        var result = new Dxf();
+        if (Child(dxf, "font") is { } font)
+        {
+            // ApplyFont inherits what the element does not mention; the two probes tell which properties are really present.
+            var off = new RunProperties { Bold = false, Italic = false, Strike = false, Underline = UnderlineStyle.None };
+            var on = new RunProperties { Bold = true, Italic = true, Strike = true, Underline = UnderlineStyle.Double };
+            var a = ApplyFont(font, off, resolve);
+            var b = ApplyFont(font, on, resolve);
+            result = result with
+            {
+                Bold = a.Bold == b.Bold ? a.Bold : null,
+                Italic = a.Italic == b.Italic ? a.Italic : null,
+                Strike = a.Strike == b.Strike ? a.Strike : null,
+                Underline = a.Underline == b.Underline ? a.Underline : null,
+                FontColor = Child(font, "color") is { } color ? resolve(color) : null,
+            };
+        }
+        if (Child(dxf, "fill") is { } fill && Child(fill, "patternFill") is { } pattern)
+        {
+            // In a dxf the color of a solid fill is the background color (Excel writes it the other way round for plain patterns).
+            var type = (string?)pattern.Attribute("patternType");
+            if (type != "none") result = result with { Fill = resolve(Child(pattern, "bgColor")) ?? resolve(Child(pattern, "fgColor")) };
+        }
+        if (Child(dxf, "border") is { } border)
+        {
+            var edges = ReadBorders(border, resolve);
+            result = result with
+            {
+                Left = edges.Left.IsVisible ? edges.Left : null,
+                Right = edges.Right.IsVisible ? edges.Right : null,
+                Top = edges.Top.IsVisible ? edges.Top : null,
+                Bottom = edges.Bottom.IsVisible ? edges.Bottom : null,
+            };
+        }
+        if (Child(dxf, "numFmt") is { } numFmt)
+        {
+            var code = (string?)numFmt.Attribute("formatCode");
+            if (code is null && Int(numFmt, "numFmtId") is { } id) code = numberFormats.GetValueOrDefault(id) ?? NumberFormat.BuiltIn(id);
+            result = result with { NumberFormat = code };
+        }
+        return result;
     }
 
     /// <summary>

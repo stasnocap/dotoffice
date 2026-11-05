@@ -399,6 +399,8 @@ public sealed class SheetLayoutEngine
         },
         GradientItem g => g with { X = dx + g.X * scale, Y = dy + g.Y * scale, Width = g.Width * scale, Height = g.Height * scale },
         ImageItem i => i with { X = dx + i.X * scale, Y = dy + i.Y * scale, Width = i.Width * scale, Height = i.Height * scale },
+        PolygonItem p => p with { Points = p.Points.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
+        EllipseItem e => e with { X = dx + e.X * scale, Y = dy + e.Y * scale, Width = e.Width * scale, Height = e.Height * scale },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
         _ => item,
     };
@@ -758,8 +760,13 @@ public sealed class SheetLayoutEngine
         private static double TextWidth(Cell cell, double cellWidth)
         {
             double indent = cell.Style.Indent * IndentWidth;
-            return Math.Max(cellWidth - 2 * CellPadding - indent, 1);
+            return Math.Max(cellWidth - 2 * CellPadding - indent - IconShift(cell), 1);
         }
+
+        /// <summary>The icon is as large as the cell's text; the text moves right by its width plus a small gap.</summary>
+        private static double IconSize(Cell cell) => cell.LargestFontSize;
+
+        private static double IconShift(Cell cell) => cell.Icon is null ? 0 : IconSize(cell) + CellPadding;
 
         // ---- bands
 
@@ -875,6 +882,11 @@ public sealed class SheetLayoutEngine
                 else if (d.Cell.Style.Fill is { } fill) items.Add(new RectItem(d.X, d.Y, d.Width, d.Height, fill));
             }
             foreach (var d in drawn)
+            {
+                if (d.Cell.DataBar is { } bar) EmitDataBar(bar, d.X, d.Y, d.Width, d.Height, items);
+                if (d.Cell.Icon is { } icon) EmitIcon(icon, d.X + CellPadding, d.Y + (d.Height - IconSize(d.Cell)) / 2, IconSize(d.Cell), items);
+            }
+            foreach (var d in drawn)
                 EmitText(d.Cell, d.Row, d.Column, d.X, d.Y, d.Width, d.Height, d.Merge is not null, columns, items);
             foreach (var d in drawn)
                 EmitBorders(d.Cell.Style.Borders, d.X, d.Y, d.Width, d.Height, items);
@@ -888,6 +900,61 @@ public sealed class SheetLayoutEngine
             foreach (var item in items) page.Items.Add(Transform(item, offsetX, offsetY, scale));
             _document.Pages.Add(page);
             _records.Add(new PageRecord(page, _sheet, _sheetPages++));
+        }
+
+        private static readonly Color White = new(255, 255, 255);
+
+        private static void EmitDataBar(CellDataBar bar, double x, double y, double width, double height, List<LayoutItem> items)
+        {
+            double left = x + bar.Start * width, barWidth = (bar.End - bar.Start) * width;
+            if (barWidth <= 0.05 || height <= 2) return;
+            double top = y + 1, barHeight = height - 2;
+            if (!bar.Gradient)
+            {
+                items.Add(new RectItem(left, top, barWidth, barHeight, bar.Color));
+                return;
+            }
+            // Gradient bars are solid at their base (next to the axis) and fade towards the free end.
+            var light = bar.Color.Blend(White, 0.8);
+            items.Add(new GradientItem(left, top, barWidth, barHeight, bar.Negative ? 180 : 0, [new GradientStop(0, bar.Color), new GradientStop(1, light)]));
+        }
+
+        /// <summary>Draws an icon in a square of the given size.</summary>
+        private static void EmitIcon(CellIcon icon, double x, double y, double size, List<LayoutItem> items)
+        {
+            if (size <= 0) return;
+            LayoutItem Poly(Color color, params (double X, double Y)[] points) =>
+                new PolygonItem(points.Select(p => (x + p.X * size, y + p.Y * size)).ToList(), color);
+            LayoutItem Disc(Color color, double l, double t, double w, double h) => new EllipseItem(x + l * size, y + t * size, w * size, h * size, color);
+            switch (icon.Shape)
+            {
+                case IconShape.ArrowUp:
+                    items.Add(Poly(icon.Color, (0.5, 0), (1, 0.5), (0.72, 0.5), (0.72, 1), (0.28, 1), (0.28, 0.5), (0, 0.5)));
+                    break;
+                case IconShape.ArrowDown:
+                    items.Add(Poly(icon.Color, (0.5, 1), (1, 0.5), (0.72, 0.5), (0.72, 0), (0.28, 0), (0.28, 0.5), (0, 0.5)));
+                    break;
+                case IconShape.ArrowSideways:
+                    items.Add(Poly(icon.Color, (1, 0.5), (0.5, 0), (0.5, 0.28), (0, 0.28), (0, 0.72), (0.5, 0.72), (0.5, 1)));
+                    break;
+                case IconShape.Circle:
+                    items.Add(Disc(icon.Color, 0, 0, 1, 1));
+                    break;
+                case IconShape.Check:
+                    items.Add(Disc(icon.Color, 0, 0, 1, 1));
+                    items.Add(Poly(White, (0.2, 0.52), (0.31, 0.41), (0.43, 0.54), (0.69, 0.27), (0.8, 0.38), (0.43, 0.76)));
+                    break;
+                case IconShape.Exclamation:
+                    items.Add(Disc(icon.Color, 0, 0, 1, 1));
+                    items.Add(Poly(White, (0.43, 0.2), (0.57, 0.2), (0.55, 0.58), (0.45, 0.58)));
+                    items.Add(Disc(White, 0.42, 0.65, 0.16, 0.16));
+                    break;
+                case IconShape.Cross:
+                    items.Add(Disc(icon.Color, 0, 0, 1, 1));
+                    items.Add(Poly(White, (0.28, 0.36), (0.36, 0.28), (0.5, 0.42), (0.64, 0.28), (0.72, 0.36), (0.58, 0.5), (0.72, 0.64),
+                        (0.64, 0.72), (0.5, 0.58), (0.36, 0.72), (0.28, 0.64), (0.42, 0.5)));
+                    break;
+            }
         }
 
         /// <summary>
@@ -1034,7 +1101,7 @@ public sealed class SheetLayoutEngine
 
             var alignment = AlignmentOf(cell);
             double indent = style.Indent * IndentWidth;
-            double left = x + CellPadding + (alignment == ParagraphAlignment.Left || alignment == ParagraphAlignment.Justify ? indent : 0);
+            double left = x + CellPadding + IconShift(cell) + (alignment == ParagraphAlignment.Left || alignment == ParagraphAlignment.Justify ? indent : 0);
             double right = x + width - CellPadding - (alignment == ParagraphAlignment.Right ? indent : 0);
 
             double clipLeft = x, clipRight = x + width;
