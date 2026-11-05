@@ -360,7 +360,7 @@ internal static class RasterDecoders
         if (!tags.TryGetValue(259, out var c) || c.Length == 0 || c[0] != 7) return null;
         uint[]? offsets = tags.GetValueOrDefault(273) ?? tags.GetValueOrDefault(324), counts = tags.GetValueOrDefault(279) ?? tags.GetValueOrDefault(325);
         if (offsets is null || counts is null || offsets.Length == 0 || offsets.Length != counts.Length) return null;
-        if (offsets.Length > 1 && !tags.ContainsKey(273)) return null; // tiles lie in two dimensions
+        bool tiled = !tags.ContainsKey(273);
         for (int i = 0; i < offsets.Length; i++)
             if ((long)offsets[i] + counts[i] > d.Length || counts[i] < 4 || d[offsets[i]] != 0xFF || d[offsets[i] + 1] != 0xD8) return null;
         // JPEGTables is itself a stream (SOI, tables, EOI); a strip is a stream without them (SOI, frame, scan, EOI).
@@ -380,7 +380,21 @@ internal static class RasterDecoders
             return joined;
         }
         var first = Whole(0);
-        if (offsets.Length == 1) return first;
+        if (tiled && (tags.GetValueOrDefault(284)?.FirstOrDefault() ?? 1) != 1) return null; // planes of their own
+        if (tiled && offsets.Length > 1)
+        {
+            // Tiles lie in two dimensions: their coefficients are put on one grid and coded again.
+            int tileW = (int)(tags.GetValueOrDefault(322)?.FirstOrDefault() ?? 0), tileH = (int)(tags.GetValueOrDefault(323)?.FirstOrDefault() ?? 0);
+            int imageW = (int)(tags.GetValueOrDefault(256)?.FirstOrDefault() ?? 0), imageH = (int)(tags.GetValueOrDefault(257)?.FirstOrDefault() ?? 0);
+            if (tileW <= 0 || tileH <= 0 || imageW <= 0 || imageH <= 0) return null;
+            int across = (imageW + tileW - 1) / tileW, down = (imageH + tileH - 1) / tileH;
+            return JpegTiles.Join(Enumerable.Range(0, offsets.Length).Select(i => i == 0 ? first : Whole(i)).ToList(), across, down, tileW, tileH, imageW, imageH);
+        }
+        if (offsets.Length == 1)
+        {
+            // One tile bigger than the picture: the frame is cut to the picture, which the decoder does by itself when the sizes agree.
+            return first;
+        }
 
         uint width = tags.GetValueOrDefault(256)?.FirstOrDefault() ?? 0, height = tags.GetValueOrDefault(257)?.FirstOrDefault() ?? 0;
         uint rows = tags.TryGetValue(278, out var rps) && rps.Length > 0 ? rps[0] : height;

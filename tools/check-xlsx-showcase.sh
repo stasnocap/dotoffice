@@ -107,7 +107,7 @@ if grep -q "pdf.image" "$log"; then fail "a BMP, GIF or TIFF picture was not dec
 last_n=$(pdfimages -list -f "${pic_pages[-1]}" -l "${pic_pages[-1]}" "$pdf" | awk 'NR > 2' | wc -l)
 [ "$last_n" -ge 5 ] || fail "the last page of the pictures sheet should hold the continued, BMP, GIF, RLE BMP, LZW TIFF and JPEG TIFF pictures, found $last_n"
 grep -c "DCTDecode" pictures-qdf.pdf | grep -qv "^0$" || fail "the JPEG-in-TIFF picture should be embedded as a JPEG (DCTDecode)"
-[ "$(grep -ac "/DCTDecode" pictures-qdf.pdf)" -ge 2 ] || fail "the one-strip and the three-strip JPEG-in-TIFF pictures should both be embedded as JPEGs (DCTDecode)"
+[ "$(grep -ac "/DCTDecode" pictures-qdf.pdf)" -ge 3 ] || fail "the one-strip, the three-strip and the tiled JPEG-in-TIFF pictures should all be embedded as JPEGs (DCTDecode)"
 [ "$(pdftotext -layout "$pdf" - | grep -c "purple, not red")" -ge 1 ] || fail "missing the indexed-color note"
 # Header and footer pictures (&G, from the legacy VML drawing): 54x30 pt at the left margin below the header distance, 36x36 pt at the right margin above the footer distance.
 grep -aqE "^q 54 0 0 30 50.4 [0-9.]+ cm /Im[0-9]+ Do Q$" pictures-qdf.pdf || fail "no header picture (&G) at the left margin"

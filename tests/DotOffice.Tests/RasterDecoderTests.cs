@@ -238,6 +238,64 @@ public class RasterDecoderTests
         Assert.Equal((40, 48), (PdfImage.FromTiff(tiff).Width, PdfImage.FromTiff(tiff).Height));
     }
 
+    /// <summary>The entropy-coded data of a JPEG: everything after its scan header up to the end marker.</summary>
+    private static byte[] ScanData(byte[] jpeg)
+    {
+        int sos = Enumerable.Range(2, jpeg.Length - 4).First(i => jpeg[i] == 0xFF && jpeg[i + 1] == 0xDA);
+        return jpeg[(sos + 2 + (jpeg[sos + 2] << 8 | jpeg[sos + 3]))..];
+    }
+
+    [Theory]
+    [InlineData("tiled-jpeg-aligned.tif", "whole-jpeg-aligned.tif", 4)]                  // 64x48, YCbCr 2x2, 16x16 tiles
+    [InlineData("tiled-jpeg-aligned-wide.tif", "whole-jpeg-aligned.tif", 4)]             // 32x16 tiles
+    [InlineData("tiled-jpeg-aligned-gray.tif", "whole-jpeg-aligned-gray.tif", 4)]        // one component: an MCU is one block
+    public void A_tiff_with_jpeg_tiles_is_joined_into_one_jpeg_with_the_same_coefficients(string tiled, string whole, int _)
+    {
+        // Written by libtiff (tiffcp -c jpeg:90 -t -w 16 -l 16, and -r 64 for the single strip). Both use the standard Huffman tables and the same
+        // quantization, so re-coding the tiles' coefficients on the image's own grid gives the very bytes libtiff codes for the whole picture.
+        var joined = RasterDecoders.TiffJpeg(TestAssets.Bytes(tiled))!;
+        var reference = RasterDecoders.TiffJpeg(TestAssets.Bytes(whole))!;
+        Assert.NotNull(joined);
+        Assert.Equal(ScanData(reference), ScanData(joined));
+        int frame = Enumerable.Range(2, joined.Length - 8).First(i => joined[i] == 0xFF && joined[i + 1] == 0xC0);
+        Assert.Equal((48, 64), (joined[frame + 5] << 8 | joined[frame + 6], joined[frame + 7] << 8 | joined[frame + 8]));
+        Assert.DoesNotContain(Enumerable.Range(0, joined.Length - 1), i => joined[i] == 0xFF && joined[i + 1] == 0xDD);   // no restart intervals
+        Assert.Equal((64, 48), (PdfImage.FromTiff(TestAssets.Bytes(tiled)).Width, PdfImage.FromTiff(TestAssets.Bytes(tiled)).Height));
+    }
+
+    [Fact]
+    public void Tiles_that_overhang_the_picture_are_cut_to_its_size()
+    {
+        // 70x50 in 16x16 tiles: the last column and row of tiles are partly outside. (libtiff pads the tiles differently from a whole-picture
+        // encode, so the edge blocks cannot be compared with one; the frame must have the picture's size and the data must be one scan.)
+        var tiff = TestAssets.Bytes("tiled-jpeg.tif");
+        var joined = RasterDecoders.TiffJpeg(tiff)!;
+        Assert.NotNull(joined);
+        int frame = Enumerable.Range(2, joined.Length - 8).First(i => joined[i] == 0xFF && joined[i + 1] == 0xC0);
+        Assert.Equal((50, 70), (joined[frame + 5] << 8 | joined[frame + 6], joined[frame + 7] << 8 | joined[frame + 8]));
+        Assert.Equal(1, Enumerable.Range(0, joined.Length - 1).Count(i => joined[i] == 0xFF && joined[i + 1] == 0xDA));
+        Assert.Equal([(byte)0xFF, (byte)0xD9], joined[^2..]);
+        Assert.Equal((70, 50), (PdfImage.FromTiff(tiff).Width, PdfImage.FromTiff(tiff).Height));
+    }
+
+    [Fact]
+    public void Jpeg_tiles_that_are_damaged_or_not_whole_mcus_are_not_joined()
+    {
+        var tiff = TestAssets.Bytes("tiled-jpeg.tif");
+        var odd = (byte[])tiff.Clone();      // a tile width of 12 is not a whole MCU
+        int ifd = BitConverter.ToInt32(odd, 4), count = BitConverter.ToUInt16(odd, ifd);
+        for (int i = 0; i < count; i++)
+        {
+            int e = ifd + 2 + i * 12;
+            if (BitConverter.ToUInt16(odd, e) == 322) odd[e + 8] = 12;
+        }
+        Assert.Null(RasterDecoders.TiffJpeg(odd));
+        var broken = (byte[])tiff.Clone();   // the entropy-coded data of the first tile overwritten
+        Array.Fill(broken, (byte)0xFE, 700, 120);
+        var result = RasterDecoders.TiffJpeg(broken);
+        Assert.True(result is null || result.Length > 100);   // never throws
+    }
+
     [Fact]
     public void Jpeg_strips_that_cannot_be_chained_are_not_joined()
     {
