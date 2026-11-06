@@ -106,4 +106,22 @@ public class TextDirectionTests
         Assert.InRange(longText, 15, 22);
         Assert.Equal(shortText, longText, 0.5);
     }
+
+    [Fact]
+    public void Auto_column_of_a_vertical_cell_in_a_fixed_height_row_is_as_wide_as_the_lines_wrapped_at_that_height()
+    {
+        string Width(string rowPr)
+        {
+            var text = string.Join(' ', Enumerable.Repeat("lorem ipsum dolor", 4));
+            var vertical = $"<w:tc><w:tcPr><w:textDirection w:val=\"btLr\"/></w:tcPr>{P(R(text, Font))}</w:tc>";
+            var plain = $"<w:tc><w:tcPr/>{P(R("abc", Font))}</w:tc>";
+            var body = $"<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr><w:tr>{rowPr}{vertical}{plain}</w:tr></w:tbl>{P("")}{Section()}";
+            var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+            var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+            return page.Items.OfType<PushItem>().Single(p => p.Rotation != 0).Clip!.Value.Width.ToString("F1");
+        }
+        double free = double.Parse(Width(""));
+        double fixedHeight = double.Parse(Width("<w:trPr><w:trHeight w:val=\"1200\" w:hRule=\"exact\"/></w:trPr>"));
+        Assert.True(fixedHeight > free * 2, $"{fixedHeight} vs {free}");
+    }
 }

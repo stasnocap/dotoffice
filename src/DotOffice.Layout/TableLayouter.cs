@@ -339,7 +339,7 @@ internal static class TableLayouter
         var preferred = new double?[columns];
         foreach (var p in placed.SelectMany(r => r))
         {
-            var (cmin, cmax) = Intrinsic(p.Cell, ctx);
+            var (cmin, cmax) = Intrinsic(p.Cell, ctx, FixedRowLength(table, p));
             if (p.Cell.Width.Unit == TableWidthUnit.Points && p.Cell.Width.Value > 0) cmax = Math.Max(cmin, p.Cell.Width.Value);
             if (p.Cell.Width.Unit == TableWidthUnit.Percent && p.Cell.Width.Value > 0)
                 cmax = Math.Max(cmin, available * p.Cell.Width.Value / 100);
@@ -352,7 +352,7 @@ internal static class TableLayouter
         }
         foreach (var p in placed.SelectMany(r => r).Where(p => p.Span > 1))
         {
-            var (cmin, cmax) = Intrinsic(p.Cell, ctx);
+            var (cmin, cmax) = Intrinsic(p.Cell, ctx, FixedRowLength(table, p));
             double haveMin = 0, haveMax = 0;
             for (int c = p.Column; c < p.Column + p.Span; c++) { haveMin += min[c]; haveMax += max[c]; }
             for (int c = p.Column; c < p.Column + p.Span; c++)
@@ -384,16 +384,24 @@ internal static class TableLayouter
     /// The widths a cell asks for. A cell whose text runs up or down is as wide as its stacked lines are high, whatever the
     /// text length (the length is the unwrapped content, capped at the body height).
     /// </summary>
-    internal static (double Min, double Max) Intrinsic(TableCell cell, FlowContext ctx)
+    internal static (double Min, double Max) Intrinsic(TableCell cell, FlowContext ctx, double? rowHeight = null)
     {
         var horizontal = HorizontalIntrinsic(cell, ctx);
         if (cell.TextDirection == CellTextDirection.LeftToRight) return horizontal;
         var m = cell.Margins;
-        double length = Math.Max(1, Math.Min(horizontal.Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom));
+        double length = Math.Max(1, rowHeight is { } h
+            ? h - m.Top - m.Bottom
+            : Math.Min(horizontal.Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom));
         var slices = BlockFlow.Build(cell.Blocks, 0, length, ctx.Nested());
         double across = BlockFlow.Stack(slices, []) + m.Left + m.Right;
         return (across, across);
     }
+
+    /// <summary>The fixed height of a one-row cell's row, the length its vertical text is laid out at (as in <c>RowHint</c>).</summary>
+    private static double? FixedRowLength(Table table, Placed p) =>
+        p.Cell.TextDirection != CellTextDirection.LeftToRight && table.Rows[p.Row] is { Height: > 0, HeightRule: not RowHeightRule.Auto } row
+            ? row.Height
+            : null;
 
     private static (double Min, double Max) HorizontalIntrinsic(TableCell cell, FlowContext ctx)
     {
