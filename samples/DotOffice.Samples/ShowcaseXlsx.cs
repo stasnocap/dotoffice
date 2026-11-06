@@ -604,7 +604,10 @@ internal static class ShowcaseXlsx
         const string NoMarker = "<c:marker><c:symbol val=\"none\"/></c:marker>";
         var line = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true, NoMarker) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
         var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
-        var stock = "<c:stockChart/>";
+        const string Unjoined = "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>";
+        var stock = "<c:stockChart>" + ChartSeries(0, true, Unjoined + NoMarker) + ChartSeries(1, true, Unjoined + NoMarker) + ChartSeries(2, true, Unjoined + "<c:marker><c:symbol val=\"dash\"/><c:size val=\"7\"/></c:marker>") +
+                    "<c:hiLowLines/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" + Axes();
+        var surface = "<c:surfaceChart/>";
         string[] charts =
         [
             ChartSpace("Clustered columns", Bars("col", "clustered", 3, true, axes: Axes("Quarter", "Units")), "b"),
@@ -613,9 +616,9 @@ internal static class ShowcaseXlsx
             ChartSpace("Lines", line, "b"),
             ChartSpace("Pie shares", pie),
             ChartSpace("100 % stacked", Bars("col", "percentStacked", 3, true)),
-            ChartSpace("Stock", stock),
+            ChartSpace("Stock", stock, "b"), ChartSpace("Surface", surface),
         ];
-        (int C0, int R0, int C1, int R1)[] places = [(0, 11, 3, 24), (3, 11, 6, 24), (0, 25, 3, 38), (3, 25, 6, 38), (0, 39, 3, 52), (3, 39, 6, 52), (0, 53, 3, 60)];
+        (int C0, int R0, int C1, int R1)[] places = [(0, 11, 3, 24), (3, 11, 6, 24), (0, 25, 3, 38), (3, 25, 6, 38), (0, 39, 3, 52), (3, 39, 6, 52), (0, 53, 3, 66), (3, 53, 6, 66)];
         WriteChartParts(zip, sheetNumber, charts, places, "chart");
     }
 
@@ -645,7 +648,7 @@ internal static class ShowcaseXlsx
         rows.Append(Row(3, Str("A3", "Quarter", Header) + Str("B3", SeriesNames[0], Header) + Str("C3", SeriesNames[1], Header) + Str("D3", SeriesNames[2], Header)));
         for (int k = 0; k < 6; k++)
             rows.Append(Row(4 + k, Str($"A{4 + k}", Quarters[k]) + Num($"B{4 + k}", ChartData[0][k]) + Num($"C{4 + k}", ChartData[1][k]) + Num($"D{4 + k}", ChartData[2][k])));
-        rows.Append(Row(11, Str("A11", "The stock chart at the bottom is not supported and is reported.")));
+        rows.Append(Row(11, Str("A11", "The surface chart at the bottom is not supported and is reported.")));
         return Sheet("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><cols><col min=\"1\" max=\"6\" width=\"16\" customWidth=\"1\"/></cols>", rows.ToString(),
             "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" fitToWidth=\"1\" fitToHeight=\"1\"/>" + HeaderFooter + "<drawing r:id=\"rId1\"/>");
     }

@@ -12,7 +12,7 @@ namespace DotOffice.Xlsx;
 /// </summary>
 internal static class XlsxCharts
 {
-    private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart", "scatterChart", "bubbleChart", "radarChart"];
+    private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart", "scatterChart", "bubbleChart", "radarChart", "stockChart"];
 
     /// <summary>What a chart type is called in warnings.</summary>
     private static string Describe(string element) => element switch
@@ -119,7 +119,7 @@ internal static class XlsxCharts
             : (string?)Child(g, "grouping")?.Attribute("val") switch { "stacked" => ChartGrouping.Stacked, "percentStacked" => ChartGrouping.PercentStacked, _ => ChartGrouping.Clustered };
         ChartKind KindOf(XElement g) => g.Name.LocalName switch
         {
-            "pieChart" => ChartKind.Pie, "doughnutChart" => ChartKind.Doughnut, "lineChart" => ChartKind.Line, "areaChart" => ChartKind.Area,
+            "pieChart" => ChartKind.Pie, "doughnutChart" => ChartKind.Doughnut, "lineChart" or "stockChart" => ChartKind.Line, "areaChart" => ChartKind.Area,
             "scatterChart" => ChartKind.Scatter, "bubbleChart" => ChartKind.Bubble, "radarChart" => ChartKind.Radar,
             _ => ((string?)Child(g, "barDir")?.Attribute("val") ?? "col") == "bar" ? ChartKind.Bar : ChartKind.Column,
         };
@@ -158,7 +158,7 @@ internal static class XlsxCharts
                 var symbol = (string?)Path(ser, "marker", "symbol")?.Attribute("val");
                 marker = symbol is not null ? symbol != "none"
                     : kind == ChartKind.Radar ? radarStyle == "marker"
-                    : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
+                    : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
             }
 
             List<Color>? pointColors = null;
@@ -555,7 +555,7 @@ internal static class XlsxCharts
 
         return template with
         {
-            Kind = kind, Grouping = grouping, Title = title, TitleSize = titleSize, Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, Grouping = grouping, Title = title, TitleSize = titleSize, Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),

@@ -476,6 +476,12 @@ public sealed partial class SheetLayoutEngine
             else if (group.Kind == ChartKind.Line)
             {
                 var cumulative = new double[categories];
+                if (chart.HiLowLines && !group.Secondary)
+                    for (int i = 0; i < categories; i++)
+                    {
+                        var vs = list.Where(q => i < q.Values.Count && q.Values[i] is not null).Select(q => q.Values[i]!.Value).ToList();
+                        if (vs.Count >= 2) items.Add(new LineItem(CategoryX(i), ValueY(scale, vs.Max()), CategoryX(i), ValueY(scale, vs.Min()), 1, new Color(0x40, 0x40, 0x40)));
+                    }
                 for (int j = 0; j < seriesCount; j++)
                 {
                     var s = list[j];

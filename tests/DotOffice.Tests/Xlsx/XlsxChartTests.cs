@@ -101,11 +101,11 @@ public class XlsxChartTests
     [Fact]
     public void Unsupported_chart_types_are_named_in_the_warning_and_not_drawn()
     {
-        var (sheet, warnings) = Read(Space("<c:stockChart/>"));
+        var (sheet, warnings) = Read(Space("<c:surfaceChart/>"));
         Assert.Empty(sheet.Charts);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("xlsx.drawing", warning.Code);
-        Assert.Contains("stock", warning.Message);
+        Assert.Contains("surface", warning.Message);
     }
 
     private const string SecondaryAxes =
@@ -245,6 +245,20 @@ public class XlsxChartTests
         Assert.Equal((ChartKind.Area, ChartGrouping.Stacked, false), (chart.Kind, chart.Grouping, chart.CategoriesBetween));
         Assert.True(chart.ValueMax >= 80);
         Assert.True(Read(Space(plot.Replace("midCat", "between"))).Sheet.Charts.Single().CategoriesBetween);
+    }
+
+    [Fact]
+    public void A_stock_chart_is_drawn_as_unjoined_series_with_hi_low_lines()
+    {
+        var noLine = "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>";
+        var stock = "<c:stockChart>" + Ser(0, null, "S!$A$2:$A$4", "S!$B$2:$B$4", noLine) + Ser(1, null, "S!$A$2:$A$4", "S!$B$2:$B$4", noLine) + "<c:hiLowLines/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" +
+                    "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+        var (sheet, warnings) = Read(Space(stock));
+        Assert.Empty(warnings.Warnings);
+        var chart = Assert.Single(sheet.Charts);
+        Assert.True(chart.HiLowLines);
+        Assert.Equal(ChartKind.Line, chart.Kind);
+        Assert.All(chart.Series, x => Assert.False(x.Line || x.Marker));
     }
 
     [Fact]

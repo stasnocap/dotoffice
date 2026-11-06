@@ -256,20 +256,21 @@ done
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "Shape presets"; then fail "the shape presets sheet should not warn"; fi
 if grep -F "drawn as rectangles" "$log" | grep -qE "star|Callout|cloud|flowChart|Bracket|Brace|can|cube"; then fail "a preset is still drawn as a rectangle"; fi
 
-# Charts: six drawn on one page (titles, legend entries, axis labels, pie percentages, series colors), the stock chart is the only one reported.
+# Charts: six drawn on one page (titles, legend entries, axis labels, pie percentages, series colors), the stock chart is drawn with its hi-low lines, the surface chart is the only one reported.
 chart_pages=0; chart_page=0
 for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Charts" ] && { chart_pages=$((chart_pages + 1)); chart_page=$p; }; done
 [ "$chart_pages" = 1 ] || fail "the charts sheet should fit one page, found $chart_pages"
 chart_text=$(page_text "$chart_page")
-for text in "Clustered columns" "Stacked columns" "Bars with labels" "Lines" "Pie shares" "100 % stacked" "100%" "26%" "Units" "North" "Q6"; do
+for text in "Clustered columns" "Stacked columns" "Bars with labels" "Lines" "Pie shares" "100 % stacked" "100%" "26%" "Stock" "Units" "North" "Q6"; do
   [[ $chart_text == *"$text"* ]] || fail "missing chart text: $text"
 done
-[[ $chart_text != *"Stock"* ]] || fail "the unsupported stock chart should not be drawn"
+[[ $chart_text != *"Surface"* ]] || fail "the unsupported surface chart should not be drawn"
 qpdf --qdf --object-streams=disable "$pdf" charts-qdf.pdf
 for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.6471 0.6471 0.6471"; do
   grep -aq "^$color rg$" charts-qdf.pdf || fail "chart series color $color is missing"
 done
-grep -E "warning xlsx\.drawing" "$log" | grep -q "stock chart" || fail "the stock chart should be reported"
+grep -E "warning xlsx\.drawing" "$log" | grep -q "surface chart" || fail "the surface chart should be reported"
+if grep -E "warning xlsx\.drawing" "$log" | grep -q "stock chart"; then fail "the stock chart should be drawn"; fi
 if grep -E "warning xlsx\.(chart|drawing-approximated)" "$log"; then fail "the supported charts should not warn"; fi
 
 # More chart types: area, doughnut, scatter, bubble and radar are drawn on one page and not reported.

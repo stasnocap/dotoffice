@@ -123,6 +123,9 @@ public sealed record SheetChart : SheetObject
 
     public ChartGrouping Grouping { get; init; }
 
+    /// <summary>Whether a vertical line joins the highest and lowest value of every category (stock charts, <c>hiLowLines</c>).</summary>
+    public bool HiLowLines { get; init; }
+
     public string? Title { get; init; }
 
     public double TitleSize { get; init; } = 14;
