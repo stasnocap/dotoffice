@@ -4,13 +4,14 @@ using DotOffice.Fonts.Shaping;
 namespace DotOffice.Tests;
 
 /// <summary>
-/// The Universal Shaping Engine shaper (Sinhala). The expected glyphs are what DotOffice produces for words whose
+/// The Universal Shaping Engine shaper (Sinhala and Tibetan). The expected glyphs are what DotOffice produces for words whose
 /// page rendering matched LibreOffice (which shapes Sinhala with HarfBuzz's USE) pixel for pixel; they are not
 /// output of Word.
 /// </summary>
 public class UseShaperTests
 {
     private static readonly TrueTypeFont Sinhala = TrueTypeFont.Load(TestAssets.Path("NotoSansSinhala-Regular.ttf"));
+    private static readonly TrueTypeFont Tibetan = TrueTypeFont.Load(TestAssets.Path("NotoSerifTibetan-Regular.ttf"));
     private static readonly TrueTypeFont Latin = TrueTypeFont.Load(TestAssets.Path("NotoSans-Regular.ttf"));
 
     private static List<GlyphInfo> Shape(string text) => UseShaper.Shape(Sinhala, text, "sinh")!;
@@ -133,5 +134,46 @@ public class UseShaperTests
         var shaped = TextShaper.Shape(Sinhala, "කො", false, kerning: true);
         Assert.Equal(3, shaped.Length);
         Assert.True(TextShaper.NeedsShaping(Sinhala, "කො", kerning: false));
+    }
+
+    private static List<GlyphInfo> ShapeTibetan(string text) => UseShaper.Shape(Tibetan, text, "tibt")!;
+
+    [Fact]
+    public void A_Tibetan_stack_is_one_syllable()
+    {
+        // KA + subjoined RA is one syllable (a base and a subjoined consonant) that the font draws as one glyph;
+        // the next base starts another.
+        var shaped = ShapeTibetan("ཀྲཀ");
+        Assert.Equal(2, shaped.Count);
+        Assert.Equal("ཀྲ", shaped[0].Text);
+        Assert.NotEqual(shaped[0].Syllable, shaped[1].Syllable);
+        Assert.Equal(ShapeTibetan("ཀ")[0].Glyph, shaped[1].Glyph);
+    }
+
+    [Fact]
+    public void Tibetan_vowel_signs_have_no_advance_and_the_decomposed_AA_I_sign_matches_its_parts()
+    {
+        var parts = ShapeTibetan("ཀཱི"); // KA, AA, I (decomposed form)
+        var composed = ShapeTibetan("ཀ\u0F73"); // KA, II (canonically KA, AA, I)
+        Assert.Equal(parts.Select(g => g.Glyph), composed.Select(g => g.Glyph));
+        foreach (var mark in parts.Skip(1)) Assert.Equal(0, mark.XAdvance);
+    }
+
+    [Fact]
+    public void A_Tibetan_vowel_sign_without_a_base_gets_a_dotted_circle()
+    {
+        var shaped = ShapeTibetan("\u0F72");
+        Assert.Equal(2, shaped.Count);
+        Assert.Equal(Tibetan.GetGlyphId(0x25CC), shaped[0].Glyph);
+    }
+
+    [Fact]
+    public void Tibetan_goes_through_the_text_shaper()
+    {
+        var shaped = TextShaper.Shape(Tibetan, "ཀྲཀ", false, kerning: false);
+        Assert.Equal(2, shaped.Length);
+        Assert.Equal("ཀྲཀ", string.Concat(shaped.Select(g => g.Text)));
+        Assert.True(TextShaper.NeedsShaping(Tibetan, "ཀ", kerning: false));
+        Assert.False(TextShaper.IsUnsupportedComplexScript('ཀ'));
     }
 }

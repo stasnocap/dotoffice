@@ -142,6 +142,6 @@ this Software without prior written authorization of the copyright holder.
 ## Test assets
 
 The Noto fonts in `tests/DotOffice.Tests/Assets` (`NotoSans`, `NotoSansArabic`, `NotoSansHebrew`,
-`NotoNastaliqUrdu`, `NotoSansDevanagari`, `NotoSansBengali`, `NotoSansTamil` and `NotoSansSinhala`) are licensed under the SIL Open
+`NotoNastaliqUrdu`, `NotoSansDevanagari`, `NotoSansBengali`, `NotoSansTamil`, `NotoSansSinhala` and `NotoSerifTibetan`) are licensed under the SIL Open
 Font License 1.1 (see the `-OFL.txt` file next to each). They are used by tests only and are not shipped in
 packages.

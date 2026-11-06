@@ -15,7 +15,7 @@ internal enum JoiningType : byte { NotListed, U, R, L, D, C, T }
 /// Basic OpenType shaping, after HarfBuzz's default, Arabic and Hebrew shapers: normalization, Arabic-style
 /// joining forms (isol/fina/medi/init), ligatures, kerning and mark positioning from the font's GSUB/GPOS tables.
 /// Text is split into script runs (<see cref="ScriptRuns"/>) and each is shaped with its script's features.
-/// Indic scripts go to the <see cref="IndicShaper"/>, Sinhala to the <see cref="UseShaper"/>; Tibetan, Myanmar and Khmer are not handled (their
+/// Indic scripts go to the <see cref="IndicShaper"/>, Sinhala and Tibetan to the <see cref="UseShaper"/>; Myanmar and Khmer (which HarfBuzz shapes with shapers of their own) are not handled (their
 /// glyphs are mapped one to one).
 /// </summary>
 public static class TextShaper
@@ -45,9 +45,9 @@ public static class TextShaper
         return layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, -1);
     }
 
-    /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented: Tibetan, Myanmar, Khmer.</summary>
+    /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented: Myanmar, Khmer.</summary>
     public static bool IsUnsupportedComplexScript(int codePoint) =>
-        codePoint is >= 0x0F00 and <= 0x0FFF or >= 0x1000 and <= 0x109F or >= 0x1780 and <= 0x17FF;
+        codePoint is >= 0x1000 and <= 0x109F or >= 0x1780 and <= 0x17FF;
 
     /// <summary>
     /// Shapes one run of text in one font. <paramref name="rightToLeft"/> only affects how mark offsets are
