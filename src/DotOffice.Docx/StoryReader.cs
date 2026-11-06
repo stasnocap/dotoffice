@@ -863,6 +863,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                 Width = format.Width ?? TableWidth.Auto,
                 Alignment = format.Alignment ?? TableAlignment.Left,
                 Indent = format.Indent ?? 0,
+                RightToLeft = format.RightToLeft ?? false,
                 Layout = format.Layout ?? TableLayoutMode.Auto,
             },
         };

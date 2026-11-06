@@ -102,17 +102,28 @@ internal static class TableLayouter
 
         var widths = ResolveColumns(table, placed, columns, available, ctx);
         double tableWidth = widths.Sum();
-        double left = table.Properties.Alignment switch
+        // A right-to-left table (w:bidiVisual) has its leading edge on the right: ISO 29500 17.4.51 puts tblInd there, and the
+        // alignment is read relative to it, so "left" (start) means flush with the right margin. Not checked against Word.
+        bool rtl = table.Properties.RightToLeft;
+        var alignment = table.Properties.Alignment;
+        if (rtl) alignment = alignment switch { TableAlignment.Left => TableAlignment.Right, TableAlignment.Right => TableAlignment.Left, _ => alignment };
+        double indent = table.Properties.Indent;
+        double left = alignment switch
         {
             TableAlignment.Center => x0 + (available - tableWidth) / 2,
-            TableAlignment.Right => x0 + available - tableWidth,
-            _ => x0 + table.Properties.Indent,
+            TableAlignment.Right => x0 + available - tableWidth - (rtl ? indent : 0),
+            _ => x0 + (rtl ? 0 : indent),
         };
-        if (!ctx.Settings.TableEdgeAtIndent && table.Properties.Alignment == TableAlignment.Left && placed[0].Count > 0)
-            left -= placed[0][0].Cell.Margins.Left;
+        if (!ctx.Settings.TableEdgeAtIndent && placed[0].Count > 0)
+        {
+            if (!rtl && alignment == TableAlignment.Left) left -= placed[0][0].Cell.Margins.Left;
+            else if (rtl && alignment == TableAlignment.Right) left += placed[0][0].Cell.Margins.Right;
+        }
+        // Column edges in logical order: increasing to the right, or (right-to-left table) decreasing from the table's right edge.
         var colX = new double[columns + 1];
-        colX[0] = left;
-        for (int c = 0; c < columns; c++) colX[c + 1] = colX[c] + widths[c];
+        colX[0] = rtl ? left + tableWidth : left;
+        for (int c = 0; c < columns; c++) colX[c + 1] = colX[c] + (rtl ? -widths[c] : widths[c]);
+        double CellLeft(Placed p) => Math.Min(colX[p.Column], colX[p.Column + p.Span]);
 
         // Vertical merge groups: restart cell → last row index of the group.
         var groupEnd = new Dictionary<Placed, int>();
@@ -137,10 +148,10 @@ internal static class TableLayouter
         var nested = ctx.Nested();
         foreach (var p in placed.SelectMany(r => r))
         {
-            double w = colX[p.Column + p.Span] - colX[p.Column];
+            double w = Math.Abs(colX[p.Column + p.Span] - colX[p.Column]);
             var m = p.Cell.Margins;
             double inner = Math.Max(1, w - m.Left - m.Right);
-            var slices = BlockFlow.Build(p.Cell.Blocks, colX[p.Column] + m.Left, inner, nested);
+            var slices = BlockFlow.Build(p.Cell.Blocks, CellLeft(p) + m.Left, inner, nested);
             var lines = new List<(double, Slice)>();
             double h = BlockFlow.Stack(slices, lines);
             contents[p] = (lines, h);
@@ -205,7 +216,7 @@ internal static class TableLayouter
                 while (k > 0 && rowTops[k] >= bottom - 0.01) k--;
                 perRow[k].Add(new CellLine(top - rowTops[k], slice.Height, slice.Items, slice.Footnotes, slice.Floats));
             }
-            double x = colX[p.Column], w = colX[p.Column + p.Span] - x;
+            double x = CellLeft(p), w = Math.Abs(colX[p.Column + p.Span] - colX[p.Column]);
             for (int r = p.Row; r <= end; r++)
             {
                 var own = placed[r].FirstOrDefault(q => q.Column == p.Column)?.Cell ?? p.Cell;

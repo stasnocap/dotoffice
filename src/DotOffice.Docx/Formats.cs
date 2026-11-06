@@ -442,6 +442,7 @@ internal sealed record TableFormat
     public TableWidth? Width { get; init; }
     public TableAlignment? Alignment { get; init; }
     public double? Indent { get; init; }
+    public bool? RightToLeft { get; init; }
     public TableLayoutMode? Layout { get; init; }
     public EdgeBorders Borders { get; init; } = EdgeBorders.Empty;
     public EdgeLengths CellMargins { get; init; } = EdgeLengths.Empty;
@@ -456,6 +457,7 @@ internal sealed record TableFormat
         Width = over.Width ?? Width,
         Alignment = over.Alignment ?? Alignment,
         Indent = over.Indent ?? Indent,
+        RightToLeft = over.RightToLeft ?? RightToLeft,
         Layout = over.Layout ?? Layout,
         Borders = Borders.Merge(over.Borders),
         CellMargins = CellMargins.Merge(over.CellMargins),
@@ -491,6 +493,7 @@ internal sealed record TableFormat
                     };
                     break;
                 case "tblInd": f = f with { Indent = ParseWidth(r) is { Unit: TableWidthUnit.Points } w ? w.Value : 0 }; break;
+                case "bidiVisual": f = f with { RightToLeft = r.OnOff() }; break;
                 case "tblLayout": f = f with { Layout = r.WAttr("type") == "fixed" ? TableLayoutMode.Fixed : TableLayoutMode.Auto }; break;
                 case "shd": f = f with { Shading = RunFormat.ParseShading(r) }; break;
                 case "tblStyleRowBandSize": f = f with { RowBandSize = Math.Max(1, r.IntAttr("val") ?? 1) }; break;

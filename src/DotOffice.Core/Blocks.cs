@@ -41,6 +41,12 @@ public sealed record TableProperties
     /// <summary>Offset of the table from the left edge of the text area.</summary>
     public double Indent { get; init; }
 
+    /// <summary>
+    /// The table is displayed right to left (<c>w:bidiVisual</c>): its first cell is at the right, and <see cref="Indent"/> and a
+    /// <see cref="TableAlignment.Left"/> alignment refer to its leading, right-hand edge.
+    /// </summary>
+    public bool RightToLeft { get; init; }
+
     public TableLayoutMode Layout { get; init; }
 }
 
