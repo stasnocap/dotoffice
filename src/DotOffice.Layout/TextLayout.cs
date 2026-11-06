@@ -437,9 +437,8 @@ internal static class LineBuilder
                 double contentEnd = Position(atoms, i, wordEnd, startX, f);
                 if (contentEnd > maxX + Epsilon && end > i)
                 {
-                    if (hyphenation is { } h && TrailingSpacesOnly(atoms, end + 1, wordEnd)
-                        && (h.ConsecutiveLimit == 0 || hyphenRun < h.ConsecutiveLimit)
-                        && TryHyphenate(atoms, i, end, startX, maxX, f, h))
+                    if (hyphenation is { } h && (h.ConsecutiveLimit == 0 || hyphenRun < h.ConsecutiveLimit)
+                        && TryHyphenate(atoms, i, end, wordEnd, startX, maxX, f, h))
                     {
                         hyphenated = true;
                         continue;
@@ -589,18 +588,25 @@ internal static class LineBuilder
     }
 
     /// <summary>
-    /// Splits the word at <paramref name="at"/> at its last hyphenation point that fits the line, ending the first
-    /// part with a hyphen. Only plain ASCII words in one run are hyphenated, with the English patterns.
+    /// Splits the word starting at atom <paramref name="at"/> (its text may span several runs) at its last hyphenation
+    /// point that fits the line, ending the first part with a hyphen. Words of letters, accented ones included, are
+    /// hyphenated with the English patterns; a word with digits or other symbols inside stays whole.
     /// </summary>
-    private static bool TryHyphenate(List<Atom> atoms, int from, int at, double startX, double maxX, LineFrame frame, HyphenationOptions options)
+    private static bool TryHyphenate(List<Atom> atoms, int from, int at, int wordEnd, double startX, double maxX, LineFrame frame, HyphenationOptions options)
     {
-        var atom = atoms[at];
-        var text = atom.Text;
-        if (atom.Kind != AtomKind.Text || atom.Field is not null || atom.Glyphs is not null && atom.RightToLeft) return false;
+        // The word is the run of text atoms from `at`; only spaces may follow it up to the end of the break unit.
+        int stop = at;
+        while (stop < wordEnd && atoms[stop].Kind == AtomKind.Text && atoms[stop].Field is null
+            && !(atoms[stop].Glyphs is not null && atoms[stop].RightToLeft)) stop++;
+        if (stop == at || !TrailingSpacesOnly(atoms, stop, wordEnd)) return false;
+
+        var starts = new int[stop - at + 1];
+        for (int k = at; k < stop; k++) starts[k - at + 1] = starts[k - at] + atoms[k].Text.Length;
+        string text = string.Concat(atoms.Skip(at).Take(stop - at).Select(a => a.Text));
         int first = 0, last = text.Length;
-        while (first < last && !IsAsciiLetter(text[first])) first++;
-        while (last > first && !IsAsciiLetter(text[last - 1])) last--;
-        for (int k = first; k < last; k++) if (!IsAsciiLetter(text[k])) return false;
+        while (first < last && !char.IsLetter(text[first])) first++;
+        while (last > first && !char.IsLetter(text[last - 1])) last--;
+        for (int k = first; k < last; k++) if (!char.IsLetter(text[k])) return false;
         if (options.SkipCaps && text.Count(char.IsLetter) > 1 && !text.Any(char.IsLower)) return false;
         if (Hyphenator.ForLanguage("en-US") is not { } hyphenator) return false;
 
@@ -609,17 +615,36 @@ internal static class LineBuilder
         while (before > from && atoms[before - 1].Kind == AtomKind.Space) before--;
         if (maxX - Position(atoms, from, before, startX, frame) < options.Zone - Epsilon) return false;
 
+        var original = atoms.GetRange(at, stop - at);
         var points = hyphenator.Find(text[first..last]);
         for (int p = points.Count - 1; p >= 0; p--)
         {
-            int cut = first + points[p];
-            atoms[at] = Copy(atom, text[..cut] + "-", atom.BreakBefore);
-            atoms.Insert(at + 1, Copy(atom, text[cut..], LineBreakOpportunity.Allowed));
-            if (Position(atoms, from, at + 1, startX, frame) <= maxX + Epsilon) return true;
-            atoms.RemoveAt(at + 1);
-            atoms[at] = atom;
+            int cut = first + points[p], a = 0;
+            while (starts[a + 1] < cut) a++;
+            var atom = original[a];
+            int inside = cut - starts[a];
+            int firstIndex = at + a;
+            if (inside == atom.Text.Length)
+            {
+                // The point falls between two runs: the hyphen ends the earlier one.
+                atoms[firstIndex] = Copy(atom, atom.Text + "-", atom.BreakBefore);
+                atoms[firstIndex + 1] = Copy(original[a + 1], original[a + 1].Text, LineBreakOpportunity.Allowed);
+            }
+            else
+            {
+                atoms[firstIndex] = Copy(atom, atom.Text[..inside] + "-", atom.BreakBefore);
+                atoms.Insert(firstIndex + 1, Copy(atom, atom.Text[inside..], LineBreakOpportunity.Allowed));
+            }
+            if (Position(atoms, from, firstIndex + 1, startX, frame) <= maxX + Epsilon) return true;
+            Restore(atoms, at, original, stop - at + (inside == atom.Text.Length ? 0 : 1));
         }
         return false;
+    }
+
+    private static void Restore(List<Atom> atoms, int at, List<Atom> original, int currentCount)
+    {
+        atoms.RemoveRange(at, currentCount);
+        atoms.InsertRange(at, original);
     }
 
     private static bool TrailingSpacesOnly(List<Atom> atoms, int from, int to)
@@ -627,8 +652,6 @@ internal static class LineBuilder
         for (int k = from; k < to; k++) if (atoms[k].Kind != AtomKind.Space) return false;
         return true;
     }
-
-    private static bool IsAsciiLetter(char c) => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z';
 
     private static double Measure(Atom atom, string text) =>
         Itemizer.Measure(atom.Font!, text, atom.Size, atom.Props, atom.RightToLeft, shape: atom.Glyphs is not null);

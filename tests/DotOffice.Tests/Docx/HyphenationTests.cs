@@ -106,4 +106,50 @@ public class HyphenationTests
         int indent = Enumerable.Range(50, 80).Select(n => n * 100).First(n => Longest(n, "") >= 2);
         Assert.Equal(1, Longest(indent, "<w:consecutiveHyphenLimit w:val=\"1\"/>"));
     }
+
+    private static string Runs(string filler, params string[] parts) =>
+        "<w:p>" + $"<w:r>{Run}<w:t xml:space=\"preserve\">{filler} </w:t></w:r>"
+        + string.Concat(parts.Select((t, i) => $"<w:r><w:rPr><w:rFonts w:ascii=\"Noto Sans\" w:hAnsi=\"Noto Sans\"/>{(i % 2 == 1 ? "<w:b/>" : "")}</w:rPr><w:t>{t}</w:t></w:r>")) + "</w:p>";
+
+    private static List<string> Split(string word, int cut, bool hyphenate, out int fill)
+    {
+        string[] parts = [word[..cut], word[cut..]];
+        fill = Enumerable.Range(1, 14).First(n => Lines(Runs(string.Join(' ', Enumerable.Repeat("lorem", n)), parts), false) is [_, _, ..]
+            && Lines(Runs(string.Join(' ', Enumerable.Repeat("lorem", n)), parts), false)[1] == word);
+        return Lines(Runs(string.Join(' ', Enumerable.Repeat("lorem", fill)), parts), hyphenate);
+    }
+
+    [Theory]
+    [InlineData(8)]  // the hyphenation point (9) falls inside the second run
+    [InlineData(9)]  // the point falls exactly between the runs
+    [InlineData(13)] // the best point falls inside the first run
+    public void Word_split_across_runs_is_hyphenated(int cut)
+    {
+        var lines = Split(Word, cut, true, out _);
+        Assert.EndsWith("-", lines[0]);
+        string head = lines[0].Split(' ')[^1].TrimEnd('-');
+        Assert.Equal(Word, head + lines[1]);
+        Assert.Contains(head.Length, DotOffice.Layout.Hyphenation.Hyphenator.ForLanguage("en-US")!.Find(Word));
+    }
+
+    [Fact]
+    public void Word_with_digits_stays_whole()
+    {
+        string word = "character1stically";
+        int n = Enumerable.Range(1, 14).First(k => Lines(Para(string.Join(' ', Enumerable.Repeat("lorem", k)) + " " + word), false) is [_, _, ..]
+            && Lines(Para(string.Join(' ', Enumerable.Repeat("lorem", k)) + " " + word), false)[1] == word);
+        var lines = Lines(Para(string.Join(' ', Enumerable.Repeat("lorem", n)) + " " + word), true);
+        Assert.Equal(word, lines[1]);
+    }
+
+    [Fact]
+    public void Accented_letters_do_not_stop_a_word_from_being_hyphenated()
+    {
+        string word = "caract\u00e9ristically";
+        string Text(int k) => string.Join(' ', Enumerable.Repeat("lorem", k)) + " " + word;
+        int n = Enumerable.Range(1, 14).First(k => Lines(Para(Text(k)), false) is [_, _, ..] && Lines(Para(Text(k)), false)[1] == word);
+        var lines = Lines(Para(Text(n)), true);
+        Assert.EndsWith("-", lines[0]);
+        Assert.Equal(word, lines[0].Split(' ')[^1].TrimEnd('-') + lines[1]);
+    }
 }
