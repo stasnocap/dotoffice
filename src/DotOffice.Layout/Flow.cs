@@ -231,7 +231,8 @@ internal static class ParagraphLayouter
 
         var mark = FontMetrics.Of(ctx.Fonts.ForCharacter(p.MarkProperties, ' ').Font, p.MarkProperties.FontSize);
         var space = obstacles is null ? null : new WrapSpace(obstacles, props.LineSpacing, mark, obstacles.StartY + spaceBefore + topExtra);
-        var lines = LineBuilder.Build(atoms, frame, props.Alignment, ctx.Settings.JustifyLinesEndingWithBreak, space);
+        var lines = LineBuilder.Build(atoms, frame, props.Alignment, ctx.Settings.JustifyLinesEndingWithBreak, space,
+            hyphenate: ctx.Settings.AutoHyphenation && !props.SuppressAutoHyphens);
         double areaLeft = x0 + props.LeftIndent - (borders.Left.IsVisible ? borders.Left.Space + borders.Left.Width : 0);
         double areaRight = x0 + width - props.RightIndent + (borders.Right.IsVisible ? borders.Right.Space + borders.Right.Width : 0);
 

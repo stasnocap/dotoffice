@@ -170,6 +170,9 @@ public sealed record ParagraphProperties
 
     /// <summary>The paragraph's lines are not numbered (w:suppressLineNumbers).</summary>
     public bool SuppressLineNumbers { get; init; }
+
+    /// <summary>The paragraph's words are not hyphenated (w:suppressAutoHyphens).</summary>
+    public bool SuppressAutoHyphens { get; init; }
     public bool KeepLinesTogether { get; init; }
     public bool PageBreakBefore { get; init; }
     public bool WidowControl { get; init; } = true;

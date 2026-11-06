@@ -139,6 +139,15 @@ used in advertising or otherwise to promote the sale, use or other dealings in
 this Software without prior written authorization of the copyright holder.
 ```
 
+## Hyphenation patterns
+
+`src/DotOffice.Layout/Hyphenation/hyph_en_US.dic` is `hyph_en_US.dic` of LibreOffice's dictionaries
+(https://github.com/LibreOffice/dictionaries, `en/`), American English hyphenation patterns by László Németh,
+based on the plain TeX table `hyphen.tex` and the TUGboat hyphenation exceptions. Its licence is BSD-style: unlimited
+copying, redistribution and modification are permitted with this copyright and license information. `hyphen.tex`
+(Knuth) may be copied and redistributed provided the file is not modified; the TUGboat exceptions (copyright 2007
+TeX Users Group) may be freely used, modified and distributed.
+
 ## Test assets
 
 The Noto fonts in `tests/DotOffice.Tests/Assets` (`NotoSans`, `NotoSansArabic`, `NotoSansHebrew`,

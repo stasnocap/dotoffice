@@ -12,6 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Hyphenation\hyph_*.dic" LogicalName="DotOffice.Hyphenation.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="DotOffice.Tests" />
   </ItemGroup>
 

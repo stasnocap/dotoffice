@@ -3,6 +3,7 @@ using DotOffice.Core;
 using DotOffice.Fonts;
 using DotOffice.Fonts.Shaping;
 using DotOffice.Layout.Bidi;
+using DotOffice.Layout.Hyphenation;
 using DotOffice.Layout.LineBreaking;
 
 namespace DotOffice.Layout;
@@ -414,7 +415,7 @@ internal static class LineBuilder
     private const double Epsilon = 0.01;
 
     public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks,
-        ILineSpace? space = null)
+        ILineSpace? space = null, bool hyphenate = false)
     {
         var lines = new List<Line>();
         int i = 0;
@@ -431,7 +432,11 @@ internal static class LineBuilder
                 while (wordEnd < atoms.Count && atoms[wordEnd].BreakBefore == LineBreakOpportunity.None && !atoms[wordEnd - 1].IsBreak)
                     wordEnd++;
                 double contentEnd = Position(atoms, i, wordEnd, startX, f);
-                if (contentEnd > maxX + Epsilon && end > i) break; // word does not fit: line ends before it
+                if (contentEnd > maxX + Epsilon && end > i)
+                {
+                    if (hyphenate && wordEnd == end + 1 && TryHyphenate(atoms, i, end, startX, maxX, f)) continue;
+                    break; // word does not fit: line ends before it
+                }
                 if (contentEnd > maxX + Epsilon && end == i)
                 {
                     // A single word wider than the line: break it between characters.
@@ -572,6 +577,36 @@ internal static class LineBuilder
         _ = frame;
         return false;
     }
+
+    /// <summary>
+    /// Splits the word at <paramref name="at"/> at its last hyphenation point that fits the line, ending the first
+    /// part with a hyphen. Only plain ASCII words in one run are hyphenated, with the English patterns.
+    /// </summary>
+    private static bool TryHyphenate(List<Atom> atoms, int from, int at, double startX, double maxX, LineFrame frame)
+    {
+        var atom = atoms[at];
+        var text = atom.Text;
+        if (atom.Kind != AtomKind.Text || atom.Field is not null || atom.Glyphs is not null && atom.RightToLeft) return false;
+        int first = 0, last = text.Length;
+        while (first < last && !IsAsciiLetter(text[first])) first++;
+        while (last > first && !IsAsciiLetter(text[last - 1])) last--;
+        for (int k = first; k < last; k++) if (!IsAsciiLetter(text[k])) return false;
+        if (Hyphenator.ForLanguage("en-US") is not { } hyphenator) return false;
+
+        var points = hyphenator.Find(text[first..last]);
+        for (int p = points.Count - 1; p >= 0; p--)
+        {
+            int cut = first + points[p];
+            atoms[at] = Copy(atom, text[..cut] + "-", atom.BreakBefore);
+            atoms.Insert(at + 1, Copy(atom, text[cut..], LineBreakOpportunity.Allowed));
+            if (Position(atoms, from, at + 1, startX, frame) <= maxX + Epsilon) return true;
+            atoms.RemoveAt(at + 1);
+            atoms[at] = atom;
+        }
+        return false;
+    }
+
+    private static bool IsAsciiLetter(char c) => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z';
 
     private static double Measure(Atom atom, string text) =>
         Itemizer.Measure(atom.Font!, text, atom.Size, atom.Props, atom.RightToLeft, shape: atom.Glyphs is not null);

@@ -317,6 +317,7 @@ internal sealed class StyleSheet
             KeepWithNext = f.KeepNext ?? false,
             Frame = f.Frame,
             SuppressLineNumbers = f.SuppressLineNumbers ?? false,
+            SuppressAutoHyphens = f.SuppressAutoHyphens ?? false,
             KeepLinesTogether = f.KeepLines ?? false,
             PageBreakBefore = f.PageBreakBefore ?? false,
             WidowControl = f.WidowControl ?? true,

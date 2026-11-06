@@ -57,6 +57,7 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
     public static DocxSettings Default { get; } = new(36, false, 15, false);
 
     public bool MirrorMargins { get; init; }
+    public bool AutoHyphenation { get; init; }
 
     public NoteNumbering Footnotes { get; init; } = new("decimal", 1);
     public NoteNumbering Endnotes { get; init; } = new("lowerRoman", 1);
@@ -76,6 +77,7 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                     if (r.TwipsAttr("val") is { } tab && tab > 1) s = s with { DefaultTabStop = Math.Min(tab, 720) };
                     break;
                 case "evenAndOddHeaders": s = s with { EvenAndOddHeaders = r.OnOff() }; break;
+                case "autoHyphenation": s = s with { AutoHyphenation = r.OnOff() }; break;
                 case "mirrorMargins": s = s with { MirrorMargins = r.OnOff() }; break;
                 case "doNotExpandShiftReturn": s = s with { DoNotExpandShiftReturn = r.OnOff() }; break;
                 case "compatSetting" when r.WAttr("name") == "compatibilityMode":
@@ -244,6 +246,7 @@ internal sealed class DocxContext
                 DefaultTabStop = Settings.DefaultTabStop,
                 EvenAndOddHeaders = Settings.EvenAndOddHeaders,
                 MirrorMargins = Settings.MirrorMargins,
+                AutoHyphenation = Settings.AutoHyphenation,
                 TableEdgeAtIndent = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
             },

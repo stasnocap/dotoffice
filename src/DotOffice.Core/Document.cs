@@ -30,6 +30,9 @@ public sealed class DocumentSettings
     /// </summary>
     public bool TableEdgeAtIndent { get; init; } = true;
 
+    /// <summary>Break long words at hyphenation points (w:autoHyphenation); English patterns only.</summary>
+    public bool AutoHyphenation { get; init; }
+
     /// <summary>When false, lines ending in a manual line break are not stretched in justified paragraphs.</summary>
     public bool JustifyLinesEndingWithBreak { get; init; } = true;
 }
