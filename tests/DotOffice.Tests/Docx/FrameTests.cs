@@ -125,4 +125,19 @@ public class FrameTests
         Assert.Equal(72, running.X, 0.5);
         Assert.NotEqual(frame.Baseline, running.Baseline);
     }
+
+    [Fact]
+    public void Frame_in_a_table_cell_is_laid_out_in_the_flow_of_the_cell()
+    {
+        // Word ignores w:framePr inside a cell: the paragraph stays an ordinary one at the cell's left edge.
+        string frame = "w:w=\"2400\" w:wrap=\"around\" w:hAnchor=\"margin\" w:xAlign=\"right\" w:vAnchor=\"page\" w:y=\"7200\"";
+        var page = Layout("<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr><w:tblGrid><w:gridCol w:w=\"6000\"/></w:tblGrid>"
+            + $"<w:tr><w:tc><w:tcPr><w:tcW w:w=\"6000\" w:type=\"dxa\"/></w:tcPr>{Framed("FRAMED", frame)}{P(R("AFTER", Font))}</w:tc></w:tr></w:tbl>");
+        var framed = Texts(page).Single(t => t.Text.StartsWith("FRAMED"));
+        var after = Texts(page).Single(t => t.Text.StartsWith("AFTER"));
+        Assert.Equal(after.X, framed.X, 0.5);
+        Assert.InRange(framed.X, 72, 80);
+        Assert.InRange(framed.Baseline, 72, 100);
+        Assert.True(after.Baseline > framed.Baseline);
+    }
 }
