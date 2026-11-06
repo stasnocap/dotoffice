@@ -211,6 +211,17 @@ public sealed class LayoutEngine
             bool keepWithNext = false;
             for (int i = 0; i < section.Blocks.Count; i++)
             {
+                if (section.Blocks[i] is Table { Properties.Position: not null } floating)
+                {
+                    var (fx, fw) = paginator.Column;
+                    var box = FloatingTable.Build(floating, fw, paginator.BodyHeight, bodyContext);
+                    if (box is not null)
+                    {
+                        paginator.PlaceTable(box);
+                        continue;
+                    }
+                    bodyContext.Warnings.Warn("docx.floating-table", "A floating table that does not fit on a page is laid out in the text flow.");
+                }
                 // Blocks are built for the column they start in, so columns of different widths work.
                 var (x, width) = paginator.Column;
                 bool keep = keepWithNext;
@@ -518,6 +529,7 @@ public sealed class LayoutEngine
     /// <summary>The layout items of a floating object whose top-left corner is at (<paramref name="x"/>, <paramref name="y"/>).</summary>
     private static List<LayoutItem> Realize(FloatingObject f, double x, double y, FlowContext context)
     {
+        if (f is FloatingTable table) return table.Items.Select(i => i.Offset(x, y)).ToList();
         if (f is FloatingImage image) return [new ImageItem(x, y, f.Width, f.Height, image.Image)];
         return f is FloatingTextBox box ? TextBoxes.Realize(box, x, y, context) : [];
     }
@@ -579,6 +591,18 @@ public sealed class LayoutEngine
         /// <summary>Floats the next block must wrap around, or null when there are none on the page.</summary>
         public Obstacles? Obstacles => Current.Exclusions.Count == 0 ? null
             : new Obstacles(Current.Exclusions, Column.X, Column.Width, Current.Cursor);
+
+        /// <summary>Height of the body area of the current page.</summary>
+        public double BodyHeight => Current.ContentBottom - Current.ContentTop;
+
+        /// <summary>Places a floating table; one anchored to the text moves to a new page when it would not fit below the cursor.</summary>
+        public void PlaceTable(FloatingTable table)
+        {
+            if (table.Vertical.RelativeTo == FloatReference.Paragraph && Current.HasBody
+                && Current.Cursor + table.Height + table.Distance.Top + table.Distance.Bottom > Current.BodyBottom + Epsilon)
+                NextPage(natural: false);
+            PlaceFloats([table]);
+        }
 
         /// <summary>Positions floats anchored at the current position and makes text wrap around them.</summary>
         public void PlaceFloats(IEnumerable<FloatingObject> floats) => PlaceFloats(Current, floats, Current.Cursor);

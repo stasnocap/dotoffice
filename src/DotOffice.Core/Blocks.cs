@@ -48,6 +48,20 @@ public sealed record TableProperties
     public bool RightToLeft { get; init; }
 
     public TableLayoutMode Layout { get; init; }
+
+    /// <summary>Set for a floating table (<c>w:tblpPr</c>); null for a table in the text flow.</summary>
+    public TablePosition? Position { get; init; }
+}
+
+/// <summary>
+/// Where a floating table sits (<c>w:tblpPr</c>) and how close text may come; the positions use the same references as
+/// floating pictures (a text anchor is the column horizontally and the following paragraph vertically).
+/// </summary>
+public sealed record TablePosition
+{
+    public FloatPosition Horizontal { get; init; } = new(FloatReference.Column, FloatAlignment.Offset, 0);
+    public FloatPosition Vertical { get; init; } = new(FloatReference.Paragraph, FloatAlignment.Offset, 0);
+    public Thickness Distance { get; init; }
 }
 
 public sealed class Table : Block

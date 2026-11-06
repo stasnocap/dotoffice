@@ -455,6 +455,7 @@ internal sealed record TableFormat
     public double? Indent { get; init; }
     public bool? RightToLeft { get; init; }
     public TableLayoutMode? Layout { get; init; }
+    public TablePosition? Position { get; init; }
     public EdgeBorders Borders { get; init; } = EdgeBorders.Empty;
     public EdgeLengths CellMargins { get; init; } = EdgeLengths.Empty;
     public ColorSpec? Shading { get; init; }
@@ -470,6 +471,7 @@ internal sealed record TableFormat
         Indent = over.Indent ?? Indent,
         RightToLeft = over.RightToLeft ?? RightToLeft,
         Layout = over.Layout ?? Layout,
+        Position = over.Position ?? Position,
         Borders = Borders.Merge(over.Borders),
         CellMargins = CellMargins.Merge(over.CellMargins),
         Shading = over.Shading ?? Shading,
@@ -505,6 +507,7 @@ internal sealed record TableFormat
                     break;
                 case "tblInd": f = f with { Indent = ParseWidth(r) is { Unit: TableWidthUnit.Points } w ? w.Value : 0 }; break;
                 case "bidiVisual": f = f with { RightToLeft = r.OnOff() }; break;
+                case "tblpPr": f = f with { Position = ParsePosition(r) }; break;
                 case "tblLayout": f = f with { Layout = r.WAttr("type") == "fixed" ? TableLayoutMode.Fixed : TableLayoutMode.Auto }; break;
                 case "shd": f = f with { Shading = RunFormat.ParseShading(r) }; break;
                 case "tblStyleRowBandSize": f = f with { RowBandSize = Math.Max(1, r.IntAttr("val") ?? 1) }; break;
@@ -514,6 +517,33 @@ internal sealed record TableFormat
             r.Skip();
         }
         return f;
+    }
+
+    /// <summary>w:tblpPr. A <c>tblpYSpec="inline"</c> table is not floating.</summary>
+    private static TablePosition? ParsePosition(XmlReader r)
+    {
+        if (r.WAttr("tblpYSpec") == "inline") return null;
+        static FloatReference Ref(string? anchor, FloatReference text) => anchor switch
+        {
+            "margin" => FloatReference.Margin,
+            "page" => FloatReference.Page,
+            _ => text,
+        };
+        static FloatAlignment Align(string? spec) => spec switch
+        {
+            "left" or "inside" or "top" => FloatAlignment.Start,
+            "center" => FloatAlignment.Center,
+            "right" or "outside" or "bottom" => FloatAlignment.End,
+            _ => FloatAlignment.Offset,
+        };
+        string? xSpec = r.WAttr("tblpXSpec"), ySpec = r.WAttr("tblpYSpec");
+        return new TablePosition
+        {
+            Horizontal = new FloatPosition(Ref(r.WAttr("horzAnchor"), FloatReference.Column), Align(xSpec), r.TwipsAttr("tblpX") ?? 0),
+            Vertical = new FloatPosition(Ref(r.WAttr("vertAnchor"), FloatReference.Paragraph), Align(ySpec), r.TwipsAttr("tblpY") ?? 0),
+            Distance = new Thickness(r.TwipsAttr("topFromText") ?? 0, r.TwipsAttr("rightFromText") ?? 0,
+                r.TwipsAttr("bottomFromText") ?? 0, r.TwipsAttr("leftFromText") ?? 0),
+        };
     }
 
     public const int LookFirstRow = 0x20, LookLastRow = 0x40, LookFirstColumn = 0x80, LookLastColumn = 0x100,

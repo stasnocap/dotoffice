@@ -26,6 +26,9 @@ internal sealed class RowSlice : Slice
         Render();
     }
 
+    /// <summary>Horizontal extent of the row's cells.</summary>
+    public (double Left, double Right) Extent => (_cells.Min(c => c.X), _cells.Max(c => c.X + c.Width));
+
     private void Render()
     {
         Items.Clear();

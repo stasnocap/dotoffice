@@ -904,6 +904,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                 Indent = format.Indent ?? 0,
                 RightToLeft = format.RightToLeft ?? false,
                 Layout = format.Layout ?? TableLayoutMode.Auto,
+                Position = format.Position,
             },
         };
         table.Grid.AddRange(grid);
