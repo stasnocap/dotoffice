@@ -66,6 +66,21 @@ public class TextDirectionTests
     }
 
     [Fact]
+    public void Row_with_a_vertical_cell_that_does_not_fit_the_page_moves_whole_to_the_next_page()
+    {
+        var fill = string.Concat(Enumerable.Repeat(P(R("filler", Font)), 36));
+        var cell = $"<w:tc><w:tcPr><w:tcW w:w=\"4000\" w:type=\"dxa\"/><w:textDirection w:val=\"btLr\"/></w:tcPr>{P(R(Lorem, Font))}</w:tc>";
+        var row = $"<w:tr><w:trPr><w:trHeight w:val=\"3000\" w:hRule=\"exact\"/></w:trPr>{cell}</w:tr>";
+        var body = $"{fill}<w:tbl><w:tblGrid><w:gridCol w:w=\"4000\"/></w:tblGrid>{row}</w:tbl>{P("")}{Section()}";
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        var pages = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages;
+        Assert.Equal(2, pages.Count);
+        Assert.DoesNotContain(pages[0].Items, i => i is PushItem { Rotation: not 0 });
+        var turn = pages[1].Items.OfType<PushItem>().Single(p => p.Rotation != 0);
+        Assert.Equal(150, turn.Clip!.Value.Height, 0.5);
+    }
+
+    [Fact]
     public void Horizontal_cells_are_not_turned()
     {
         Assert.DoesNotContain(Layout("").Items, i => i is PushItem { Rotation: not 0 });
