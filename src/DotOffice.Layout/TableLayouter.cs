@@ -302,11 +302,13 @@ internal static class TableLayouter
         var notes = new List<Note>();
         // PushItem turns counter-clockwise; the lines of text running down turn clockwise.
         group.Items.Add(new PushItem((x0, 0, inner, length), up ? 90 : -90, cx, cy));
+        var content = new List<LayoutItem>();
         foreach (var (y, slice) in stacked)
         {
-            foreach (var item in slice.Items) group.Items.Add(item.Offset(0, y + shift));
+            foreach (var item in slice.Items) content.Add(item.Offset(0, y + shift));
             notes.AddRange(slice.Footnotes);
         }
+        group.Items.AddRange(up ? content : UprightText.Apply(content));
         group.Footnotes = notes;
         group.Items.Add(new PopItem());
         return ([(0, group)], length);

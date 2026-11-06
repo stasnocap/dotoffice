@@ -72,7 +72,7 @@ internal static class TextBoxes
             // PushItem turns counter-clockwise; text turned clockwise needs a negative angle.
             if (direction != TextBoxDirection.Horizontal)
                 items.Add(new PushItem(null, direction == TextBoxDirection.CounterClockwise ? 90 : -90, cx, cy));
-            items.AddRange(content);
+            items.AddRange(direction == TextBoxDirection.Clockwise ? UprightText.Apply(content) : content);
             if (direction != TextBoxDirection.Horizontal) items.Add(new PopItem());
             items.Add(new PopItem());
         }

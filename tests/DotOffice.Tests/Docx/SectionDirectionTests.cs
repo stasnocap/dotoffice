@@ -172,4 +172,35 @@ public class SectionDirectionTests
         double edge = direction == "tbRl" ? box.Y1 : box.Y0;
         Assert.Contains(words, w => w.X > box.X0 + 1 && w.X < box.X1 - 1 && Math.Abs(w.Y - edge) < 1);
     }
+
+    private static List<LayoutItem> Mixed(string textDirection)
+    {
+        var body = P(R("ab日本語cd", Font)) + Section(extra: $"<w:textDirection w:val=\"{textDirection}\"/>");
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        return new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0].Items;
+    }
+
+    [Fact]
+    public void East_Asian_characters_in_text_running_down_are_turned_back_upright_and_Latin_is_not()
+    {
+        var items = Mixed("tbRl");
+        var texts = items.OfType<TextItem>().ToList();
+        Assert.Contains(texts, t => t.Text == "日");
+        Assert.Contains(texts, t => t.Text == "語");
+        foreach (var t in texts.Where(t => t.Text is "日" or "本" or "語"))
+        {
+            int at = items.IndexOf(t);
+            var push = Assert.IsType<PushItem>(items[at - 1]);
+            Assert.Equal(90, push.Rotation);
+            Assert.Equal(t.X + t.Font.MeasureText(t.Text, t.FontSize) / 2, push.CenterX, 0.01);
+            Assert.IsType<PopItem>(items[at + 1]);
+        }
+        Assert.All(texts.Where(t => t.Text.Contains('a') || t.Text.Contains('d')), t => Assert.False(items[items.IndexOf(t) - 1] is PushItem { Rotation: 90 }));
+    }
+
+    [Fact]
+    public void Text_running_up_keeps_East_Asian_characters_turned_with_the_line()
+    {
+        Assert.DoesNotContain(Mixed("btLr"), i => i is PushItem { Rotation: -90 or 90 } p && p.CenterY != 396);
+    }
 }

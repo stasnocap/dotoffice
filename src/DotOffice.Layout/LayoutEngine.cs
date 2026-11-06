@@ -496,7 +496,8 @@ public sealed class LayoutEngine
         double cx = physical.Width / 2, cy = physical.Height / 2;
         double dx = cx - page.Width / 2, dy = cy - page.Height / 2;
         physical.Items.Add(new PushItem(null, direction == CellTextDirection.TopToBottom ? -90 : 90, cx, cy));
-        foreach (var item in logical.Items) physical.Items.Add(item.Offset(dx, dy));
+        var turnedItems = logical.Items.Select(item => item.Offset(dx, dy));
+        physical.Items.AddRange(direction == CellTextDirection.TopToBottom ? UprightText.Apply(turnedItems) : turnedItems);
         physical.Items.Add(new PopItem());
         return physical;
     }
