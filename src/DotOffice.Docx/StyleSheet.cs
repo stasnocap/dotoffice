@@ -258,7 +258,8 @@ internal sealed class StyleSheet
             CharacterSpacing = Math.Clamp(merged.Spacing ?? 0, -100, 100),
             BaselineShift = Math.Clamp(merged.Position ?? 0, -500, 500),
             ComplexScriptFontFamily = FontName(merged.ComplexScript),
-            ComplexScriptFontSize = merged.SizeCs,
+            // ISO 29500 17.3.2.39: an absent szCs keeps the value from the previous style level; never specified, the size is 10 pt (as for sz), not w:sz.
+            ComplexScriptFontSize = merged.SizeCs ?? 10,
             ComplexScriptBold = merged.BoldCs is null ? null : Toggle(static f => f.BoldCs),
             ComplexScriptItalic = merged.ItalicCs is null ? null : Toggle(static f => f.ItalicCs),
             RightToLeft = merged.RightToLeft ?? false,

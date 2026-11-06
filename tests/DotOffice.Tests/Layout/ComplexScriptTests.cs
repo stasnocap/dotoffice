@@ -45,6 +45,20 @@ public class ComplexScriptTests
     }
 
     [Fact]
+    public void Absent_szCs_is_ten_points_not_sz_unless_a_style_level_sets_it()
+    {
+        // ISO 29500 17.3.2.39: szCs inherits from the previous style level; never set, it is 10 pt, independent of w:sz.
+        var doc = DocxReader.Read(new DocxBuilder
+        {
+            Body = P(R("a", "<w:sz w:val=\"40\"/>") + R("b", "<w:sz w:val=\"40\"/><w:szCs w:val=\"28\"/>")),
+        }.BuildStream());
+        var p = (Paragraph)doc.Sections[0].Blocks[0];
+        Assert.Equal(20, p.Inlines[0].Properties.FontSize);
+        Assert.Equal(10, p.Inlines[0].Properties.ComplexScriptFontSize);
+        Assert.Equal(14, p.Inlines[1].Properties.ComplexScriptFontSize);
+    }
+
+    [Fact]
     public void Rtl_paragraph_starts_at_the_right_and_reads_right_to_left()
     {
         var page = Layout(Para("אחת שתיים", RtlParagraph, Text with { ComplexScriptFontFamily = "Noto Sans Hebrew" }));
