@@ -274,7 +274,7 @@ internal static class ParagraphLayouter
 
             if (props.Shading is { } shading)
                 slice.Items.Add(new RectItem(areaLeft, areaTop, areaRight - areaLeft, y - areaTop, shading));
-            DrawLine(line, x0, lineTop + baseline, slice.Items);
+            DrawLine(line, x0, lineTop + baseline, slice.Items, ctx);
             AddLinks(line, x0, lineTop, lineTop + height, slice.Items);
             if (first && topBorder.IsVisible)
                 AddBorder(slice.Items, topBorder, areaLeft, areaTop + topBorder.Width / 2, areaRight, areaTop + topBorder.Width / 2);
@@ -327,7 +327,7 @@ internal static class ParagraphLayouter
     }
 
     /// <summary>Emits backgrounds, glyph runs, images, leaders and decoration lines for one line.</summary>
-    internal static void DrawLine(Line line, double x0, double baseline, List<LayoutItem> items)
+    internal static void DrawLine(Line line, double x0, double baseline, List<LayoutItem> items, FlowContext? context = null)
     {
         var atoms = line.Atoms;
         int visible = line.VisibleCount;
@@ -357,7 +357,11 @@ internal static class ParagraphLayouter
                     });
                     break;
                 case AtomKind.Image:
-                    items.Add(new ImageItem(x0 + a.X, baseline - a.Image!.Height, a.Image.Width, a.Image.Height, a.Image.Image));
+                    if (a.Shape is { } shape)
+                    {
+                        if (context is not null) items.AddRange(TextBoxes.Realize(shape.Box, x0 + a.X, baseline - shape.Height, context));
+                    }
+                    else items.Add(new ImageItem(x0 + a.X, baseline - a.Image!.Height, a.Image.Width, a.Image.Height, a.Image.Image));
                     break;
                 case AtomKind.Tab when a.Tab is { Leader: not TabLeader.None } stop && a.Advance > 4:
                     var ch = stop.Leader switch { TabLeader.Dot => ".", TabLeader.Hyphen => "-", TabLeader.Underscore => "_", _ => "·" };

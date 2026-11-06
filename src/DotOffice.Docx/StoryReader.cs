@@ -534,11 +534,17 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         long cx = 0, cy = 0;
         string? embed = null;
         string? graphicType = null;
+        ShapeData? shape = null;
         int depth = r.Depth;
         if (r.IsEmptyElement) { r.Read(); return; }
         r.Read();
         while (!r.EOF && r.Depth > depth)
         {
+            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") == WordprocessingShape)
+            {
+                shape = ReadShapeData(r);
+                continue;
+            }
             if (r.NodeType == XmlNodeType.Element)
             {
                 if (r.IsWP() && r.LocalName == "extent")
@@ -553,7 +559,13 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         }
         if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
 
-        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+        if (shape is not null)
+        {
+            var origin = new FloatPosition(FloatReference.Column, FloatAlignment.Offset, 0);
+            if (CreateShape(shape, Units.FromEmu(cx), Units.FromEmu(cy), props, origin, origin, TextWrap.None, false, default) is { } box)
+                AddInline(state, new InlineShape(box));
+        }
+        else if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
             AddInline(state, new ImageRun(image, width, height, props));
     }
 

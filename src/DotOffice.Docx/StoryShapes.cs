@@ -20,6 +20,10 @@ internal sealed partial class StoryReader
         public TextBoxAnchor Anchor { get; set; }
         public double Rotation { get; set; }
         public string Geometry { get; set; } = "rect";
+        public double CornerRadius { get; set; } = 1.0 / 6;
+        public double? Adjust1 { get; set; }
+        public double? Adjust2 { get; set; }
+        public GradientFill? Gradient { get; set; }
         public bool Vertical { get; set; }
         public List<Block> Blocks { get; } = [];
     }
@@ -87,7 +91,14 @@ internal sealed partial class StoryReader
         {
             if (Child(properties, "xfrm") is { } xfrm && double.TryParse((string?)xfrm.Attribute("rot"), NumberStyles.Float, CultureInfo.InvariantCulture, out var rot))
                 data.Rotation = rot / 60000.0;
-            if (Child(properties, "prstGeom") is { } geometry) data.Geometry = (string?)geometry.Attribute("prst") ?? "rect";
+            if (Child(properties, "prstGeom") is { } geometry)
+            {
+                data.Geometry = (string?)geometry.Attribute("prst") ?? "rect";
+                data.CornerRadius = data.Geometry == "flowChartTerminator" ? 0.5 : AdjustOf(geometry, "adj") ?? 1.0 / 6;
+                data.CornerRadius = Math.Clamp(data.CornerRadius, 0, 0.5);
+                data.Adjust1 = AdjustOf(geometry, "adj1") ?? AdjustOf(geometry, "adj");
+                data.Adjust2 = AdjustOf(geometry, "adj2");
+            }
             else if (Child(properties, "custGeom") is not null) data.Geometry = "custom";
         }
 
@@ -102,11 +113,11 @@ internal sealed partial class StoryReader
             case "noFill": break;
             case "solidFill": data.Fill = ResolveDrawingColor(fill); break;
             case "gradFill":
-                data.Fill = ResolveDrawingColor(fill.Elements().FirstOrDefault(e => e.Name.LocalName == "gsLst")?.Elements().FirstOrDefault());
-                context.WarnOnce("docx.shape.fill", "Gradient, picture and pattern fills of shapes are drawn as a solid color or not at all.");
+                data.Gradient = ReadGradient(fill);
+                data.Fill = data.Gradient?.Stops[0].Color ?? ResolveDrawingColor(fill.Elements().FirstOrDefault(e => e.Name.LocalName == "gsLst")?.Elements().FirstOrDefault());
                 break;
             default:
-                context.WarnOnce("docx.shape.fill", "Gradient, picture and pattern fills of shapes are drawn as a solid color or not at all.");
+                context.WarnOnce("docx.shape.fill", "Picture and pattern fills of shapes are drawn as a solid color or not at all.");
                 break;
         }
 
@@ -125,6 +136,65 @@ internal sealed partial class StoryReader
                 _ => LineStyleKind.Solid,
             };
         }
+    }
+
+    /// <summary>A preset's adjust value (<c>val N</c> over 100000) from its <c>avLst</c>, or null when it states none.</summary>
+    private static double? AdjustOf(XElement geometry, string name)
+    {
+        var gd = geometry.Elements().FirstOrDefault(e => e.Name.LocalName == "avLst")?.Elements().FirstOrDefault(e => (string?)e.Attribute("name") == name);
+        return gd?.Attribute("fmla")?.Value is { } f && f.StartsWith("val ", StringComparison.Ordinal)
+               && double.TryParse(f.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v / 100_000.0 : null;
+    }
+
+    private static ShapeGeometry? PresetGeometry(string preset) => preset switch
+    {
+        "rect" or "flowChartProcess" or "textBox" => ShapeGeometry.Rectangle,
+        "roundRect" or "flowChartAlternateProcess" or "flowChartTerminator" => ShapeGeometry.RoundRectangle,
+        "ellipse" or "flowChartConnector" => ShapeGeometry.Ellipse,
+        "triangle" => ShapeGeometry.Triangle,
+        "rtTriangle" => ShapeGeometry.RightTriangle,
+        "diamond" or "flowChartDecision" => ShapeGeometry.Diamond,
+        "parallelogram" or "flowChartInputOutput" => ShapeGeometry.Parallelogram,
+        "trapezoid" => ShapeGeometry.Trapezoid,
+        "hexagon" or "flowChartPreparation" => ShapeGeometry.Hexagon,
+        "pentagon" => ShapeGeometry.Pentagon,
+        "octagon" => ShapeGeometry.Octagon,
+        "plus" => ShapeGeometry.Plus,
+        "chevron" => ShapeGeometry.Chevron,
+        "homePlate" => ShapeGeometry.HomePlate,
+        "star5" => ShapeGeometry.Star5,
+        "rightArrow" => ShapeGeometry.RightArrow,
+        "leftArrow" => ShapeGeometry.LeftArrow,
+        "upArrow" => ShapeGeometry.UpArrow,
+        "downArrow" => ShapeGeometry.DownArrow,
+        _ => null,
+    };
+
+    /// <summary>A linear or path gradient; null with fewer than two usable stops.</summary>
+    private GradientFill? ReadGradient(XElement fill)
+    {
+        var stops = new List<GradientStop>();
+        foreach (var gs in fill.Elements().FirstOrDefault(e => e.Name.LocalName == "gsLst")?.Elements().Where(e => e.Name.LocalName == "gs") ?? [])
+            if (ResolveDrawingColor(gs) is { } color
+                && double.TryParse((string?)gs.Attribute("pos"), NumberStyles.Float, CultureInfo.InvariantCulture, out var pos))
+                stops.Add(new GradientStop(Math.Clamp(pos / 100_000.0, 0, 1), color));
+        if (stops.Count < 2) return null;
+        stops = [.. stops.OrderBy(s => s.Position)];
+        static double Number(XElement? e, string name) =>
+            double.TryParse((string?)e?.Attribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : double.NaN;
+        var path = fill.Elements().FirstOrDefault(e => e.Name.LocalName == "path");
+        if (path is not null)
+        {
+            var focus = path.Elements().FirstOrDefault(e => e.Name.LocalName == "fillToRect");
+            double Edge(string name) => double.IsNaN(Number(focus, name)) ? 0.5 : Number(focus, name) / 100_000.0;
+            return new GradientFill
+            {
+                Kind = GradientKind.Path, Rectangular = (string?)path.Attribute("path") == "rect",
+                Left = Edge("l"), Right = 1 - Edge("r"), Top = Edge("t"), Bottom = 1 - Edge("b"), Stops = stops,
+            };
+        }
+        double angle = Number(fill.Elements().FirstOrDefault(e => e.Name.LocalName == "lin"), "ang");
+        return new GradientFill { Kind = GradientKind.Linear, Degree = double.IsNaN(angle) ? 0 : angle / 60_000.0, Stops = stops };
     }
 
     private static readonly Dictionary<string, Color> OfficeColors = new()
@@ -186,19 +256,22 @@ internal sealed partial class StoryReader
         if (width <= 0 || height <= 0) return null;
         width = Math.Min(width, context.Options.MaxDimension);
         height = Math.Min(height, context.Options.MaxDimension);
-        bool rectangle = data.Geometry is "rect" or "flowChartProcess" or "textBox";
+        var geometry = PresetGeometry(data.Geometry);
         bool hasText = data.Blocks.Count > 0;
         if (data.Vertical) context.WarnOnce("docx.shape.vert", "Vertical text in shapes is laid out horizontally.");
-        if (!rectangle)
+        if (geometry is null)
         {
-            context.WarnOnce("docx.shape.geometry", $"Shapes other than rectangles are not drawn (only their text, if any); first seen: '{data.Geometry}'.");
+            context.WarnOnce("docx.shape.geometry", $"Shapes other than the basic presets (rectangle, rounded rectangle, ellipse, triangles, diamond, hexagon, arrows, …) are not drawn (only their text, if any); first seen: '{data.Geometry}'.");
             if (!hasText) return null;
         }
         if (!hasText && data.Fill is null && data.Outline is null) return null;
         var box = new FloatingTextBox(width, height, props)
         {
-            Fill = rectangle ? data.Fill : null,
-            Outline = rectangle ? data.Outline : null,
+            Fill = geometry is null ? null : data.Fill,
+            FillGradient = geometry is null ? null : data.Gradient,
+            Outline = geometry is null ? null : data.Outline,
+            Geometry = geometry ?? ShapeGeometry.Rectangle,
+            CornerRadius = data.CornerRadius, Adjust1 = data.Adjust1, Adjust2 = data.Adjust2,
             OutlineWidth = data.OutlineWidth,
             OutlineStyle = data.Dash,
             Insets = data.Insets,

@@ -13,8 +13,20 @@ internal static class TextBoxes
     {
         var items = new List<LayoutItem>();
         double w = box.Width, h = box.Height;
-        if (box.Fill is { } fill) items.Add(new RectItem(x, y, w, h, fill));
-        if (box.Outline is { } outline && box.OutlineWidth > 0)
+        bool plain = box.Geometry == ShapeGeometry.Rectangle && box.FillGradient is null;
+        if (!plain)
+        {
+            // Other outlines and gradients are drawn by the same code as the shapes of spreadsheets.
+            var shape = new SheetShape
+            {
+                Geometry = box.Geometry, CornerRadius = box.CornerRadius, Adjust1 = box.Adjust1, Adjust2 = box.Adjust2,
+                Fill = box.Fill, FillGradient = box.FillGradient, LineColor = box.Outline, LineWidth = box.OutlineWidth,
+                LineStyle = box.OutlineStyle switch { LineStyleKind.Dotted => StrokeStyle.Dotted, LineStyleKind.Dashed => StrokeStyle.Dashed, _ => StrokeStyle.Solid },
+            };
+            SheetLayoutEngine.EmitOutline(shape, x, y, w, h, items);
+        }
+        else if (box.Fill is { } fill) items.Add(new RectItem(x, y, w, h, fill));
+        if (plain && box.Outline is { } outline && box.OutlineWidth > 0)
         {
             var style = box.OutlineStyle switch { LineStyleKind.Dotted => LineStyle.Dotted, LineStyleKind.Dashed => LineStyle.Dashed, _ => LineStyle.Solid };
             double lw = box.OutlineWidth;
@@ -25,6 +37,14 @@ internal static class TextBoxes
         }
 
         var inset = box.Insets;
+        // The text rectangle of an ellipse is the rectangle inscribed in it; of a rounded rectangle, the one inside its corners.
+        if (box.Geometry == ShapeGeometry.Ellipse)
+            inset = new Thickness(inset.Top + h * 0.14645, inset.Right + w * 0.14645, inset.Bottom + h * 0.14645, inset.Left + w * 0.14645);
+        else if (box.Geometry == ShapeGeometry.RoundRectangle)
+        {
+            double corner = Math.Clamp(Math.Min(w, h) * box.CornerRadius, 0, Math.Min(w, h) / 2) * 0.29289;
+            inset = new Thickness(inset.Top + corner, inset.Right + corner, inset.Bottom + corner, inset.Left + corner);
+        }
         double bodyWidth = w - inset.Left - inset.Right;
         if (box.Blocks.Count > 0 && bodyWidth > 1 && context.Depth < 8)
         {

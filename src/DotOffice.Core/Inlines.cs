@@ -93,6 +93,28 @@ public sealed class FloatingTextBox(double width, double height, RunProperties p
 
     /// <summary>Clockwise rotation in degrees.</summary>
     public double Rotation { get; init; }
+
+    /// <summary>The outline of the box; text goes in the insets of the frame, or of the rectangle inscribed in an ellipse or rounded corners.</summary>
+    public ShapeGeometry Geometry { get; init; }
+
+    /// <summary>Corner radius of a rounded rectangle as a fraction of the shorter side.</summary>
+    public double CornerRadius { get; init; } = 1.0 / 6;
+
+    /// <summary>The preset's first and second adjust values as fractions; null keeps its default.</summary>
+    public double? Adjust1 { get; init; }
+
+    public double? Adjust2 { get; init; }
+
+    /// <summary>A gradient fill, drawn instead of <see cref="Fill"/> (which holds the color of its first stop).</summary>
+    public GradientFill? FillGradient { get; init; }
+}
+
+/// <summary>A shape laid out in the line of text like a picture (<c>wp:inline</c>); its position fields are not used.</summary>
+public sealed class InlineShape(FloatingTextBox box) : Inline(box.Properties)
+{
+    public FloatingTextBox Box { get; } = box;
+    public double Width => Box.Width;
+    public double Height => Box.Height;
 }
 
 public enum LineStyleKind { Solid, Dotted, Dashed }

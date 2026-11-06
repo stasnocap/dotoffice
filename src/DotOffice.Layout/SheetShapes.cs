@@ -323,7 +323,7 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
-    private static void EmitOutline(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
+    internal static void EmitOutline(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
     {
         var dash = shape.LineStyle switch { StrokeStyle.Dotted => LineStyle.Dotted, StrokeStyle.Dashed => LineStyle.Dashed, _ => LineStyle.Solid };
         double strokeWidth = Math.Max(shape.LineWidth, 0.25);

@@ -27,6 +27,9 @@ internal sealed class Atom
 
     public double Width { get; init; }
     public ImageRun? Image { get; init; }
+
+    /// <summary>The shape of an <see cref="AtomKind.Image"/> atom that holds a shape instead of a picture.</summary>
+    public InlineShape? Shape { get; init; }
     public FieldRun? Field { get; init; }
     public Hyperlink? Link { get; init; }
 
@@ -106,7 +109,7 @@ internal sealed class Itemizer(FontSelector fonts)
                 case Tab:
                     segments.Add(new Segment(AtomKind.Tab, "\t", inline.Properties, inline));
                     break;
-                case ImageRun:
+                case ImageRun or InlineShape:
                     segments.Add(new Segment(AtomKind.Image, "￼", inline.Properties, inline));
                     break;
                 case Break { Kind: BreakKind.Line }:
@@ -156,11 +159,12 @@ internal sealed class Itemizer(FontSelector fonts)
                     });
                     break;
                 case AtomKind.Image:
-                    var image = (ImageRun)s.Inline!;
+                    var image = s.Inline as ImageRun;
+                    var shape = s.Inline as InlineShape;
                     atoms.Add(new Atom
                     {
-                        Kind = AtomKind.Image, Props = s.Props, Image = image, Width = image.Width, BreakBefore = before, Link = image.Link,
-                        Level = Level(offset),
+                        Kind = AtomKind.Image, Props = s.Props, Image = image, Shape = shape, Width = image?.Width ?? shape!.Width,
+                        BreakBefore = before, Link = s.Inline!.Link, Level = Level(offset),
                     });
                     break;
                 case AtomKind.Marker:
@@ -633,7 +637,7 @@ internal static class LineBuilder
         {
             if (atom.Kind == AtomKind.Image)
             {
-                ascent = Math.Max(ascent, atom.Image!.Height);
+                ascent = Math.Max(ascent, atom.Image?.Height ?? atom.Shape!.Height);
                 continue;
             }
             if (atom.Font is null) continue;
