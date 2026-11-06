@@ -146,6 +146,19 @@ internal static class TableLayouter
             }
         }
 
+        // Height the rows of a cell are fixed to (exact or at-least), summed over a merge group; null when the content decides.
+        double? RowHint(Placed p)
+        {
+            int last = groupEnd.TryGetValue(p, out var e) ? e : p.Row;
+            double sum = 0;
+            for (int r = p.Row; r <= last; r++)
+            {
+                if (rows[r].HeightRule == RowHeightRule.Auto || rows[r].Height <= 0) return null;
+                sum += rows[r].Height;
+            }
+            return sum;
+        }
+
         // Lay out cell contents.
         var contents = new Dictionary<Placed, (List<(double Y, Slice Slice)> Lines, double Height)>();
         var nested = ctx.Nested();
@@ -154,6 +167,11 @@ internal static class TableLayouter
             double w = Math.Abs(colX[p.Column + p.Span] - colX[p.Column]);
             var m = p.Cell.Margins;
             double inner = Math.Max(1, w - m.Left - m.Right);
+            if (p.Cell.TextDirection != CellTextDirection.LeftToRight)
+            {
+                contents[p] = LayoutVertical(p, CellLeft(p) + m.Left, inner, RowHint(p), nested, ctx);
+                continue;
+            }
             var slices = BlockFlow.Build(p.Cell.Blocks, CellLeft(p) + m.Left, inner, nested);
             var lines = new List<(double, Slice)>();
             double h = BlockFlow.Stack(slices, lines);
@@ -203,12 +221,13 @@ internal static class TableLayouter
             }
             var (lines, contentHeight) = contents[p];
             double free = Math.Max(0, groupHeight - m.Top - m.Bottom - contentHeight);
-            double offset = m.Top + p.Cell.VerticalAlignment switch
+            // In rotated text the vertical alignment acts across the lines, inside the rotated group.
+            double offset = m.Top + (p.Cell.TextDirection != CellTextDirection.LeftToRight ? 0 : p.Cell.VerticalAlignment switch
             {
                 CellVerticalAlignment.Center => free / 2,
                 CellVerticalAlignment.Bottom => free,
                 _ => 0,
-            };
+            });
             var perRow = Enumerable.Range(0, rowTops.Length).Select(_ => new List<CellLine>()).ToArray();
             foreach (var (y, slice) in lines)
             {
@@ -251,6 +270,46 @@ internal static class TableLayouter
             result.Add(slice);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Lays out a cell whose text runs up or down: the content goes through the horizontal flow in a frame as long as the cell is high
+    /// (the fixed row height, or else the unwrapped content) and as wide as the cell's inner height, and that frame is turned a quarter
+    /// about the center of the cell's content box. The vertical alignment of the cell places the lines across its width.
+    /// </summary>
+    private static (List<(double Y, Slice Slice)> Lines, double Height) LayoutVertical(
+        Placed p, double x0, double inner, double? rowHint, FlowContext nested, FlowContext ctx)
+    {
+        var m = p.Cell.Margins;
+        double length = rowHint is { } hint
+            ? hint - m.Top - m.Bottom
+            : Intrinsic(p.Cell, ctx).Max - m.Left - m.Right;
+        length = Math.Max(1, length);
+        double cx = x0 + inner / 2, cy = length / 2;
+        var slices = BlockFlow.Build(p.Cell.Blocks, cx - length / 2, length, nested);
+        var stacked = new List<(double Y, Slice Slice)>();
+        double across = BlockFlow.Stack(slices, stacked);
+        double free = Math.Max(0, inner - across);
+        bool up = p.Cell.TextDirection == CellTextDirection.BottomToTop;
+        // The first line is at the left for text running up and at the right for text running down, so "top" means that side.
+        double shift = cy - inner / 2 + p.Cell.VerticalAlignment switch
+        {
+            CellVerticalAlignment.Center => free / 2,
+            CellVerticalAlignment.Bottom => free,
+            _ => 0,
+        };
+        var group = new Slice { Height = length };
+        var notes = new List<Note>();
+        // PushItem turns counter-clockwise; the lines of text running down turn clockwise.
+        group.Items.Add(new PushItem((x0, 0, inner, length), up ? 90 : -90, cx, cy));
+        foreach (var (y, slice) in stacked)
+        {
+            foreach (var item in slice.Items) group.Items.Add(item.Offset(0, y + shift));
+            notes.AddRange(slice.Footnotes);
+        }
+        group.Footnotes = notes;
+        group.Items.Add(new PopItem());
+        return ([(0, group)], length);
     }
 
     private static double[] ResolveColumns(Table table, List<List<Placed>> placed, int columns, double available, FlowContext ctx)

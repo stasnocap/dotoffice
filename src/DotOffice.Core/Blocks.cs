@@ -96,6 +96,19 @@ public enum VerticalMerge { None, Restart, Continue }
 
 public enum CellVerticalAlignment { Top, Center, Bottom }
 
+/// <summary>Direction in which the text of a table cell runs (<c>w:textDirection</c>).</summary>
+public enum CellTextDirection
+{
+    /// <summary>Horizontal lines from left to right, stacked downwards.</summary>
+    LeftToRight,
+
+    /// <summary><c>btLr</c>: lines run upwards, stacked from left to right.</summary>
+    BottomToTop,
+
+    /// <summary><c>tbRl</c>: lines run downwards, stacked from right to left.</summary>
+    TopToBottom,
+}
+
 public sealed class TableCell
 {
     public TableWidth Width { get; init; } = TableWidth.Auto;
@@ -108,5 +121,6 @@ public sealed class TableCell
     public Color? Shading { get; init; }
     public Thickness Margins { get; init; } = new(0, 5.4, 0, 5.4);
     public CellVerticalAlignment VerticalAlignment { get; init; }
+    public CellTextDirection TextDirection { get; init; }
     public List<Block> Blocks { get; } = [];
 }

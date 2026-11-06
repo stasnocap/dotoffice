@@ -966,6 +966,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     Shading = (cellFormat.Shading ?? effective.Shading ?? format.Shading)?.Value,
                     Margins = CellMargins(format.CellMargins.Merge(effective.Margins).Merge(cellFormat.Margins)),
                     VerticalAlignment = cellFormat.VerticalAlignment ?? effective.VerticalAlignment ?? CellVerticalAlignment.Top,
+                    TextDirection = cellFormat.TextDirection ?? effective.TextDirection ?? CellTextDirection.LeftToRight,
                 };
                 if (cellXml is not null)
                 {

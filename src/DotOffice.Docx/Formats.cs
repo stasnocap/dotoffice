@@ -766,6 +766,7 @@ internal sealed record CellFormat
     public ColorSpec? Shading { get; init; }
     public EdgeLengths Margins { get; init; } = EdgeLengths.Empty;
     public CellVerticalAlignment? VerticalAlignment { get; init; }
+    public CellTextDirection? TextDirection { get; init; }
 
     public CellFormat Merge(CellFormat? over) => over is null ? this : new CellFormat
     {
@@ -777,6 +778,7 @@ internal sealed record CellFormat
         Shading = over.Shading ?? Shading,
         Margins = Margins.Merge(over.Margins),
         VerticalAlignment = over.VerticalAlignment ?? VerticalAlignment,
+        TextDirection = over.TextDirection ?? TextDirection,
     };
 
     public static CellFormat Parse(XmlReader r)
@@ -796,6 +798,17 @@ internal sealed record CellFormat
                 case "vMerge": f = f with { VerticalMerge = r.WAttr("val") == "restart" ? Core.VerticalMerge.Restart : Core.VerticalMerge.Continue }; break;
                 case "hMerge": f = f with { HorizontalMergeContinue = r.WAttr("val") != "restart" }; break;
                 case "shd": f = f with { Shading = RunFormat.ParseShading(r) }; break;
+                case "textDirection":
+                    f = f with
+                    {
+                        TextDirection = r.WAttr("val") switch
+                        {
+                            "btLr" => CellTextDirection.BottomToTop,
+                            "tbRl" or "tbRlV" => CellTextDirection.TopToBottom,
+                            _ => CellTextDirection.LeftToRight,
+                        },
+                    };
+                    break;
                 case "vAlign":
                     f = f with
                     {
