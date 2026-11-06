@@ -62,21 +62,33 @@ public sealed class TrueTypeFont
     /// <summary>True when the OS/2 fsType forbids embedding (restricted license).</summary>
     public bool IsEmbeddingRestricted { get; }
 
+    /// <summary>True for an OpenType font with PostScript (CFF) outlines; such fonts have metrics and a cmap but no <c>glyf</c> data.</summary>
+    public bool IsCff { get; }
+
+    /// <summary>The parsed CFF table (null for TrueType outlines).</summary>
+    internal CffFont? Cff => IsCff ? _cff ??= new CffFont(_data.AsMemory(_tables["CFF "].Offset, _tables["CFF "].Length), NumGlyphs) : null;
+
+    private CffFont? _cff;
+
+    /// <summary>The character id a PDF uses for a glyph of a CFF font (the glyph id for TrueType outlines).</summary>
+    public ushort GetCharacterId(ushort glyphId) => Cff?.Cid(glyphId) ?? glyphId;
+
+    /// <summary>The CFF table cut down to the given glyphs, for embedding as a <c>CIDFontType0C</c> font file.</summary>
+    public byte[] SubsetCff(IEnumerable<ushort> glyphIds) =>
+        Cff?.Subset(glyphIds) ?? throw new InvalidOperationException("The font has no CFF outlines.");
+
     private TrueTypeFont(byte[] data, int faceIndex)
     {
         _data = data;
         var sfntVersion = U32(0);
-        if (sfntVersion == 0x4F54544F) // 'OTTO'
-            throw new NotSupportedException("CFF-based OpenType fonts are not supported yet.");
         int dir = 0;
         if (sfntVersion == 0x74746366) // 'ttcf': table offsets stay absolute, only the directory moves
         {
             if (faceIndex < 0 || faceIndex >= (int)U32(8)) throw new InvalidDataException("Face index out of range.");
             dir = (int)U32(12 + faceIndex * 4);
             sfntVersion = U32(dir);
-            if (sfntVersion == 0x4F54544F) throw new NotSupportedException("CFF-based OpenType fonts are not supported yet.");
         }
-        if (sfntVersion != 0x00010000 && sfntVersion != 0x74727565) // 'true'
+        if (sfntVersion != 0x00010000 && sfntVersion != 0x74727565 && sfntVersion != 0x4F54544F) // 'true', 'OTTO'
             throw new InvalidDataException("Not a TrueType font.");
 
         int numTables = U16(dir + 4);
@@ -92,7 +104,8 @@ public sealed class TrueTypeFont
             _tables[tag] = (offset, length);
         }
 
-        foreach (var required in new[] { "head", "hhea", "maxp", "hmtx", "cmap", "loca", "glyf" })
+        IsCff = sfntVersion == 0x4F54544F;
+        foreach (var required in IsCff ? new[] { "head", "hhea", "maxp", "hmtx", "cmap", "CFF " } : ["head", "hhea", "maxp", "hmtx", "cmap", "loca", "glyf"])
             if (!_tables.ContainsKey(required))
                 throw new InvalidDataException($"Missing required table '{required}'.");
 
@@ -122,10 +135,13 @@ public sealed class TrueTypeFont
             if (lsb + 2 <= hmtxLength) _leftSideBearings[g] = S16(hmtx + lsb);
         }
 
-        _loca = new int[NumGlyphs + 1];
-        int loca = Table("loca");
-        for (int g = 0; g <= NumGlyphs; g++)
-            _loca[g] = longLoca ? (int)U32(loca + g * 4) : U16(loca + g * 2) * 2;
+        _loca = new int[IsCff ? 0 : NumGlyphs + 1];
+        if (!IsCff)
+        {
+            int loca = Table("loca");
+            for (int g = 0; g <= NumGlyphs; g++)
+                _loca[g] = longLoca ? (int)U32(loca + g * 4) : U16(loca + g * 2) * 2;
+        }
 
         _cmap = ParseCmap(Table("cmap"));
 
@@ -199,6 +215,7 @@ public sealed class TrueTypeFont
     internal (int XBearing, int YBearing, int Width, int Height)? GetGlyphExtents(ushort glyphId)
     {
         if (glyphId >= NumGlyphs) return null;
+        if (IsCff) return (0, 0, 0, 0);
         var data = GetGlyphData(glyphId);
         if (data.Length < 10 || BinaryPrimitives.ReadInt16BigEndian(data) == 0) return (0, 0, 0, 0);
         int xMin = BinaryPrimitives.ReadInt16BigEndian(data[2..]), yMin = BinaryPrimitives.ReadInt16BigEndian(data[4..]);
@@ -228,6 +245,7 @@ public sealed class TrueTypeFont
 
     internal ReadOnlySpan<byte> GetGlyphData(ushort glyphId)
     {
+        if (IsCff || glyphId >= NumGlyphs) return default;
         int start = _loca[glyphId], end = _loca[glyphId + 1];
         if (end <= start) return default;
         return GetTableData("glyf").Slice(start, end - start);

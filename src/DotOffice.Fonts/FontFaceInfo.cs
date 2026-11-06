@@ -58,7 +58,7 @@ public sealed record FontFaceInfo(string Path, string FamilyName, string Typogra
         Span<byte> header = stackalloc byte[12];
         stream.ReadExactly(header);
         uint version = BinaryPrimitives.ReadUInt32BigEndian(header);
-        if (version != 0x00010000 && version != 0x74727565) return null; // CFF and collections unsupported
+        if (version != 0x00010000 && version != 0x74727565 && version != 0x4F54544F) return null; // collections are read by TryReadAll
         int numTables = BinaryPrimitives.ReadUInt16BigEndian(header[4..]);
         if (numTables is 0 or > 512) return null;
 
@@ -72,7 +72,7 @@ public sealed record FontFaceInfo(string Path, string FamilyName, string Typogra
             var tag = Encoding.ASCII.GetString(rec[..4]);
             uint offset = BinaryPrimitives.ReadUInt32BigEndian(rec[8..]);
             uint length = BinaryPrimitives.ReadUInt32BigEndian(rec[12..]);
-            if (tag == "glyf") hasGlyf = true;
+            if (tag is "glyf" or "CFF ") hasGlyf = true;
             if (tag is not ("name" or "head" or "OS/2") || length > 1 << 20 || offset + (long)length > stream.Length)
                 continue;
             var data = new byte[length];

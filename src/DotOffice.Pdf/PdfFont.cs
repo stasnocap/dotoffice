@@ -53,6 +53,13 @@ public sealed class PdfFont
     private ushort Cid(ushort glyph, string text)
     {
         if (glyph == 0) return 0;
+        if (Font.IsCff)
+        {
+            // The CIDs of a CFF font are fixed by its charset, so a glyph used for several texts keeps one code (and the first text).
+            var code = Font.GetCharacterId(glyph);
+            _usedCids.TryAdd(code, (glyph, text));
+            return code;
+        }
         if (_cids.TryGetValue((glyph, text), out var cid)) return cid;
         // The glyph's own id is used for its first text; other texts get CIDs past the last glyph.
         if (!_usedCids.ContainsKey(glyph)) cid = glyph;
@@ -69,7 +76,7 @@ public sealed class PdfFont
         int descriptorId = writer.Allocate();
         int fontFileId = IsEmbedded ? writer.Allocate() : 0;
         int toUnicodeId = writer.Allocate();
-        bool identity = _usedCids.All(c => c.Key == c.Value.Glyph);
+        bool identity = Font.IsCff || _usedCids.All(c => c.Key == c.Value.Glyph);
         int cidToGidId = identity ? 0 : writer.Allocate();
 
         var baseFont = IsEmbedded ? SubsetTag() + "+" + Font.PostScriptName : Font.PostScriptName;
@@ -80,14 +87,14 @@ public sealed class PdfFont
             $"/DescendantFonts [{cidFontId} 0 R] /ToUnicode {toUnicodeId} 0 R >>");
 
         writer.WriteObject(cidFontId,
-            $"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{baseFont} " +
+            $"<< /Type /Font /Subtype /{(Font.IsCff ? "CIDFontType0" : "CIDFontType2")} /BaseFont /{baseFont} " +
             "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> " +
             $"/FontDescriptor {descriptorId} 0 R /DW {PdfFormat.Number(Font.GetAdvanceWidth(0) * scale)} " +
-            $"/W {WidthsArray(scale)} /CIDToGIDMap {(cidToGidId != 0 ? $"{cidToGidId} 0 R" : "/Identity")} >>");
+            $"/W {WidthsArray(scale)}{(Font.IsCff ? "" : $" /CIDToGIDMap {(cidToGidId != 0 ? $"{cidToGidId} 0 R" : "/Identity")}")} >>");
 
         var bbox = Font.BoundingBox;
         int flags = 4 | (Font.IsFixedPitch ? 1 : 0) | (Font.IsItalic ? 64 : 0);
-        var fontFile = IsEmbedded ? $" /FontFile2 {fontFileId} 0 R" : "";
+        var fontFile = IsEmbedded ? $" /{(Font.IsCff ? "FontFile3" : "FontFile2")} {fontFileId} 0 R" : "";
         writer.WriteObject(descriptorId,
             $"<< /Type /FontDescriptor /FontName /{baseFont} /Flags {flags} " +
             $"/FontBBox [{PdfFormat.Number(bbox.XMin * scale)} {PdfFormat.Number(bbox.YMin * scale)} " +
@@ -107,7 +114,9 @@ public sealed class PdfFont
             }
             writer.WriteStream(cidToGidId, "", map);
         }
-        if (IsEmbedded)
+        if (IsEmbedded && Font.IsCff)
+            writer.WriteStream(fontFileId, "/Subtype /CIDFontType0C", Font.SubsetCff(_usedCids.Values.Select(v => v.Glyph)));
+        else if (IsEmbedded)
         {
             var subset = TrueTypeSubsetter.Subset(Font, _usedCids.Values.Select(v => v.Glyph));
             writer.WriteStream(fontFileId, $"/Length1 {subset.Length}", subset);
