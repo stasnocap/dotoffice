@@ -180,7 +180,7 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment horizontal=\"fill\"/></xf>" +                                                  // 31 fill alignment
         "</cellXfs>" +
-        "<dxfs count=\"8\">" +
+        "<dxfs count=\"9\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
         "<dxf><font><color rgb=\"FF006100\"/></font><fill><patternFill><bgColor rgb=\"FFC6EFCE\"/></patternFill></fill></dxf>" +                       // 1 good
         "<dxf><fill><patternFill><bgColor rgb=\"FFDDEBF7\"/></patternFill></fill></dxf>" +                                                              // 2 zebra
@@ -190,6 +190,7 @@ internal static class ShowcaseXlsx
         "<dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFFD966\"/></patternFill></fill></dxf>" +                                                  // 5 time period
         "<dxf><font><color rgb=\"FF403151\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></dxf>" +                      // 6 lavender: the function showcase
         "<dxf><fill><patternFill><bgColor rgb=\"FFF8CBAD\"/></patternFill></fill></dxf>" +                                                              // 7 peach: tables and 3-D references
+        "<dxf><fill><patternFill><bgColor rgb=\"FFB4E5A2\"/></patternFill></fill></dxf>" +                                                              // 8 mint: a table reference without a table name
         "</dxfs>" +
         // A table style of the workbook's own for the "Pivot custom" sheet: a yellow header, blue and lavender stripes, a gold total row.
         "<tableStyles count=\"1\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"><tableStyle name=\"Showcase pivot\" table=\"0\" count=\"4\">" +
@@ -1351,30 +1352,32 @@ internal static class ShowcaseXlsx
     {
         var rows = new StringBuilder();
         rows.Append(Row(1, Str("A1", "Conditional formatting with structured table references and a 3-D reference", Bold) + Num("H1", 10)));
-        rows.Append(Row(3, Str("A3", "Item", Header) + Str("B3", "Qty", Header) + Str("C3", "Limit", Header) + Str("D3", "Stock", Header)));
+        rows.Append(Row(3, Str("A3", "Item", Header) + Str("B3", "Qty", Header) + Str("C3", "Limit", Header) + Str("D3", "Stock", Header) + Str("E3", "Reorder", Header)));
         string[] items = ["Bolts", "Nuts", "Screws", "Washers"];
-        double[] qty = [12, 3, 9, 20], limit = [10, 5, 9, 15], stock = [4, 8, 40, 60];
+        double[] reorder = [11, 2, 9, 16], qty = [12, 3, 9, 20], limit = [10, 5, 9, 15], stock = [4, 8, 40, 60];
         for (int i = 0; i < items.Length; i++)
         {
             int r = 4 + i;
-            rows.Append(Row(r, Str($"A{r}", items[i]) + Num($"B{r}", qty[i]) + Num($"C{r}", limit[i]) + Num($"D{r}", stock[i])));
+            rows.Append(Row(r, Str($"A{r}", items[i]) + Num($"B{r}", qty[i]) + Num($"C{r}", limit[i]) + Num($"D{r}", stock[i]) + Num($"E{r}", reorder[i])));
         }
-        rows.Append(Row(8, Str("A8", "Total") + Num("B8", 44) + Num("C8", 39) + Num("D8", 112)));
+        rows.Append(Row(8, Str("A8", "Total") + Num("B8", 44) + Num("C8", 39) + Num("D8", 112) + Num("E8", 38)));
         rows.Append(Row(10, Str("A10", "Qty above the Limit of its row: Stock[@Limit]")));
         rows.Append(Row(11, Str("A11", "Limit above the table's average: AVERAGE(Stock[Limit])")));
         rows.Append(Row(12, Str("A12", "Stock below the three H1 cells: SUM('Conditional tables:Span B'!$H$1)")));
+        rows.Append(Row(13, Str("A13", "Reorder above the Limit of its row, with no table name: [@Limit] (mint)")));
         string Rule(string sqref, int priority, string formula) =>
             $"<conditionalFormatting sqref=\"{sqref}\"><cfRule type=\"expression\" dxfId=\"7\" priority=\"{priority}\"><formula>{SecurityElement.Escape(formula)}</formula></cfRule></conditionalFormatting>";
         var tail = Rule("B4:B7", 1, "B4>Stock[@Limit]") + Rule("C4:C7", 2, "C4>AVERAGE(Stock[Limit])") + Rule("D4:D7", 3, "D4<SUM('Conditional tables:Span B'!$H$1)")
+            + "<conditionalFormatting sqref=\"E4:E7\"><cfRule type=\"expression\" dxfId=\"8\" priority=\"4\"><formula>E4&gt;[@Limit]</formula></cfRule></conditionalFormatting>"
             + "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\"/>" + HeaderFooter;
-        return Sheet("<cols><col min=\"1\" max=\"4\" width=\"24\" customWidth=\"1\"/></cols>", rows.ToString(), tail);
+        return Sheet("<cols><col min=\"1\" max=\"5\" width=\"24\" customWidth=\"1\"/></cols>", rows.ToString(), tail);
     }
 
     private static void WriteConditionalTables(ZipArchive zip, int sheetNumber)
     {
         Entry(zip, "xl/tables/table1.xml",
-            $"<table xmlns=\"{Main}\" id=\"1\" name=\"Stock\" displayName=\"Stock\" ref=\"A3:D8\" totalsRowCount=\"1\"><tableColumns count=\"4\">" +
-            "<tableColumn id=\"1\" name=\"Item\"/><tableColumn id=\"2\" name=\"Qty\"/><tableColumn id=\"3\" name=\"Limit\"/><tableColumn id=\"4\" name=\"Stock\"/></tableColumns></table>");
+            $"<table xmlns=\"{Main}\" id=\"1\" name=\"Stock\" displayName=\"Stock\" ref=\"A3:E8\" totalsRowCount=\"1\"><tableColumns count=\"5\">" +
+            "<tableColumn id=\"1\" name=\"Item\"/><tableColumn id=\"2\" name=\"Qty\"/><tableColumn id=\"3\" name=\"Limit\"/><tableColumn id=\"4\" name=\"Stock\"/><tableColumn id=\"5\" name=\"Reorder\"/></tableColumns></table>");
         Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
             $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}table\" Target=\"../tables/table1.xml\"/></Relationships>");
     }
