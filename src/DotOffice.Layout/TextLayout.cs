@@ -409,19 +409,22 @@ internal interface ILineSpace
     void Done(Line line);
 }
 
+/// <summary>Hyphenation settings of a paragraph: the zone in points, the consecutive-line limit (0 for none) and whether to skip capitals.</summary>
+internal sealed record HyphenationOptions(double Zone, int ConsecutiveLimit, bool SkipCaps);
+
 /// <summary>Greedy line filling over break opportunities, with tab stops, alignment and justification.</summary>
 internal static class LineBuilder
 {
     private const double Epsilon = 0.01;
 
     public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks,
-        ILineSpace? space = null, bool hyphenate = false)
+        ILineSpace? space = null, HyphenationOptions? hyphenation = null)
     {
         var lines = new List<Line>();
-        int i = 0;
+        int i = 0, hyphenRun = 0;
         while (i < atoms.Count)
         {
-            bool first = lines.Count == 0;
+            bool first = lines.Count == 0, hyphenated = false;
             var (f, gap) = space?.Next(frame, first) ?? (frame, 0);
             double startX = f.LeftIndent + (first ? f.FirstLineIndent : 0);
             double maxX = f.Width - f.RightIndent;
@@ -434,7 +437,13 @@ internal static class LineBuilder
                 double contentEnd = Position(atoms, i, wordEnd, startX, f);
                 if (contentEnd > maxX + Epsilon && end > i)
                 {
-                    if (hyphenate && wordEnd == end + 1 && TryHyphenate(atoms, i, end, startX, maxX, f)) continue;
+                    if (hyphenation is { } h && TrailingSpacesOnly(atoms, end + 1, wordEnd)
+                        && (h.ConsecutiveLimit == 0 || hyphenRun < h.ConsecutiveLimit)
+                        && TryHyphenate(atoms, i, end, startX, maxX, f, h))
+                    {
+                        hyphenated = true;
+                        continue;
+                    }
                     break; // word does not fit: line ends before it
                 }
                 if (contentEnd > maxX + Epsilon && end == i)
@@ -459,6 +468,7 @@ internal static class LineBuilder
                 IsLast = end == atoms.Count && !last.IsBreak,
             };
             lines.Add(line);
+            hyphenRun = hyphenated ? hyphenRun + 1 : 0;
             i = end;
             Finish(line, f, alignment, first, justifyBeforeBreaks);
             space?.Done(line);
@@ -582,7 +592,7 @@ internal static class LineBuilder
     /// Splits the word at <paramref name="at"/> at its last hyphenation point that fits the line, ending the first
     /// part with a hyphen. Only plain ASCII words in one run are hyphenated, with the English patterns.
     /// </summary>
-    private static bool TryHyphenate(List<Atom> atoms, int from, int at, double startX, double maxX, LineFrame frame)
+    private static bool TryHyphenate(List<Atom> atoms, int from, int at, double startX, double maxX, LineFrame frame, HyphenationOptions options)
     {
         var atom = atoms[at];
         var text = atom.Text;
@@ -591,7 +601,13 @@ internal static class LineBuilder
         while (first < last && !IsAsciiLetter(text[first])) first++;
         while (last > first && !IsAsciiLetter(text[last - 1])) last--;
         for (int k = first; k < last; k++) if (!IsAsciiLetter(text[k])) return false;
+        if (options.SkipCaps && text.Count(char.IsLetter) > 1 && !text.Any(char.IsLower)) return false;
         if (Hyphenator.ForLanguage("en-US") is not { } hyphenator) return false;
+
+        // The zone: when the text before the word already ends within it of the right margin, the word moves whole.
+        int before = at;
+        while (before > from && atoms[before - 1].Kind == AtomKind.Space) before--;
+        if (maxX - Position(atoms, from, before, startX, frame) < options.Zone - Epsilon) return false;
 
         var points = hyphenator.Find(text[first..last]);
         for (int p = points.Count - 1; p >= 0; p--)
@@ -604,6 +620,12 @@ internal static class LineBuilder
             atoms[at] = atom;
         }
         return false;
+    }
+
+    private static bool TrailingSpacesOnly(List<Atom> atoms, int from, int to)
+    {
+        for (int k = from; k < to; k++) if (atoms[k].Kind != AtomKind.Space) return false;
+        return true;
     }
 
     private static bool IsAsciiLetter(char c) => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z';

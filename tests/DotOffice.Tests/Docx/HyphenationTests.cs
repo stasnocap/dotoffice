@@ -14,9 +14,11 @@ public class HyphenationTests
 
     private static string Para(string text, string pPr = "") => $"<w:p><w:pPr>{pPr}</w:pPr><w:r>{Run}<w:t>{text}</w:t></w:r></w:p>";
 
-    private static List<string> Lines(string body, bool hyphenate)
+    private static string With(string options) => On.Replace("<w:autoHyphenation/>", "<w:autoHyphenation/>" + options);
+
+    private static List<string> Lines(string body, bool hyphenate, string? options = null)
     {
-        var doc = DocxReader.Read(new DocxBuilder { Body = body + Section(), Settings = hyphenate ? On : null }.BuildStream());
+        var doc = DocxReader.Read(new DocxBuilder { Body = body + Section(), Settings = options is not null ? With(options) : hyphenate ? On : null }.BuildStream());
         var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
         return Texts(page).GroupBy(t => Math.Round(t.Baseline, 1)).OrderBy(g => g.Key)
             .Select(g => string.Concat(g.OrderBy(t => t.X).Select(t => t.Text)).TrimEnd()).ToList();
@@ -61,5 +63,47 @@ public class HyphenationTests
         var h = DotOffice.Layout.Hyphenation.Hyphenator.ForLanguage("en-US")!;
         Assert.Equal([4, 6, 9], h.Find(Word).Take(3));
         Assert.Empty(h.Find("pine"));
+    }
+
+    [Fact]
+    public void Zone_wider_than_the_line_keeps_every_word_whole()
+    {
+        var lines = Lines(Para(Filled(Straddling())), true, "<w:hyphenationZone w:val=\"20000\"/>");
+        Assert.Equal(Word, lines[1]);
+    }
+
+    [Fact]
+    public void Zero_zone_hyphenates_wherever_the_word_straddles()
+    {
+        var lines = Lines(Para(Filled(Straddling())), true, "<w:hyphenationZone w:val=\"0\"/>");
+        Assert.EndsWith("-", lines[0]);
+    }
+
+    [Fact]
+    public void Capitals_are_kept_whole_with_do_not_hyphenate_caps()
+    {
+        string caps = Filled(Straddling()).Replace(Word, Word.ToUpperInvariant());
+        Assert.EndsWith("-", Lines(Para(caps), true, "<w:hyphenationZone w:val=\"0\"/>")[0]);
+        Assert.Equal(Word.ToUpperInvariant(), Lines(Para(caps), true, "<w:hyphenationZone w:val=\"0\"/><w:doNotHyphenateCaps/>")[1]);
+    }
+
+    [Fact]
+    public void Consecutive_hyphen_limit_stops_a_run_of_hyphenated_lines()
+    {
+        string text = string.Join(' ', Enumerable.Repeat("internationalization characteristically", 8));
+        int Longest(int indent, string options)
+        {
+            int best = 0, cur = 0;
+            foreach (var l in Lines(Para(text, $"<w:ind w:right=\"{indent}\"/>"), true, "<w:hyphenationZone w:val=\"0\"/>" + options))
+            {
+                cur = l.EndsWith('-') ? cur + 1 : 0;
+                best = Math.Max(best, cur);
+            }
+            return best;
+        }
+
+        // Some line width makes several lines in a row end in a hyphen; the limit then caps that run.
+        int indent = Enumerable.Range(50, 80).Select(n => n * 100).First(n => Longest(n, "") >= 2);
+        Assert.Equal(1, Longest(indent, "<w:consecutiveHyphenLimit w:val=\"1\"/>"));
     }
 }

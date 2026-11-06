@@ -58,6 +58,9 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
 
     public bool MirrorMargins { get; init; }
     public bool AutoHyphenation { get; init; }
+    public double HyphenationZone { get; init; } = 18;
+    public int ConsecutiveHyphenLimit { get; init; }
+    public bool DoNotHyphenateCaps { get; init; }
 
     public NoteNumbering Footnotes { get; init; } = new("decimal", 1);
     public NoteNumbering Endnotes { get; init; } = new("lowerRoman", 1);
@@ -78,6 +81,13 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                     break;
                 case "evenAndOddHeaders": s = s with { EvenAndOddHeaders = r.OnOff() }; break;
                 case "autoHyphenation": s = s with { AutoHyphenation = r.OnOff() }; break;
+                case "hyphenationZone":
+                    if (r.TwipsAttr("val") is { } zone) s = s with { HyphenationZone = Math.Max(0, zone) };
+                    break;
+                case "consecutiveHyphenLimit":
+                    if (int.TryParse(r.WAttr("val"), out var limit)) s = s with { ConsecutiveHyphenLimit = Math.Max(0, limit) };
+                    break;
+                case "doNotHyphenateCaps": s = s with { DoNotHyphenateCaps = r.OnOff() }; break;
                 case "mirrorMargins": s = s with { MirrorMargins = r.OnOff() }; break;
                 case "doNotExpandShiftReturn": s = s with { DoNotExpandShiftReturn = r.OnOff() }; break;
                 case "compatSetting" when r.WAttr("name") == "compatibilityMode":
@@ -247,6 +257,9 @@ internal sealed class DocxContext
                 EvenAndOddHeaders = Settings.EvenAndOddHeaders,
                 MirrorMargins = Settings.MirrorMargins,
                 AutoHyphenation = Settings.AutoHyphenation,
+                HyphenationZone = Settings.HyphenationZone,
+                ConsecutiveHyphenLimit = Settings.ConsecutiveHyphenLimit,
+                DoNotHyphenateCaps = Settings.DoNotHyphenateCaps,
                 TableEdgeAtIndent = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
             },

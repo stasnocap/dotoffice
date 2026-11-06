@@ -33,6 +33,15 @@ public sealed class DocumentSettings
     /// <summary>Break long words at hyphenation points (w:autoHyphenation); English patterns only.</summary>
     public bool AutoHyphenation { get; init; }
 
+    /// <summary>Width at the right margin, in points, in which a word is not hyphenated (w:hyphenationZone; Word's default is 360 twips).</summary>
+    public double HyphenationZone { get; init; } = 18;
+
+    /// <summary>Maximum number of consecutive lines ending in a hyphen; 0 is no limit (w:consecutiveHyphenLimit).</summary>
+    public int ConsecutiveHyphenLimit { get; init; }
+
+    /// <summary>Words in capitals are not hyphenated (w:doNotHyphenateCaps).</summary>
+    public bool DoNotHyphenateCaps { get; init; }
+
     /// <summary>When false, lines ending in a manual line break are not stretched in justified paragraphs.</summary>
     public bool JustifyLinesEndingWithBreak { get; init; } = true;
 }
