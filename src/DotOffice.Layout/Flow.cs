@@ -99,10 +99,12 @@ internal sealed class FlowContext
     public required Func<FieldRun, string> FieldText { get; init; }
     public IConversionWarningSink? Warnings { get; init; }
     public int Depth { get; init; }
+    /// <summary>Longest a line of vertical cell text may run: the body height of the section being laid out. Infinite when unknown.</summary>
+    public double MaxVerticalLength { get; set; } = double.PositiveInfinity;
 
     public FlowContext Nested() => new()
     {
-        Fonts = Fonts, Itemizer = Itemizer, Settings = Settings, FieldText = FieldText, Warnings = Warnings, Depth = Depth + 1,
+        Fonts = Fonts, Itemizer = Itemizer, Settings = Settings, FieldText = FieldText, Warnings = Warnings, Depth = Depth + 1, MaxVerticalLength = MaxVerticalLength,
     };
 }
 

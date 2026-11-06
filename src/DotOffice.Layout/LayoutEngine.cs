@@ -203,6 +203,7 @@ public sealed class LayoutEngine
                 pages.Add(current);
             }
 
+            bodyContext.MaxVerticalLength = Math.Max(36, section.PageHeight - section.Margins.Top - section.Margins.Bottom);
             var notes = new Dictionary<(Note, double, double), List<Slice>>();
             var paginator = new Paginator(pages, () =>
             {

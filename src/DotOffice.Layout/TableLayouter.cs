@@ -283,7 +283,7 @@ internal static class TableLayouter
         var m = p.Cell.Margins;
         double length = rowHint is { } hint
             ? hint - m.Top - m.Bottom
-            : Intrinsic(p.Cell, ctx).Max - m.Left - m.Right;
+            : Math.Min(Intrinsic(p.Cell, ctx).Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom);
         length = Math.Max(1, length);
         double cx = x0 + inner / 2, cy = length / 2;
         var slices = BlockFlow.Build(p.Cell.Blocks, cx - length / 2, length, nested);
