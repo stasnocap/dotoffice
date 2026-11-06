@@ -33,3 +33,29 @@ public class LoneMarkTests
         Assert.Equal("DFLT", Assert.Single(ScriptRuns.Split("́")).Tag); // Zinh in the UCD too
     }
 }
+
+/// <summary>
+/// Clusters of shaped Khmer and Myanmar text follow hb_form_clusters and the merge in reordering. The expected
+/// values were checked against libharfbuzz (OpenType shaper) for these inputs; they are not output of Word.
+/// </summary>
+public class ClusterTests
+{
+    private static int[] Clusters(string file, string text) =>
+        TextShaper.Shape(TrueTypeFont.Load(TestAssets.Path(file)), text, rightToLeft: false, kerning: true).Select(g => g.Cluster).ToArray();
+
+    [Fact]
+    public void Marks_after_a_Khmer_consonant_share_its_cluster()
+        => Assert.All(Clusters("NotoSansKhmer-Regular.ttf", "កុុ"), c => Assert.Equal(0, c));
+
+    [Fact]
+    public void A_ZWJ_and_the_marks_after_it_share_the_cluster_of_the_character_before()
+        => Assert.All(Clusters("NotoSansKhmer-Regular.ttf", "ក‍្រ"), c => Assert.Equal(0, c));
+
+    [Fact]
+    public void Marks_that_follow_a_reordered_vowel_join_the_syllable()
+        => Assert.All(Clusters("NotoSansMyanmar-Regular.ttf", "င်္ကေျာ"), c => Assert.Equal(0, c));
+
+    [Fact]
+    public void Separate_graphemes_keep_their_own_clusters()
+        => Assert.Equal([0, 1], Clusters("NotoSansKhmer-Regular.ttf", "កខ"));
+}

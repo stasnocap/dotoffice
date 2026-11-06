@@ -753,4 +753,31 @@ internal static class IndicShaper
                 glyphs[i] = glyphs[i] with { Cluster = from, Text = i == start ? text[from..to] : "" };
         }
     }
+
+    /// <summary>
+    /// The clusters of a shaped Khmer or Myanmar run as HarfBuzz forms them. hb_form_clusters (the default
+    /// MONOTONE_GRAPHEMES level) first gives every mark and ZWJ the cluster of the character before it. Reordering
+    /// then merges each syllable's clusters, and a merge extends over the following glyphs that shared the cluster
+    /// of the last glyph merged (hb_buffer_t::merge_clusters), so a mark that the syllable grammar left out of its
+    /// syllable still joins it when it belongs to the same grapheme.
+    /// </summary>
+    internal static void FormClusters(string text, List<GlyphInfo> glyphs)
+    {
+        var start = new int[text.Length];
+        for (int i = 0, first = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
+        {
+            int cp = char.IsSurrogatePair(text, i) ? char.ConvertToUtf32(text, i) : text[i];
+            if (i == 0 || !(TextShaper.IsMark(cp) || cp == 0x200D)) first = i;
+            start[i] = first;
+            if (cp >= 0x10000) start[i + 1] = first;
+        }
+        var grapheme = glyphs.Select(g => g.Cluster >= 0 && g.Cluster < text.Length ? start[g.Cluster] : g.Cluster).ToArray();
+        AssignSyllableText(text, glyphs);
+        var merged = new Dictionary<int, int>();
+        foreach (var (first, end) in Syllables(glyphs))
+            for (int i = first; i < end; i++)
+                merged[grapheme[i]] = merged.TryGetValue(grapheme[i], out var m) ? Math.Min(m, glyphs[first].Cluster) : glyphs[first].Cluster;
+        for (int i = 0; i < glyphs.Count; i++)
+            glyphs[i] = glyphs[i] with { Cluster = merged.TryGetValue(grapheme[i], out var c) ? Math.Min(c, grapheme[i]) : grapheme[i] };
+    }
 }

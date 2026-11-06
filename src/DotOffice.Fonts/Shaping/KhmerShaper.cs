@@ -65,7 +65,7 @@ internal static class KhmerShaper
         TextShaper.ZeroIgnorables(glyphs);
         if (layout.HasPositioning) TextShaper.ResolveAttachments(glyphs, rightToLeft: false);
         TextShaper.HideIgnorables(font, glyphs);
-        IndicShaper.AssignSyllableText(text, glyphs);
+        IndicShaper.FormClusters(text, glyphs);
         return glyphs;
     }
 
