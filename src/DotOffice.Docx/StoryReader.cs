@@ -12,7 +12,7 @@ internal sealed record CellStyle(ParaFormat? Para, RunFormat? Run);
 /// Reads one story (main document body, header or footer): blocks, paragraphs, runs, fields,
 /// inline images and tables. Unknown elements are skipped; nothing here throws on odd content.
 /// </summary>
-internal sealed class StoryReader(DocxContext context, string partName)
+internal sealed partial class StoryReader(DocxContext context, string partName)
 {
     private readonly Stack<FieldFrame> _fields = new();
     private readonly Dictionary<(string?, RunFormat?, RunFormat?), RunProperties> _runCache = [];
@@ -571,11 +571,18 @@ internal sealed class StoryReader(DocxContext context, string partName)
         var wrap = TextWrap.None;
         long cx = 0, cy = 0;
         string? embed = null, graphicType = null;
+        ShapeData? shape = null;
         int depth = r.Depth;
         if (r.IsEmptyElement) { r.Read(); return; }
         r.Read();
         while (!r.EOF && r.Depth > depth)
         {
+            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") == WordprocessingShape)
+            {
+                graphicType = WordprocessingShape;
+                shape = ReadShapeData(r);
+                continue;
+            }
             if (r.NodeType == XmlNodeType.Element && r.IsWP())
             {
                 switch (r.LocalName)
@@ -622,7 +629,12 @@ internal sealed class StoryReader(DocxContext context, string partName)
         }
         if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
 
-        if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
+        if (shape is not null)
+        {
+            if (CreateShape(shape, Units.FromEmu(cx), Units.FromEmu(cy), props, horizontal, vertical, wrap, behind, distance) is { } box)
+                AddInline(state, box);
+        }
+        else if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
             AddInline(state, new FloatingImage(image, width, height, props)
             {
                 Horizontal = horizontal, Vertical = vertical, Wrap = behind ? TextWrap.None : wrap, BehindText = behind, Distance = distance,

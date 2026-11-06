@@ -17,7 +17,8 @@ internal sealed class DocxBuilder
         "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" " +
         "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\" " +
         "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" " +
-        "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" mc:Ignorable=\"w14\"";
+        "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" " +
+        "xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\" mc:Ignorable=\"w14\"";
 
     private readonly List<(string Id, string Type, string Target, bool External)> _relationships = [];
     private readonly Dictionary<string, byte[]> _parts = [];
@@ -70,6 +71,14 @@ internal sealed class DocxBuilder
         $"<wp:extent cx=\"{(long)(widthPt * 12700)}\" cy=\"{(long)(heightPt * 12700)}\"/>{wrap}<wp:docPr id=\"2\" name=\"Float\"/>" +
         "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
         $"<pic:pic><pic:blipFill><a:blip r:embed=\"{relId}\"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>";
+
+    /// <summary>A floating wps shape inside mc:AlternateContent (as Word writes it); <paramref name="shape"/> is the content of wps:wsp.</summary>
+    public static string AnchorShape(double widthPt, double heightPt, string position, string shape, string wrap = "<wp:wrapNone/>", bool behind = false) =>
+        "<w:r><mc:AlternateContent><mc:Choice Requires=\"wps\"><w:drawing>" +
+        $"<wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"1\" behindDoc=\"{(behind ? 1 : 0)}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\">" +
+        $"<wp:simplePos x=\"0\" y=\"0\"/>{position}<wp:extent cx=\"{(long)(widthPt * 12700)}\" cy=\"{(long)(heightPt * 12700)}\"/>{wrap}<wp:docPr id=\"2\" name=\"Box\"/>" +
+        $"<a:graphic><a:graphicData uri=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\"><wps:wsp>{shape}</wps:wsp></a:graphicData></a:graphic></wp:anchor>" +
+        "</w:drawing></mc:Choice><mc:Fallback><w:pict><v:rect xmlns:v=\"urn:schemas-microsoft-com:vml\"/></w:pict></mc:Fallback></mc:AlternateContent></w:r>";
 
     public static string Position(string relativeFromH, string h, string relativeFromV, string v)
     {

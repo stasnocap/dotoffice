@@ -116,7 +116,7 @@ public sealed class LayoutEngine
         public double LowestBodyBottom => ContentBottom - NoteAreas.Select(a => a.Height).DefaultIfEmpty(0).Max();
 
         /// <summary>Floating images, painted below (<c>Behind</c>) or above the text.</summary>
-        public List<(ImageItem Item, bool Behind)> Floats { get; } = [];
+        public List<PlacedFloat> Floats { get; } = [];
 
         /// <summary>Areas wrapped text avoids.</summary>
         public List<Exclusion> Exclusions { get; } = [];
@@ -213,7 +213,7 @@ public sealed class LayoutEngine
                 // Blocks are built for the column they start in, so columns of different widths work.
                 var (x, width) = paginator.Column;
                 bool keep = keepWithNext;
-                var floats = section.Blocks[i] is Paragraph p ? p.Inlines.OfType<FloatingImage>().Where(f => !f.Properties.Hidden).ToList() : [];
+                var floats = section.Blocks[i] is Paragraph p ? p.Inlines.OfType<FloatingObject>().Where(f => !f.Properties.Hidden).ToList() : [];
                 var slices = BlockFlow.BuildBlock(section.Blocks, i, x, width, bodyContext, ref keepWithNext, paginator.Obstacles);
                 if ((floats.Count > 0 || section.Columns.Definitions.Count > 1) && slices.Count > 0 && paginator.StartsInNextColumn(slices[0]))
                     paginator.NextColumn();
@@ -384,8 +384,12 @@ public sealed class LayoutEngine
         var output = new LayoutPage(page.Width, page.Height);
         var section = page.Section;
         var context = Context(settings, field => fields.Text(field, page));
-        var front = page.Floats.Where(f => !f.Behind).Select(f => f.Item).ToList();
-        output.Items.AddRange(page.Floats.Where(f => f.Behind).Select(f => f.Item));
+        var front = new List<LayoutItem>();
+        foreach (var placed in page.Floats)
+        {
+            var items = Realize(placed.Object, placed.X, placed.Y, context);
+            if (placed.Behind) output.Items.AddRange(items); else front.AddRange(items);
+        }
 
         void Story(List<(double Y, Slice Slice)> stacked, double top)
         {
@@ -395,8 +399,9 @@ public sealed class LayoutEngine
                 // Floats in headers and footers are drawn but do not push text aside.
                 foreach (var f in slice.Floats)
                 {
-                    var item = FloatItem(f, page, section, (section.Margins.Left, section.ContentWidth), top + y);
-                    if (f.BehindText) output.Items.Insert(0, item); else front.Add(item);
+                    var (fx, fy) = FloatOrigin(f, page, section, (section.Margins.Left, section.ContentWidth), top + y);
+                    var items = Realize(f, fx, fy, context);
+                    if (f.BehindText) output.Items.InsertRange(0, items); else front.AddRange(items);
                 }
             }
         }
@@ -443,7 +448,7 @@ public sealed class LayoutEngine
     }
 
     /// <summary>Positions a floating image on <paramref name="page"/>; <paramref name="anchorY"/> is the top of its paragraph.</summary>
-    private static ImageItem FloatItem(FloatingImage f, Page page, Section section, (double X, double Width) column, double anchorY)
+    private static (double X, double Y) FloatOrigin(FloatingObject f, Page page, Section section, (double X, double Width) column, double anchorY)
     {
         var m = section.Margins;
         var (hx, hw) = f.Horizontal.RelativeTo switch
@@ -473,7 +478,14 @@ public sealed class LayoutEngine
         double y = Place(f.Vertical, vy, vh, f.Height);
         // Keep the image on the page, as Word does for objects anchored to text.
         y = Math.Clamp(y, 0, Math.Max(0, page.Height - f.Height));
-        return new ImageItem(x, y, f.Width, f.Height, f.Image);
+        return (x, y);
+    }
+
+    /// <summary>The layout items of a floating object whose top-left corner is at (<paramref name="x"/>, <paramref name="y"/>).</summary>
+    private static List<LayoutItem> Realize(FloatingObject f, double x, double y, FlowContext context)
+    {
+        if (f is FloatingImage image) return [new ImageItem(x, y, f.Width, f.Height, image.Image)];
+        return f is FloatingTextBox box ? TextBoxes.Realize(box, x, y, context) : [];
     }
 
     private static void Emit(LayoutPage output, Slice slice, double y, Page page, FieldValues fields) =>
@@ -522,7 +534,7 @@ public sealed class LayoutEngine
         private readonly HashSet<Note> _placedNotes = new(ReferenceEqualityComparer.Instance);
 
         /// <summary>Where each floating image went, so it can follow its anchor when that moves to another page.</summary>
-        private readonly Dictionary<FloatingImage, (Page Page, ImageItem Item, Exclusion? Exclusion)> _placedFloats =
+        private readonly Dictionary<FloatingObject, (Page Page, PlacedFloat Item, Exclusion? Exclusion)> _placedFloats =
             new(ReferenceEqualityComparer.Instance);
 
         private Page Current => pages[^1];
@@ -535,9 +547,9 @@ public sealed class LayoutEngine
             : new Obstacles(Current.Exclusions, Column.X, Column.Width, Current.Cursor);
 
         /// <summary>Positions floats anchored at the current position and makes text wrap around them.</summary>
-        public void PlaceFloats(IEnumerable<FloatingImage> floats) => PlaceFloats(Current, floats, Current.Cursor);
+        public void PlaceFloats(IEnumerable<FloatingObject> floats) => PlaceFloats(Current, floats, Current.Cursor);
 
-        private void PlaceFloats(Page page, IEnumerable<FloatingImage> floats, double anchorY)
+        private void PlaceFloats(Page page, IEnumerable<FloatingObject> floats, double anchorY)
         {
             foreach (var f in floats)
             {
@@ -545,16 +557,17 @@ public sealed class LayoutEngine
                 {
                     if (ReferenceEquals(placed.Page, page)) continue;
                     // The anchor moved to a later page: the image goes with it.
-                    placed.Page.Floats.RemoveAll(x => ReferenceEquals(x.Item, placed.Item));
+                    placed.Page.Floats.Remove(placed.Item);
                     if (placed.Exclusion is { } old) placed.Page.Exclusions.Remove(old);
                 }
-                var item = FloatItem(f, page, page.Region.Section, page.Region.Columns[page.Column], anchorY);
-                page.Floats.Add((item, f.BehindText));
+                var (fx, fy) = FloatOrigin(f, page, page.Region.Section, page.Region.Columns[page.Column], anchorY);
+                var item = new PlacedFloat(f, fx, fy, f.BehindText);
+                page.Floats.Add(item);
                 Exclusion? exclusion = null;
                 if (f.Wrap != TextWrap.None)
                 {
                     var d = f.Distance;
-                    exclusion = new Exclusion(item.X - d.Left, item.Y - d.Top, item.Width + d.Left + d.Right, item.Height + d.Top + d.Bottom,
+                    exclusion = new Exclusion(item.X - d.Left, item.Y - d.Top, f.Width + d.Left + d.Right, f.Height + d.Top + d.Bottom,
                         FullWidth: f.Wrap == TextWrap.TopAndBottom);
                     page.Exclusions.Add(exclusion.Value);
                 }

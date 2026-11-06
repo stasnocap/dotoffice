@@ -4,7 +4,7 @@ namespace DotOffice.Layout;
 
 /// <summary>A laid-out line of cell content; <see cref="Y"/> is relative to the row's top.</summary>
 internal sealed record CellLine(double Y, double Height, IReadOnlyList<LayoutItem> Items, IReadOnlyList<Note> Footnotes,
-    IReadOnlyList<FloatingImage> Floats);
+    IReadOnlyList<FloatingObject> Floats);
 
 /// <summary>The part of a (possibly vertically merged) cell that falls into one row.</summary>
 internal sealed record CellPart(double X, double Width, Thickness Margins, Color? Shading, BorderSet Borders,

@@ -53,10 +53,9 @@ public enum TextWrap
     Square,
 }
 
-/// <summary>An image anchored to its paragraph and positioned independently of the text flow; size in points.</summary>
-public sealed class FloatingImage(ImageData image, double width, double height, RunProperties properties) : Inline(properties)
+/// <summary>An object anchored to its paragraph and positioned independently of the text flow; size in points.</summary>
+public abstract class FloatingObject(double width, double height, RunProperties properties) : Inline(properties)
 {
-    public ImageData Image { get; } = image;
     public double Width { get; } = width;
     public double Height { get; } = height;
     public FloatPosition Horizontal { get; init; } = new(FloatReference.Column, FloatAlignment.Offset, 0);
@@ -69,6 +68,34 @@ public sealed class FloatingImage(ImageData image, double width, double height, 
     /// <summary>Minimum distance between the image and wrapped text.</summary>
     public Thickness Distance { get; init; }
 }
+
+/// <summary>A picture anchored to its paragraph.</summary>
+public sealed class FloatingImage(ImageData image, double width, double height, RunProperties properties) : FloatingObject(width, height, properties)
+{
+    public ImageData Image { get; } = image;
+}
+
+public enum TextBoxAnchor { Top, Center, Bottom }
+
+/// <summary>
+/// A text box (a DrawingML <c>wps</c> shape with <c>w:txbxContent</c>): a rectangle with optional fill and outline around block content
+/// laid out in the box minus <see cref="Insets"/>. Content that does not fit is clipped, as in Word.
+/// </summary>
+public sealed class FloatingTextBox(double width, double height, RunProperties properties) : FloatingObject(width, height, properties)
+{
+    public List<Block> Blocks { get; } = [];
+    public Color? Fill { get; init; }
+    public Color? Outline { get; init; }
+    public double OutlineWidth { get; init; } = 0.75;
+    public LineStyleKind OutlineStyle { get; init; }
+    public Thickness Insets { get; init; } = new(3.6, 7.2, 3.6, 7.2);
+    public TextBoxAnchor VerticalAnchor { get; init; }
+
+    /// <summary>Clockwise rotation in degrees.</summary>
+    public double Rotation { get; init; }
+}
+
+public enum LineStyleKind { Solid, Dotted, Dashed }
 
 public enum BreakKind { Line, Page, Column }
 

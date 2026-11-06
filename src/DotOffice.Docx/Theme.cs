@@ -12,6 +12,9 @@ internal sealed class Theme
     public string? MajorComplexScript { get; private set; }
     public string? MinorComplexScript { get; private set; }
 
+    /// <summary>The color scheme by element name (dk1, lt1, dk2, lt2, accent1–6, hlink, folHlink).</summary>
+    public Dictionary<string, Core.Color> Colors { get; } = [];
+
     public static Theme Read(XmlReader r)
     {
         var theme = new Theme();
@@ -21,6 +24,20 @@ internal sealed class Theme
             if (r.NodeType == XmlNodeType.EndElement && r.IsA() && r.LocalName is "majorFont" or "minorFont")
                 major = null;
             if (r.NodeType != XmlNodeType.Element || !r.IsA()) continue;
+            if (r.LocalName is "dk1" or "lt1" or "dk2" or "lt2" or "accent1" or "accent2" or "accent3" or "accent4" or "accent5" or "accent6" or "hlink" or "folHlink")
+            {
+                string name = r.LocalName;
+                int d = r.Depth;
+                while (!r.IsEmptyElement && r.Read() && r.Depth > d)
+                {
+                    if (r.NodeType != XmlNodeType.Element) continue;
+                    var c = r.LocalName == "srgbClr" ? Core.Color.TryParseHex(r.GetAttribute("val"))
+                          : r.LocalName == "sysClr" ? Core.Color.TryParseHex(r.GetAttribute("lastClr")) ?? (r.GetAttribute("val") == "window" ? Core.Color.White : Core.Color.Black)
+                          : null;
+                    if (c is { } color) theme.Colors.TryAdd(name, color);
+                }
+                if (r.NodeType != XmlNodeType.Element && r.NodeType != XmlNodeType.EndElement) continue;
+            }
             switch (r.LocalName)
             {
                 case "majorFont": major = true; break;

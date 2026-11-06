@@ -42,8 +42,8 @@ internal class Slice
     /// </summary>
     public Func<double, double, Obstacles?, List<Slice>>? Reflow { get; set; }
 
-    /// <summary>Floating images anchored in this slice; positioned when the slice is placed.</summary>
-    public IReadOnlyList<FloatingImage> Floats { get; set; } = [];
+    /// <summary>Floating objects anchored in this slice; positioned when the slice is placed.</summary>
+    public IReadOnlyList<FloatingObject> Floats { get; set; } = [];
 
     /// <summary>Splits the slice so the first part fits in <paramref name="available"/>; null if it cannot be split.</summary>
     public virtual (Slice First, Slice Remainder)? Split(double available) => null;
@@ -261,7 +261,7 @@ internal static class ParagraphLayouter
                 KeepWithPrevious = (i > 0 || continued) && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
                                    || (props.WidowControl && (i == 1 || i == lines.Count - 1))),
                 Footnotes = line.Atoms.Where(a => a.Note is { Kind: NoteKind.Footnote }).Select(a => a.Note!).ToList(),
-                Floats = first ? p.Inlines.OfType<FloatingImage>().Where(f => !f.Properties.Hidden).ToList() : [],
+                Floats = first ? p.Inlines.OfType<FloatingObject>().Where(f => !f.Properties.Hidden).ToList() : [],
             };
             if (!first && consumed < atoms.Count)
             {
@@ -455,3 +455,5 @@ internal static class ParagraphLayouter
         Flush();
     }
 }
+/// <summary>A floating object placed on a page: the top-left corner of its box.</summary>
+internal sealed record PlacedFloat(FloatingObject Object, double X, double Y, bool Behind);
