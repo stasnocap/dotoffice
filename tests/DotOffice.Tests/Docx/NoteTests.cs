@@ -108,7 +108,7 @@ public class NoteTests
         var layout = Render(Doc(Page(20), Para("body"), WithNote("ref", Note(NoteKind.Footnote, "footnote"))));
         var page = Assert.Single(layout.Pages);
         var note = Texts(page).Single(t => t.Text == "footnote");
-        Assert.Equal(72 + 20 * LineHeight + 0.5, note.Baseline + 2.95, 2); // content bottom; 2.95 = descent in twips
+        Assert.Equal(72 + 20 * LineHeight + 0.5, note.Baseline + NotoDescent(), 2); // content bottom
         var separator = Assert.Single(page.Items.OfType<LineItem>());
         Assert.True(separator.Y1 < note.Baseline && separator.X2 - separator.X1 < 200);
     }

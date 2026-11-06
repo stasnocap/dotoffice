@@ -48,13 +48,17 @@ internal static class LayoutTestHelpers
 
     public static double Right(TextItem t) => t.X + t.Font.MeasureText(t.Text, t.FontSize) + t.CharacterSpacing * t.Text.Length;
 
-    /// <summary>Single line height of Noto Sans at <paramref name="size"/>: its typo metrics (USE_TYPO_METRICS), each rounded to twips as in LibreOffice.</summary>
+    /// <summary>Single line height of Noto Sans at <paramref name="size"/>: the OS/2 win metrics plus external leading as in Word (GDI), each rounded to twips.</summary>
     public static double NotoLineHeight(double size = 10)
     {
         static double Twips(double points) => Math.Round(points * 20, MidpointRounding.AwayFromZero) / 20;
         double scale = size / Noto.UnitsPerEm;
-        return Twips(Noto.TypoAscender * scale) + Twips(-Noto.TypoDescender * scale) + Twips(Noto.TypoLineGap * scale);
+        double leading = Math.Max(0, Noto.LineGap - (Noto.WinAscent + Noto.WinDescent - (Noto.Ascender - Noto.Descender)));
+        return Twips(Noto.WinAscent * scale) + Twips(Noto.WinDescent * scale) + Twips(leading * scale);
     }
+
+    /// <summary>The part of <see cref="NotoLineHeight"/> below the baseline: win descent plus external leading.</summary>
+    public static double NotoDescent(double size = 10) => NotoLineHeight(size) - Math.Round(Noto.WinAscent * size / Noto.UnitsPerEm * 20, MidpointRounding.AwayFromZero) / 20;
 
     public static string Words(int count, string prefix = "word") =>
         string.Join(' ', Enumerable.Range(1, count).Select(i => $"{prefix}{i}"));
