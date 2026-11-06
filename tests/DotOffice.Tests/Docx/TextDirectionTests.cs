@@ -80,6 +80,14 @@ public class TextDirectionTests
         Assert.Equal(150, turn.Clip!.Value.Height, 0.5);
     }
 
+    [Theory]
+    [InlineData("lrTbV")]
+    [InlineData("tbLrV")]
+    public void Left_to_right_vertical_variants_are_laid_out_as_horizontal_text(string direction)
+    {
+        Assert.DoesNotContain(Layout(direction).Items, i => i is PushItem { Rotation: not 0 });
+    }
+
     [Fact]
     public void Horizontal_cells_are_not_turned()
     {
