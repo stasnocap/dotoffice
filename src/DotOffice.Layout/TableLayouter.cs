@@ -283,7 +283,7 @@ internal static class TableLayouter
         var m = p.Cell.Margins;
         double length = rowHint is { } hint
             ? hint - m.Top - m.Bottom
-            : Math.Min(Intrinsic(p.Cell, ctx).Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom);
+            : Math.Min(HorizontalIntrinsic(p.Cell, ctx).Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom);
         length = Math.Max(1, length);
         double cx = x0 + inner / 2, cy = length / 2;
         var slices = BlockFlow.Build(p.Cell.Blocks, cx - length / 2, length, nested);
@@ -380,7 +380,22 @@ internal static class TableLayouter
         return result;
     }
 
+    /// <summary>
+    /// The widths a cell asks for. A cell whose text runs up or down is as wide as its stacked lines are high, whatever the
+    /// text length (the length is the unwrapped content, capped at the body height).
+    /// </summary>
     internal static (double Min, double Max) Intrinsic(TableCell cell, FlowContext ctx)
+    {
+        var horizontal = HorizontalIntrinsic(cell, ctx);
+        if (cell.TextDirection == CellTextDirection.LeftToRight) return horizontal;
+        var m = cell.Margins;
+        double length = Math.Max(1, Math.Min(horizontal.Max - m.Left - m.Right, ctx.MaxVerticalLength - m.Top - m.Bottom));
+        var slices = BlockFlow.Build(cell.Blocks, 0, length, ctx.Nested());
+        double across = BlockFlow.Stack(slices, []) + m.Left + m.Right;
+        return (across, across);
+    }
+
+    private static (double Min, double Max) HorizontalIntrinsic(TableCell cell, FlowContext ctx)
     {
         double min = 0, max = 0;
         foreach (var block in cell.Blocks)

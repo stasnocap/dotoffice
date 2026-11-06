@@ -70,4 +70,25 @@ public class TextDirectionTests
     {
         Assert.DoesNotContain(Layout("").Items, i => i is PushItem { Rotation: not 0 });
     }
+
+    private static List<double> AutoWidths(string direction, string text)
+    {
+        var vertical = $"<w:tc><w:tcPr><w:textDirection w:val=\"{direction}\"/></w:tcPr>{P(R(text, Font))}</w:tc>";
+        var plain = $"<w:tc><w:tcPr/>{P(R("abc", Font))}</w:tc>";
+        var body = $"<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr><w:tr>{vertical}{plain}</w:tr></w:tbl>{P("")}{Section()}";
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+        var turn = page.Items.OfType<PushItem>().SingleOrDefault(p => p.Rotation != 0);
+        // The first column is as wide as the turned frame's clip is across.
+        return [turn?.Clip?.Width ?? Texts(page).First().X];
+    }
+
+    [Fact]
+    public void Auto_column_of_a_vertical_cell_is_as_wide_as_its_lines_not_as_long_as_its_text()
+    {
+        double shortText = AutoWidths("btLr", "lorem")[0], longText = AutoWidths("btLr", "lorem ipsum dolor lorem ipsum dolor")[0];
+        // The clip is the cell's inner width: one 12 pt Noto Sans line, about 18 pt, far less than the text is long.
+        Assert.InRange(longText, 15, 22);
+        Assert.Equal(shortText, longText, 0.5);
+    }
 }
