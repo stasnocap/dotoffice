@@ -58,9 +58,10 @@ authorization of the copyright holder.
 
 ## HarfBuzz
 
-The text shaper in `src/DotOffice.Fonts/Shaping` (OpenType lookup matching, normalization, the Indic shaper and
-its syllable grammar) is ported from HarfBuzz (https://github.com/harfbuzz/harfbuzz), and
-`tools/generate-indic-data.py` follows HarfBuzz's `gen-indic-table.py`.
+The text shaper in `src/DotOffice.Fonts/Shaping` (OpenType lookup matching, normalization, the Indic and Universal
+Shaping Engine shapers and their syllable grammars) is ported from HarfBuzz (https://github.com/harfbuzz/harfbuzz),
+`tools/generate-indic-data.py` follows HarfBuzz's `gen-indic-table.py` and `tools/generate-use-data.py` follows its
+`gen-use-table.py` (with the `ms-use` property files of `src/ms-use`).
 
 ```
 HarfBuzz is licensed under the so-called "Old MIT" license.  Details follow.
@@ -141,6 +142,6 @@ this Software without prior written authorization of the copyright holder.
 ## Test assets
 
 The Noto fonts in `tests/DotOffice.Tests/Assets` (`NotoSans`, `NotoSansArabic`, `NotoSansHebrew`,
-`NotoNastaliqUrdu`, `NotoSansDevanagari`, `NotoSansBengali` and `NotoSansTamil`) are licensed under the SIL Open
+`NotoNastaliqUrdu`, `NotoSansDevanagari`, `NotoSansBengali`, `NotoSansTamil` and `NotoSansSinhala`) are licensed under the SIL Open
 Font License 1.1 (see the `-OFL.txt` file next to each). They are used by tests only and are not shipped in
 packages.

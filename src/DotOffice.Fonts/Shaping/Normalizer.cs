@@ -16,7 +16,7 @@ internal readonly record struct NormalizedChar(int CodePoint, int Cluster, strin
 internal static class Normalizer
 {
     /// <summary>The shaper whose normalization hooks apply (HarfBuzz's decompose, compose and reorder_marks).</summary>
-    public enum Shaper { Default, Arabic, Hebrew, Indic }
+    public enum Shaper { Default, Arabic, Hebrew, Indic, Use }
 
     private const int MaxCombiningMarks = 32;
 
@@ -48,7 +48,7 @@ internal static class Normalizer
     public static List<NormalizedChar> Normalize(TrueTypeFont font, IReadOnlyList<(int CodePoint, int Cluster)> text,
         Shaper shaper, bool hasGposMark = true)
     {
-        bool shortCircuit = shaper != Shaper.Indic;
+        bool shortCircuit = shaper is not (Shaper.Indic or Shaper.Use);
         var items = new List<Item>(text.Count);
 
         // First round: decompose.
@@ -222,6 +222,7 @@ internal static class Normalizer
     /// <summary>The primary composite of <paramref name="a"/> and <paramref name="b"/> under the shaper's rules, or 0.</summary>
     private static int Compose(int a, int b, Shaper shaper, bool hasGposMark)
     {
+        if (shaper == Shaper.Use && TextShaper.IsMark(a)) return 0; // USE: avoid recomposing split matras
         if (shaper == Shaper.Indic)
         {
             if (TextShaper.IsMark(a)) return 0; // do not recompose split matras

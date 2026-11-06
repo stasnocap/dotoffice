@@ -271,7 +271,7 @@ internal static class IndicShaper
     /// <summary>Numbers the syllables (Syllable = serial * 16 + type), as HarfBuzz's Ragel scanner does: longest match, first rule on ties.</summary>
     private static void FindSyllables(List<GlyphInfo> glyphs)
     {
-        var categories = glyphs.Select(g => (IndicCategory)g.ShaperCategory).ToArray();
+        var categories = glyphs.Select(g => g.ShaperCategory).ToArray();
         int serial = 1;
         for (int p = 0; p < categories.Length;)
         {
@@ -291,7 +291,7 @@ internal static class IndicShaper
 
     private static SyllableType TypeOf(GlyphInfo g) => (SyllableType)(g.Syllable & 0xF);
 
-    private static IEnumerable<(int Start, int End)> Syllables(List<GlyphInfo> glyphs)
+    internal static IEnumerable<(int Start, int End)> Syllables(List<GlyphInfo> glyphs)
     {
         for (int start = 0; start < glyphs.Count;)
         {
@@ -735,7 +735,7 @@ internal static class IndicShaper
     /// Reordering breaks the link between glyph order and text, so each syllable's text goes on its first glyph
     /// (HarfBuzz merges such clusters too); text extraction then gets the characters in logical order.
     /// </summary>
-    private static void AssignSyllableText(string text, List<GlyphInfo> glyphs)
+    internal static void AssignSyllableText(string text, List<GlyphInfo> glyphs)
     {
         foreach (var (start, end) in Syllables(glyphs).ToList())
         {

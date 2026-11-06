@@ -635,7 +635,7 @@ internal sealed class OpenTypeLayout
                 var added = count > 1 ? GlyphFlags.Multiplied : GlyphFlags.None;
                 Replace(glyphs, i, (ushort)U16(t, sequence + 2), added);
                 for (int k = 1; k < count; k++)
-                    glyphs.Insert(i + k, glyphs[i] with { Glyph = (ushort)U16(t, sequence + 2 + k * 2), Text = "" });
+                    glyphs.Insert(i + k, glyphs[i] with { Glyph = (ushort)U16(t, sequence + 2 + k * 2), Text = "", LigatureComponent = k });
                 return i + count;
             }
             case 3:
