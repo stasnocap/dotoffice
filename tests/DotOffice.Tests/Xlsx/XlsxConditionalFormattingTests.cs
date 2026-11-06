@@ -1058,6 +1058,11 @@ public class XlsxConditionalFormattingTests
     [InlineData("SUM(S:Q!A1)=8", "A1")] // 5 + 1 + 2 (the reference moves with the cell: A2 sums 7 + 10 + 3)
     [InlineData("MAX(P:Q!A1:A2)=10", "A1,A2")]
     [InlineData("COUNT(P:Q!A1:A2)=4", "A1")] // A2 counts A2:A3 on each sheet: two cells
+    [InlineData("MEDIAN(P:Q!A1:A2)=2.5", "A1")] // A1 reads 1, 10, 2, 3; A2 reads A2:A3: 10, 3
+    [InlineData("PRODUCT(P:Q!A1:A2)=60", "A1")]
+    [InlineData("LARGE(P:Q!A1:A2,2)=3", "A1,A2")]
+    [InlineData("SMALL(P:Q!A1:A2,2)=2", "A1")]
+    [InlineData("RANK(3,P:Q!A1:A2)=2", "A1,A2")] // the 10 is larger; RANK is #N/A for a value not in the range
     public void Three_dimensional_references_aggregate_over_the_sheets_in_between(string rule, string expected)
     {
         var builder = new XlsxBuilder { Styles = StylesWithDxfs([Dxf(Red), Dxf(Green)]) }
