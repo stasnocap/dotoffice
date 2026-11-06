@@ -413,6 +413,17 @@ internal sealed record ParaFormat
 
 internal static class Borders
 {
+    private static readonly HashSet<string> LineStyles = new(StringComparer.Ordinal)
+    {
+        "nil", "none", "single", "thick", "double", "dotted", "dashed", "dotDash", "dotDotDash", "triple",
+        "thinThickSmallGap", "thickThinSmallGap", "thinThickThinSmallGap", "thinThickMediumGap", "thickThinMediumGap",
+        "thinThickThinMediumGap", "thinThickLargeGap", "thickThinLargeGap", "thinThickThinLargeGap", "wave", "doubleWave",
+        "dashSmallGap", "dashDotStroked", "threeDEmboss", "threeDEngrave", "outset", "inset",
+    };
+
+    /// <summary>True when a w:val names a decorative art border rather than a line style.</summary>
+    public static bool IsArt(string? val) => val is not null && !LineStyles.Contains(val);
+
     /// <summary>Parses a border element (w:top, w:insideH…) at the reader's position without moving.</summary>
     public static Border Parse(XmlReader r)
     {

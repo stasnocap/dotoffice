@@ -709,6 +709,9 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     d.Header = r.TwipsAttr("header");
                     d.Footer = r.TwipsAttr("footer");
                     break;
+                case "pgBorders":
+                    d.PageBorders = ReadPageBorders(r);
+                    continue;
                 case "titlePg": d.TitlePage = r.OnOff(); break;
                 case "type":
                     d.Start = r.WAttr("val") switch
@@ -749,6 +752,42 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
             r.Skip();
         }
         return d;
+    }
+
+    /// <summary>Reads w:pgBorders; leaves the reader after the element. Art borders are drawn as single lines.</summary>
+    private PageBorders? ReadPageBorders(XmlReader r)
+    {
+        var result = new PageBorders
+        {
+            OffsetFromText = r.WAttr("offsetFrom") == "text",
+            Display = r.WAttr("display") switch
+            {
+                "firstPage" => PageBorderDisplay.FirstPage,
+                "notFirstPage" => PageBorderDisplay.NotFirstPage,
+                _ => PageBorderDisplay.AllPages,
+            },
+            InFront = r.WAttr("zOrder") != "back",
+        };
+        int depth = r.Depth;
+        if (!r.Enter()) return null;
+        while (r.NextChild(depth))
+        {
+            if (r.IsW() && r.LocalName is "top" or "left" or "bottom" or "right")
+            {
+                var border = Borders.Parse(r);
+                if (Borders.IsArt(r.WAttr("val")))
+                    context.Warn("docx.page-border-art", "A page border with a decorative art style was drawn as a single line.");
+                result = r.LocalName switch
+                {
+                    "top" => result with { Top = border },
+                    "left" => result with { Left = border },
+                    "bottom" => result with { Bottom = border },
+                    _ => result with { Right = border },
+                };
+            }
+            r.Skip();
+        }
+        return result.HasAny ? result : null;
     }
 
     /// <summary>The w:numRestart value inside a w:footnotePr/w:endnotePr; leaves the reader after the element.</summary>

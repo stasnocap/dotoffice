@@ -64,9 +64,29 @@ public sealed class Section
 
     public SectionColumns Columns { get; init; } = SectionColumns.Single;
 
+    /// <summary>Page borders (w:pgBorders), or null.</summary>
+    public PageBorders? PageBorders { get; init; }
+
     public List<Block> Blocks { get; } = [];
 
     public double ContentWidth => PageWidth - Margins.Left - Margins.Right;
+}
+
+public enum PageBorderDisplay { AllPages, FirstPage, NotFirstPage }
+
+/// <summary>Borders around the page (w:pgBorders). <see cref="Border.Space"/> is the distance from the page edge
+/// or, when <see cref="OffsetFromText"/>, from the text area to the line.</summary>
+public sealed record PageBorders
+{
+    public Border Top { get; init; } = Border.None;
+    public Border Bottom { get; init; } = Border.None;
+    public Border Left { get; init; } = Border.None;
+    public Border Right { get; init; } = Border.None;
+    public bool OffsetFromText { get; init; }
+    public PageBorderDisplay Display { get; init; }
+    public bool InFront { get; init; } = true;
+
+    public bool HasAny => Top.IsVisible || Bottom.IsVisible || Left.IsVisible || Right.IsVisible;
 }
 
 /// <summary>One text column of explicit width, followed by <see cref="SpaceAfter"/> before the next column.</summary>

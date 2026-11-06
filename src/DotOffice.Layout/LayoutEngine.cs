@@ -68,6 +68,7 @@ public sealed class LayoutEngine
         public required Section Section { get; init; }
         public double Width { get; init; }
         public double Height { get; init; }
+        public bool IsSectionStart { get; init; }
         public double ContentTop { get; set; }
         public double ContentBottom { get; set; }
         public HeaderFooter? Header { get; init; }
@@ -373,7 +374,7 @@ public sealed class LayoutEngine
         {
             Section = section, Width = section.PageWidth, Height = section.PageHeight,
             ContentTop = top, ContentBottom = bottom,
-            Header = header, Footer = footer, Number = number,
+            Header = header, Footer = footer, Number = number, IsSectionStart = sectionStart,
         };
         page.StartRegion(section, top);
         return page;
@@ -444,7 +445,40 @@ public sealed class LayoutEngine
             }
         }
         output.Items.AddRange(front);
+        if (section.PageBorders is { } pageBorders && ShowsPageBorders(pageBorders, page.IsSectionStart))
+        {
+            var items = new List<LayoutItem>();
+            AddPageBorders(items, pageBorders, section);
+            if (pageBorders.InFront) output.Items.AddRange(items); else output.Items.InsertRange(0, items);
+        }
         return output;
+    }
+
+    private static bool ShowsPageBorders(PageBorders borders, bool firstOfSection) => borders.Display switch
+    {
+        PageBorderDisplay.FirstPage => firstOfSection,
+        PageBorderDisplay.NotFirstPage => !firstOfSection,
+        _ => true,
+    };
+
+    /// <summary>
+    /// Draws w:pgBorders. The space is measured to the nearest edge of the line: from the page edge outward-in, or from the
+    /// text margin outward. Top and bottom lines run over the full outer width so the corners meet.
+    /// </summary>
+    internal static void AddPageBorders(List<LayoutItem> items, PageBorders b, Section section)
+    {
+        var m = section.Margins;
+        double W = section.PageWidth, H = section.PageHeight;
+        // Centre line of each edge.
+        double top = b.OffsetFromText ? m.Top - b.Top.Space - b.Top.Width / 2 : b.Top.Space + b.Top.Width / 2;
+        double bottom = b.OffsetFromText ? H - m.Bottom + b.Bottom.Space + b.Bottom.Width / 2 : H - b.Bottom.Space - b.Bottom.Width / 2;
+        double left = b.OffsetFromText ? m.Left - b.Left.Space - b.Left.Width / 2 : b.Left.Space + b.Left.Width / 2;
+        double right = b.OffsetFromText ? W - m.Right + b.Right.Space + b.Right.Width / 2 : W - b.Right.Space - b.Right.Width / 2;
+        double x1 = b.Left.IsVisible ? left - b.Left.Width / 2 : left, x2 = b.Right.IsVisible ? right + b.Right.Width / 2 : right;
+        if (b.Top.IsVisible) ParagraphLayouter.AddBorder(items, b.Top, x1, top, x2, top);
+        if (b.Bottom.IsVisible) ParagraphLayouter.AddBorder(items, b.Bottom, x1, bottom, x2, bottom);
+        if (b.Left.IsVisible) ParagraphLayouter.AddBorder(items, b.Left, left, top, left, bottom);
+        if (b.Right.IsVisible) ParagraphLayouter.AddBorder(items, b.Right, right, top, right, bottom);
     }
 
     /// <summary>Positions a floating image on <paramref name="page"/>; <paramref name="anchorY"/> is the top of its paragraph.</summary>

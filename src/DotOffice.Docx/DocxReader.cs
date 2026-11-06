@@ -106,6 +106,7 @@ internal sealed class SectionData
     public int? PageNumberStart;
     public PageNumberFormat PageNumberFormat;
     public SectionColumns Columns = SectionColumns.Single;
+    public PageBorders? PageBorders;
 
     /// <summary>w:numRestart of the section's w:footnotePr/w:endnotePr, overriding the document settings.</summary>
     public string? FootnoteRestart, EndnoteRestart;
@@ -354,6 +355,7 @@ internal sealed class DocxContext
             PageNumberStart = d.PageNumberStart,
             PageNumberFormat = d.PageNumberFormat,
             Columns = d.Columns,
+            PageBorders = d.PageBorders,
             DefaultHeader = HeaderFooterFor(d.Headers, "default") ?? previous?.DefaultHeader,
             FirstHeader = HeaderFooterFor(d.Headers, "first") ?? previous?.FirstHeader,
             EvenHeader = HeaderFooterFor(d.Headers, "even") ?? previous?.EvenHeader,
