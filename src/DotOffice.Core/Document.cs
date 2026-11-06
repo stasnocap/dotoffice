@@ -21,6 +21,9 @@ public sealed class DocumentSettings
     /// <summary>Use the even header/footer on even-numbered pages.</summary>
     public bool EvenAndOddHeaders { get; init; }
 
+    /// <summary>Mirror margins (w:mirrorMargins): <see cref="Section.Margins"/> are inside/outside, swapped on even pages.</summary>
+    public bool MirrorMargins { get; init; }
+
     /// <summary>
     /// When true, a table's left edge is placed at its indent; when false (legacy Word behavior) the table
     /// is shifted left by its first cell's left margin so cell text lines up with surrounding paragraphs.

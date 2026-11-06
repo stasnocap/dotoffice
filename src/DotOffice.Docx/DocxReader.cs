@@ -56,6 +56,8 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
 {
     public static DocxSettings Default { get; } = new(36, false, 15, false);
 
+    public bool MirrorMargins { get; init; }
+
     public NoteNumbering Footnotes { get; init; } = new("decimal", 1);
     public NoteNumbering Endnotes { get; init; } = new("lowerRoman", 1);
 
@@ -74,6 +76,7 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                     if (r.TwipsAttr("val") is { } tab && tab > 1) s = s with { DefaultTabStop = Math.Min(tab, 720) };
                     break;
                 case "evenAndOddHeaders": s = s with { EvenAndOddHeaders = r.OnOff() }; break;
+                case "mirrorMargins": s = s with { MirrorMargins = r.OnOff() }; break;
                 case "doNotExpandShiftReturn": s = s with { DoNotExpandShiftReturn = r.OnOff() }; break;
                 case "compatSetting" when r.WAttr("name") == "compatibilityMode":
                     if (int.TryParse(r.WAttr("val"), out var mode)) s = s with { CompatibilityMode = mode };
@@ -100,7 +103,7 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
 /// <summary>Raw w:sectPr values before inheritance and defaults are applied.</summary>
 internal sealed class SectionData
 {
-    public double? Width, Height, Top, Right, Bottom, Left, Header, Footer;
+    public double? Width, Height, Top, Right, Bottom, Left, Header, Footer, Gutter;
     public bool Landscape, TitlePage;
     public SectionStart Start;
     public int? PageNumberStart;
@@ -240,6 +243,7 @@ internal sealed class DocxContext
             {
                 DefaultTabStop = Settings.DefaultTabStop,
                 EvenAndOddHeaders = Settings.EvenAndOddHeaders,
+                MirrorMargins = Settings.MirrorMargins,
                 TableEdgeAtIndent = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
             },
@@ -348,7 +352,7 @@ internal sealed class DocxContext
             PageWidth = width,
             PageHeight = height,
             Orientation = d.Landscape || width > height ? Orientation.Landscape : Orientation.Portrait,
-            Margins = new Thickness(Clamp(d.Top, 72, height), Clamp(d.Right, 72, width), Clamp(d.Bottom, 72, height), Clamp(d.Left, 72, width)),
+            Margins = new Thickness(Clamp(d.Top, 72, height), Clamp(d.Right, 72, width), Clamp(d.Bottom, 72, height), Clamp(d.Left, 72, width) + Math.Max(0, d.Gutter ?? 0)),
             HeaderDistance = Clamp(d.Header, 36, height),
             FooterDistance = Clamp(d.Footer, 36, height),
             Start = d.Start,

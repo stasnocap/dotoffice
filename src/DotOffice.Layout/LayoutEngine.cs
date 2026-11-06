@@ -66,6 +66,14 @@ public sealed class LayoutEngine
     private sealed class Page
     {
         public required Section Section { get; init; }
+
+        /// <summary>The section's margins, left and right swapped on even pages with mirrored margins.</summary>
+        public required Thickness Margins { get; init; }
+        public bool Mirrored { get; init; }
+
+        /// <summary>Margins of <paramref name="section"/> as they apply on this page.</summary>
+        public Thickness MarginsOf(Section section) =>
+            Mirrored ? new Thickness(section.Margins.Top, section.Margins.Left, section.Margins.Bottom, section.Margins.Right) : section.Margins;
         public double Width { get; init; }
         public double Height { get; init; }
         public bool IsSectionStart { get; init; }
@@ -124,7 +132,7 @@ public sealed class LayoutEngine
 
         public void StartRegion(Section section, double top)
         {
-            var columns = section.Columns.Resolve(section.ContentWidth).Select(c => (section.Margins.Left + c.X, c.Width)).ToList();
+            var columns = section.Columns.Resolve(section.ContentWidth).Select(c => (MarginsOf(section).Left + c.X, c.Width)).ToList();
             Regions.Add(new Region(section, top, columns));
             Column = 0;
             ColumnStart = Placed.Count;
@@ -366,25 +374,29 @@ public sealed class LayoutEngine
         var header = first ? section.FirstHeader : even ? section.EvenHeader : section.DefaultHeader;
         var footer = first ? section.FirstFooter : even ? section.EvenFooter : section.DefaultFooter;
 
+        bool mirrored = settings.MirrorMargins && number % 2 == 0;
+        var margins = mirrored
+            ? new Thickness(section.Margins.Top, section.Margins.Left, section.Margins.Bottom, section.Margins.Right)
+            : section.Margins;
         double top = section.Margins.Top, bottom = section.PageHeight - section.Margins.Bottom;
         var placeholder = Context(settings, field => field.Kind == FieldKind.Page
             ? Format(number, field.NumberFormat ?? section.PageNumberFormat)
             : field.Kind == FieldKind.PageRef ? field.CachedResult ?? "99" : "99");
         if (header is not null)
         {
-            double h = BlockFlow.Stack(BlockFlow.Build(header.Blocks, section.Margins.Left, section.ContentWidth, placeholder), []);
+            double h = BlockFlow.Stack(BlockFlow.Build(header.Blocks, margins.Left, section.ContentWidth, placeholder), []);
             top = Math.Max(top, section.HeaderDistance + h);
         }
         if (footer is not null)
         {
-            double h = BlockFlow.Stack(BlockFlow.Build(footer.Blocks, section.Margins.Left, section.ContentWidth, placeholder), []);
+            double h = BlockFlow.Stack(BlockFlow.Build(footer.Blocks, margins.Left, section.ContentWidth, placeholder), []);
             bottom = Math.Min(bottom, section.PageHeight - section.FooterDistance - h);
         }
         if (bottom - top < 36) bottom = top + 36; // absurd margins: keep a usable body area
 
         var page = new Page
         {
-            Section = section, Width = section.PageWidth, Height = section.PageHeight,
+            Section = section, Margins = margins, Mirrored = mirrored, Width = section.PageWidth, Height = section.PageHeight,
             ContentTop = top, ContentBottom = bottom,
             Header = header, Footer = footer, Number = number, IsSectionStart = sectionStart,
         };
@@ -438,7 +450,7 @@ public sealed class LayoutEngine
                 // Floats in headers and footers are drawn but do not push text aside.
                 foreach (var f in slice.Floats)
                 {
-                    var (fx, fy) = FloatOrigin(f, page, section, (section.Margins.Left, section.ContentWidth), top + y);
+                    var (fx, fy) = FloatOrigin(f, page, section, (page.Margins.Left, section.ContentWidth), top + y);
                     var items = Realize(f, fx, fy, context);
                     if (f.BehindText) output.Items.InsertRange(0, items); else front.AddRange(items);
                 }
@@ -448,13 +460,13 @@ public sealed class LayoutEngine
         if (page.Header is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
-            BlockFlow.Stack(BlockFlow.Build(page.Header.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
+            BlockFlow.Stack(BlockFlow.Build(page.Header.Blocks, page.Margins.Left, section.ContentWidth, context), stacked);
             Story(stacked, section.HeaderDistance);
         }
         if (page.Footer is not null)
         {
             var stacked = new List<(double Y, Slice Slice)>();
-            double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
+            double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, page.Margins.Left, section.ContentWidth, context), stacked);
             Story(stacked, page.Height - section.FooterDistance - h);
         }
         foreach (var placement in page.Placed)
@@ -495,7 +507,7 @@ public sealed class LayoutEngine
         if (section.PageBorders is { } pageBorders && ShowsPageBorders(pageBorders, page.IsSectionStart))
         {
             var items = new List<LayoutItem>();
-            AddPageBorders(items, pageBorders, section);
+            AddPageBorders(items, pageBorders, section, page.Margins);
             if (pageBorders.InFront) output.Items.AddRange(items); else output.Items.InsertRange(0, items);
         }
         return output;
@@ -512,9 +524,8 @@ public sealed class LayoutEngine
     /// Draws w:pgBorders. The space is measured to the nearest edge of the line: from the page edge outward-in, or from the
     /// text margin outward. Top and bottom lines run over the full outer width so the corners meet.
     /// </summary>
-    internal static void AddPageBorders(List<LayoutItem> items, PageBorders b, Section section)
+    internal static void AddPageBorders(List<LayoutItem> items, PageBorders b, Section section, Thickness m)
     {
-        var m = section.Margins;
         double W = section.PageWidth, H = section.PageHeight;
         // Centre line of each edge.
         double top = b.OffsetFromText ? m.Top - b.Top.Space - b.Top.Width / 2 : b.Top.Space + b.Top.Width / 2;
@@ -531,7 +542,7 @@ public sealed class LayoutEngine
     /// <summary>Positions a floating image on <paramref name="page"/>; <paramref name="anchorY"/> is the top of its paragraph.</summary>
     private static (double X, double Y) FloatOrigin(FloatingObject f, Page page, Section section, (double X, double Width) column, double anchorY)
     {
-        var m = section.Margins;
+        var m = page.Margins;
         var (hx, hw) = f.Horizontal.RelativeTo switch
         {
             FloatReference.Page => (0, page.Width),

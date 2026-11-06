@@ -720,6 +720,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     d.Left = r.TwipsAttr("left");
                     d.Header = r.TwipsAttr("header");
                     d.Footer = r.TwipsAttr("footer");
+                    d.Gutter = r.TwipsAttr("gutter");
                     break;
                 case "lnNumType":
                     d.LineNumbering = new LineNumbering
