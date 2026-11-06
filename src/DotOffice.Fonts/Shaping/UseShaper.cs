@@ -344,31 +344,10 @@ internal static class UseShaper
 
     private static void Reorder(TrueTypeFont font, List<GlyphInfo> glyphs)
     {
-        InsertDottedCircles(font, glyphs);
+        DottedCircles.Insert(font, glyphs, (int)SyllableType.Broken, (byte)B, (byte)R);
         var g = CollectionsMarshal.AsSpan(glyphs);
         foreach (var (start, end) in IndicShaper.Syllables(glyphs).ToList())
             ReorderSyllable(g, start, end);
-    }
-
-    /// <summary>A broken cluster gets a dotted circle (after a leading repha) for its marks to sit on (hb_syllabic_insert_dotted_circles).</summary>
-    private static void InsertDottedCircles(TrueTypeFont font, List<GlyphInfo> glyphs)
-    {
-        int circle = font.GetGlyphId(0x25CC);
-        if (circle == 0 || !glyphs.Exists(g => TypeOf(g) == SyllableType.Broken)) return;
-        int last = 0;
-        for (int i = 0; i < glyphs.Count; i++)
-        {
-            var g = glyphs[i];
-            if (g.Syllable == last || TypeOf(g) != SyllableType.Broken) continue;
-            last = g.Syllable;
-            int at = i;
-            while (at < glyphs.Count && glyphs[at].Syllable == last && Cat(glyphs[at]) == R) at++;
-            glyphs.Insert(at, g with
-            {
-                Glyph = (ushort)circle, Text = "", CodePoint = 0x25CC, ShaperCategory = (byte)B, Flags = GlyphFlags.None,
-                Ignorable = false, Guess = 1, LigatureId = 0, LigatureComponent = 0,
-            });
-        }
     }
 
     /// <summary>hb-ot-shaper-use.cc reorder_syllable_use: the repha goes after the base, pre-base vowels before it.</summary>

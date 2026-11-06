@@ -47,7 +47,7 @@ internal static class IndicData
         0x1133D,
     };
 
-    /// <summary>Per range: <see cref="IndicCategory"/> in the low byte, <see cref="IndicPosition"/> in the next.</summary>
+    /// <summary>Per range: the category (<see cref="IndicCategory"/> in the low byte, <see cref="IndicPosition"/> in the next).</summary>
     public static ReadOnlySpan<ushort> RangeValues => new ushort[]
     {
         0xE00, 0x40A, 0xE00, 0x40A, 0xE00, 0x40A, 0xE00, 0xD13, 0xE00, 0x40A, 0xE00, 0xD08,

@@ -16,7 +16,7 @@ internal readonly record struct NormalizedChar(int CodePoint, int Cluster, strin
 internal static class Normalizer
 {
     /// <summary>The shaper whose normalization hooks apply (HarfBuzz's decompose, compose and reorder_marks).</summary>
-    public enum Shaper { Default, Arabic, Hebrew, Indic, Use }
+    public enum Shaper { Default, Arabic, Hebrew, Indic, Use, Khmer }
 
     private const int MaxCombiningMarks = 32;
 
@@ -48,7 +48,7 @@ internal static class Normalizer
     public static List<NormalizedChar> Normalize(TrueTypeFont font, IReadOnlyList<(int CodePoint, int Cluster)> text,
         Shaper shaper, bool hasGposMark = true)
     {
-        bool shortCircuit = shaper is not (Shaper.Indic or Shaper.Use);
+        bool shortCircuit = shaper is not (Shaper.Indic or Shaper.Use or Shaper.Khmer);
         var items = new List<Item>(text.Count);
 
         // First round: decompose.
@@ -207,6 +207,13 @@ internal static class Normalizer
         a = b = 0;
         // Indic: RRA, Bengali RRA/RHA and Tamil AU are kept whole.
         if (shaper == Shaper.Indic && ab is 0x0931 or 0x09DC or 0x09DD or 0x0B94) return false;
+        // Khmer: split matras without a Unicode decomposition (hb-ot-shaper-khmer.cc decompose_khmer): the vowel
+        // sign E first, then the sign itself (which the font's GSUB turns into the right-hand part).
+        if (shaper == Shaper.Khmer && ab is 0x17BE or 0x17BF or 0x17C0 or 0x17C4 or 0x17C5)
+        {
+            (a, b) = (0x17C1, ab);
+            return true;
+        }
         int si = ab - SBase;
         if (si is >= 0 and < SCount)
         {
@@ -222,7 +229,7 @@ internal static class Normalizer
     /// <summary>The primary composite of <paramref name="a"/> and <paramref name="b"/> under the shaper's rules, or 0.</summary>
     private static int Compose(int a, int b, Shaper shaper, bool hasGposMark)
     {
-        if (shaper == Shaper.Use && TextShaper.IsMark(a)) return 0; // USE: avoid recomposing split matras
+        if (shaper is Shaper.Use or Shaper.Khmer && TextShaper.IsMark(a)) return 0; // avoid recomposing split matras
         if (shaper == Shaper.Indic)
         {
             if (TextShaper.IsMark(a)) return 0; // do not recompose split matras

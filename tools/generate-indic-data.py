@@ -3,6 +3,8 @@
 
   src/DotOffice.Fonts/Shaping/IndicData.g.cs  shaping category and position of each character (as in
                                               HarfBuzz's gen-indic-table.py)
+  src/DotOffice.Fonts/Shaping/KhmerData.g.cs  the Khmer shaper's categories of the Khmer block and the shared
+                                              characters (the same script, with the Khmer-only categories)
 
 Usage: python3 tools/generate-indic-data.py [directory containing the UCD files]
 Without an argument the files are downloaded from unicode.org (version below).
@@ -19,6 +21,15 @@ FILES = {
 
 # Must match the IndicCategory enum order (HarfBuzz's indic_syllable_machine categories; VD is the same as A).
 CATEGORIES = "X C V N H ZWNJ ZWJ M SM A PLACEHOLDER DOTTEDCIRCLE RS MPst Repha Ra CM Symbol CS SMPst".split()
+# The Khmer shaper's own categories: the numbers of the "export" lines of hb-ot-shaper-khmer-machine.rl.
+KHMER_NUMBERS = {"VAbv": 20, "VBlw": 21, "VPre": 22, "VPst": 23, "Robatic": 25, "Xgroup": 26, "Ygroup": 27}
+KHMER_OVERRIDES = {
+    0x179A: "Ra", 0x17CC: "Robatic", 0x17C9: "Robatic", 0x17CA: "Robatic",
+    **{u: "Xgroup" for u in (0x17C6, 0x17CB, 0x17CD, 0x17CE, 0x17CF, 0x17D0, 0x17D1)},
+    **{u: "Ygroup" for u in (0x17C7, 0x17C8, 0x17DD, 0x17D3)},
+    0x17D9: "PLACEHOLDER",
+}
+KHMER_BLOCKS = ["Basic Latin", "Latin-1 Supplement", "Khmer", "General Punctuation", "Superscripts and Subscripts"]
 # Must match the IndicPosition enum order (HarfBuzz's ot_position_t).
 POSITIONS = ("START RA_TO_BECOME_REPH PRE_M PRE_C BASE_C AFTER_MAIN ABOVE_C BEFORE_SUB BELOW_C AFTER_SUB "
              "BEFORE_POST POST_C AFTER_POST SMVD END").split()
@@ -109,18 +120,24 @@ def main():
     syllabic = dict(ranges(load("IndicSyllabicCategory.txt")))
     positional = dict(ranges(load("IndicPositionalCategory.txt")))
     blocks = dict(ranges(load("Blocks.txt")))
+    write("IndicData", build(syllabic, positional, blocks, ALLOWED_BLOCKS, False), False)
+    write("KhmerData", build(syllabic, positional, blocks, KHMER_BLOCKS, True), True)
 
+
+def build(syllabic, positional, blocks, allowed_blocks, khmer):
     data = {}
     for u in set(syllabic) | set(positional):
         block = blocks.get(u, "No_Block")
-        if u not in ALLOWED_SINGLES and block not in ALLOWED_BLOCKS:
+        if u not in ALLOWED_SINGLES and block not in allowed_blocks:
             continue
         cat = CATEGORY_MAP[syllabic.get(u, "Other")]
         pos = positional.get(u, "Not_Applicable")
         if cat == "SM" and pos == "Not_Applicable":
             cat = "SMPst"
         data[u] = [cat, POSITION_MAP[pos], block]
-    for u, cat in CATEGORY_OVERRIDES.items():
+    for u, cat in {**CATEGORY_OVERRIDES, **(KHMER_OVERRIDES if khmer else {})}.items():
+        if khmer and u in CATEGORY_OVERRIDES and cat not in ("PLACEHOLDER", "DOTTEDCIRCLE"):
+            continue # the overrides of the Indic scripts do not concern Khmer
         entry = data.get(u, ["X", "END", blocks.get(u, "No_Block")])
         data[u] = [cat, entry[1], blocks.get(u, "No_Block")]
     for u, (cat, pos, block) in data.items():
@@ -129,34 +146,43 @@ def main():
         if cat in ("C", "CS", "Ra", "CM", "V", "PLACEHOLDER", "DOTTEDCIRCLE"):
             pos = "BASE_C"
         elif cat in ("M", "MPst"):
-            pos = matra_position(u, pos, block)
+            if khmer and block == "Khmer":
+                cat = {"PRE_C": "VPre", "ABOVE_C": "VAbv", "BELOW_C": "VBlw", "POST_C": "VPst"}[pos]
+            else:
+                pos = matra_position(u, pos, block)
         elif cat in ("SM", "SMPst", "VD", "A", "Symbol"):
             pos = "SMVD"
         data[u] = [cat, pos, block]
     for u, pos in POSITION_OVERRIDES.items():
-        data[u][1] = pos
+        if u in data:
+            data[u][1] = pos
+    return data
+
+
+def write(name, data, khmer):
 
     # Ranges of equal (category, position); code points not listed are X/END.
     starts, values, previous = [], [], None
     for u in range(0, max(data) + 2):
         cat, pos, _ = data.get(u, ["X", "END", ""])
-        value = CATEGORIES.index(cat) | POSITIONS.index(pos) << 8
+        value = (KHMER_NUMBERS[cat] if cat in KHMER_NUMBERS else CATEGORIES.index(cat)) if khmer \
+            else CATEGORIES.index(cat) | POSITIONS.index(pos) << 8
         if value != previous:
             starts.append(u)
             values.append(value)
             previous = value
 
     out = [HEADER.format(version=VERSION), "namespace DotOffice.Fonts.Shaping;\n\n",
-           "internal static class IndicData\n{\n",
+           f"internal static class {name}\n{{\n",
            "    /// <summary>First code point of each range; a range extends to the next start.</summary>\n",
            "    public static ReadOnlySpan<int> RangeStarts => new int[]\n    {\n"]
     out += wrap([f"0x{u:X}" for u in starts])
     out += ["    };\n\n",
-            "    /// <summary>Per range: <see cref=\"IndicCategory\"/> in the low byte, <see cref=\"IndicPosition\"/> in the next.</summary>\n",
+            "    /// <summary>Per range: the category (" + ("the Khmer shaper's" if khmer else "<see cref=\"IndicCategory\"/> in the low byte, <see cref=\"IndicPosition\"/> in the next") + ").</summary>\n",
             "    public static ReadOnlySpan<ushort> RangeValues => new ushort[]\n    {\n"]
     out += wrap([f"0x{v:X}" for v in values])
     out += ["    };\n}\n"]
-    path = os.path.join(ROOT, "src/DotOffice.Fonts/Shaping/IndicData.g.cs")
+    path = os.path.join(ROOT, f"src/DotOffice.Fonts/Shaping/{name}.g.cs")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("".join(out))
     print(f"wrote {path}: {len(starts)} ranges")
