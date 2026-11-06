@@ -443,8 +443,8 @@ public sealed class LayoutEngine
         return numbers;
     }
 
-    /// <summary>Word's automatic distance between line numbers and text (a guess: 0.25 inch).</summary>
-    private const double AutoLineNumberDistance = 18;
+    /// <summary>Word's automatic distance between line numbers and text (a guess: 14.5 pt, as LibreOffice).</summary>
+    private const double AutoLineNumberDistance = 14.5;
 
     private LayoutPage Render(Page page, FieldValues fields, DocumentSettings settings, Dictionary<Slice, int> lineNumbers)
     {

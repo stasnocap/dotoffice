@@ -23,6 +23,13 @@ public class LineNumberTests
         Texts(page).Where(t => t.Text.All(char.IsDigit) && t.X < 72).OrderBy(t => t.Baseline).Select(t => t.Text).ToList();
 
     [Fact]
+    public void Automatic_distance_is_14_5_points()
+    {
+        var page = Layout(Para("one"), "<w:lnNumType w:countBy=\"1\"/>").Pages[0];
+        Assert.Equal(72 - 14.5, Right(Texts(page).First(t => t.Text == "1")), 0.01);
+    }
+
+    [Fact]
     public void Every_line_is_numbered_left_of_the_text_with_the_distance_between()
     {
         var page = Layout(Para("one") + Para("two") + Para("three"), "<w:lnNumType w:countBy=\"1\" w:distance=\"360\"/>").Pages[0];
