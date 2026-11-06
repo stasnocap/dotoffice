@@ -53,6 +53,15 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
         }
 
         var rels = Package.GetRelationships(WorkbookPart);
+        var tables = ReadTables(sheets, rels);
+        var sheetNames = sheets.Where(e => e.RelationshipId is not null && rels.TryGetValue(e.RelationshipId, out var tr) && tr.Kind == "worksheet").Select(e => e.Name).ToList();
+        CfParser.SheetSpan = (first, last) =>
+        {
+            int a = sheetNames.FindIndex(n => string.Equals(n, first, StringComparison.OrdinalIgnoreCase)), b = sheetNames.FindIndex(n => string.Equals(n, last, StringComparison.OrdinalIgnoreCase));
+            return a < 0 || b < 0 ? null : sheetNames.Skip(Math.Min(a, b)).Take(Math.Abs(a - b) + 1).ToList();
+        };
+        CfParser.TableResolver = name => tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+        try {
         for (int index = 0; index < sheets.Count; index++)
         {
             var entry = sheets[index];
@@ -93,6 +102,7 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             _conditionalJobs.Add((sheet, _conditional));
             workbook.Sheets.Add(sheet);
         }
+        } finally { CfParser.SheetSpan = null; CfParser.TableResolver = null; }
         // Conditional-formatting formulas may read other sheets, so the rules are applied once every sheet has been read.
         foreach (var (sheet, rules) in _conditionalJobs)
         {
@@ -112,6 +122,35 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             }
         }
         return workbook;
+    }
+
+    /// <summary>The tables of every worksheet (xl/tables/*.xml): name, area, header and totals rows, column names. Unreadable tables are skipped.</summary>
+    private List<CfTable> ReadTables(List<SheetEntry> sheets, IReadOnlyDictionary<string, Relationship> workbookRels)
+    {
+        var found = new List<CfTable>();
+        foreach (var entry in sheets)
+        {
+            if (entry.RelationshipId is null || !workbookRels.TryGetValue(entry.RelationshipId, out var sheetRel) || sheetRel.IsExternal || sheetRel.Kind != "worksheet" || !Package.Exists(sheetRel.Target)) continue;
+            foreach (var rel in Package.GetRelationships(sheetRel.Target).Values)
+            {
+                if (rel.IsExternal || rel.Kind != "table" || !Package.Exists(rel.Target)) continue;
+                try
+                {
+                    System.Xml.Linq.XDocument doc;
+                    using (var reader = Package.OpenXml(rel.Target)) doc = System.Xml.Linq.XDocument.Load(reader);
+                    var root = doc.Root;
+                    if (root is null || !CellReference.TryParseRange((string?)root.Attribute("ref") ?? "", out var area)) continue;
+                    var name = (string?)root.Attribute("displayName") ?? (string?)root.Attribute("name");
+                    if (string.IsNullOrEmpty(name)) continue;
+                    int header = int.TryParse((string?)root.Attribute("headerRowCount"), out var h) ? h : 1;
+                    int totals = int.TryParse((string?)root.Attribute("totalsRowCount"), out var t) ? t : 0;
+                    var columns = root.Elements().FirstOrDefault(e => e.Name.LocalName == "tableColumns")?.Elements().Where(e => e.Name.LocalName == "tableColumn").Select(e => (string?)e.Attribute("name") ?? "").ToList() ?? [];
+                    found.Add(new CfTable(name, entry.Name, area.FirstRow, area.FirstColumn, area.LastRow, area.LastColumn, Math.Clamp(header, 0, 1), Math.Max(0, totals), columns));
+                }
+                catch (Exception e) when (e is XmlException or FormatException or InvalidOperationException) { }
+            }
+        }
+        return found;
     }
 
     private readonly List<(Worksheet Sheet, Func<IReadOnlyList<Worksheet>, SheetChart> Build)> _chartJobs = [];

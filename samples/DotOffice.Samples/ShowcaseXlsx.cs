@@ -53,6 +53,9 @@ internal static class ShowcaseXlsx
             ("Pivot banded", PivotSheet("Pivot table with a banded Medium style and formats on the East data (pink) and the North label (green) (approximated, reported)"), "visible"),
             ("Pivot dark", PivotSheet("Pivot table with a banded Dark style (approximated, reported)"), "visible"),
             ("Pivot custom", PivotSheet("Pivot table with the workbook's own table style from styles.xml (header, two stripes, total row; reported)"), "visible"),
+            ("Conditional tables", ConditionalTablesSheet(), "visible"),
+            ("Span A", Sheet("", Row(1, Num("H1", 10))), "hidden"),
+            ("Span B", Sheet("", Row(1, Num("H1", 25))), "hidden"),
             ("Pivot fields", PivotFieldsSheet(), "visible"),
             ("Paper", PaperSheet(), "visible"),
             ("Areas", AreasSheet(), "visible"),
@@ -102,6 +105,7 @@ internal static class ShowcaseXlsx
         WriteChartExtras(zip, sheets.FindIndex(x => x.Name == "Chart extras") + 1);
         WriteChartText(zip, sheets.FindIndex(x => x.Name == "Chart text") + 1);
         WriteComments(zip, sheets.FindIndex(x => x.Name == "Comments") + 1, content);
+        WriteConditionalTables(zip, sheets.FindIndex(x => x.Name == "Conditional tables") + 1);
         content.Append("</Types>");
 
         Entry(zip, "[Content_Types].xml", content.ToString());
@@ -176,7 +180,7 @@ internal static class ShowcaseXlsx
         "<xf numFmtId=\"171\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>" +                                                                                      // 30 [Color3]0.0
         "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"2\"><alignment horizontal=\"fill\"/></xf>" +                                                  // 31 fill alignment
         "</cellXfs>" +
-        "<dxfs count=\"7\">" +
+        "<dxfs count=\"8\">" +
         "<dxf><font><color rgb=\"FF9C0006\"/></font><fill><patternFill><bgColor rgb=\"FFFFC7CE\"/></patternFill></fill></dxf>" +                       // 0 bad
         "<dxf><font><color rgb=\"FF006100\"/></font><fill><patternFill><bgColor rgb=\"FFC6EFCE\"/></patternFill></fill></dxf>" +                       // 1 good
         "<dxf><fill><patternFill><bgColor rgb=\"FFDDEBF7\"/></patternFill></fill></dxf>" +                                                              // 2 zebra
@@ -185,6 +189,7 @@ internal static class ShowcaseXlsx
         "<dxf><font><b/><i/><u/><color rgb=\"FFC00000\"/></font><numFmt numFmtId=\"167\" formatCode=\"0.0&quot; (!)&quot;\"/></dxf>" +                  // 4 duplicate
         "<dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFFD966\"/></patternFill></fill></dxf>" +                                                  // 5 time period
         "<dxf><font><color rgb=\"FF403151\"/></font><fill><patternFill><bgColor rgb=\"FFE4DFEC\"/></patternFill></fill></dxf>" +                      // 6 lavender: the function showcase
+        "<dxf><fill><patternFill><bgColor rgb=\"FFF8CBAD\"/></patternFill></fill></dxf>" +                                                              // 7 peach: tables and 3-D references
         "</dxfs>" +
         // A table style of the workbook's own for the "Pivot custom" sheet: a yellow header, blue and lavender stripes, a gold total row.
         "<tableStyles count=\"1\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"><tableStyle name=\"Showcase pivot\" table=\"0\" count=\"4\">" +
@@ -1342,6 +1347,38 @@ internal static class ShowcaseXlsx
     }
 
     /// <summary>Rules that use lookup and reference functions, whole-column references and a data bar that exists only as an Excel 2010 extension.</summary>
+    private static string ConditionalTablesSheet()
+    {
+        var rows = new StringBuilder();
+        rows.Append(Row(1, Str("A1", "Conditional formatting with structured table references and a 3-D reference", Bold) + Num("H1", 10)));
+        rows.Append(Row(3, Str("A3", "Item", Header) + Str("B3", "Qty", Header) + Str("C3", "Limit", Header) + Str("D3", "Stock", Header)));
+        string[] items = ["Bolts", "Nuts", "Screws", "Washers"];
+        double[] qty = [12, 3, 9, 20], limit = [10, 5, 9, 15], stock = [4, 8, 40, 60];
+        for (int i = 0; i < items.Length; i++)
+        {
+            int r = 4 + i;
+            rows.Append(Row(r, Str($"A{r}", items[i]) + Num($"B{r}", qty[i]) + Num($"C{r}", limit[i]) + Num($"D{r}", stock[i])));
+        }
+        rows.Append(Row(8, Str("A8", "Total") + Num("B8", 44) + Num("C8", 39) + Num("D8", 112)));
+        rows.Append(Row(10, Str("A10", "Qty above the Limit of its row: Stock[@Limit]")));
+        rows.Append(Row(11, Str("A11", "Limit above the table's average: AVERAGE(Stock[Limit])")));
+        rows.Append(Row(12, Str("A12", "Stock below the three H1 cells: SUM('Conditional tables:Span B'!$H$1)")));
+        string Rule(string sqref, int priority, string formula) =>
+            $"<conditionalFormatting sqref=\"{sqref}\"><cfRule type=\"expression\" dxfId=\"7\" priority=\"{priority}\"><formula>{SecurityElement.Escape(formula)}</formula></cfRule></conditionalFormatting>";
+        var tail = Rule("B4:B7", 1, "B4>Stock[@Limit]") + Rule("C4:C7", 2, "C4>AVERAGE(Stock[Limit])") + Rule("D4:D7", 3, "D4<SUM('Conditional tables:Span B'!$H$1)")
+            + "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><pageSetup paperSize=\"9\" orientation=\"landscape\"/>" + HeaderFooter;
+        return Sheet("<cols><col min=\"1\" max=\"4\" width=\"24\" customWidth=\"1\"/></cols>", rows.ToString(), tail);
+    }
+
+    private static void WriteConditionalTables(ZipArchive zip, int sheetNumber)
+    {
+        Entry(zip, "xl/tables/table1.xml",
+            $"<table xmlns=\"{Main}\" id=\"1\" name=\"Stock\" displayName=\"Stock\" ref=\"A3:D8\" totalsRowCount=\"1\"><tableColumns count=\"4\">" +
+            "<tableColumn id=\"1\" name=\"Item\"/><tableColumn id=\"2\" name=\"Qty\"/><tableColumn id=\"3\" name=\"Limit\"/><tableColumn id=\"4\" name=\"Stock\"/></tableColumns></table>");
+        Entry(zip, $"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}table\" Target=\"../tables/table1.xml\"/></Relationships>");
+    }
+
     private static string ConditionalLookupsSheet()
     {
         const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";

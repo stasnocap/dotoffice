@@ -20,8 +20,13 @@ internal sealed record CfError(string Code)
 internal abstract record CfExpr;
 internal sealed record CfConst(object Value) : CfExpr;
 /// <summary>A reference as written (zero-based); relative parts move with the cell the formula is evaluated for.</summary>
-internal sealed record CfRef(int Row, bool RowAbsolute, int Column, bool ColumnAbsolute, string? Sheet = null) : CfExpr;
+internal sealed record CfRef(int Row, bool RowAbsolute, int Column, bool ColumnAbsolute, string? Sheet = null, bool ThisRow = false) : CfExpr;
 internal sealed record CfRange(CfRef From, CfRef To) : CfExpr;
+/// <summary>A 3-D reference (<c>Sheet1:Sheet3!A1:B2</c>): the same range on each sheet in turn, used by the functions that aggregate.</summary>
+internal sealed record CfMulti(IReadOnlyList<CfRange> Parts) : CfExpr;
+
+/// <summary>A table of the workbook as structured references see it: rows are zero-based, <see cref="HeaderRows"/> and <see cref="TotalsRows"/> count the rows of <see cref="FirstRow"/>..<see cref="LastRow"/> that are not data.</summary>
+internal sealed record CfTable(string Name, string Sheet, int FirstRow, int FirstColumn, int LastRow, int LastColumn, int HeaderRows, int TotalsRows, IReadOnlyList<string> Columns);
 internal sealed record CfUnary(char Op, CfExpr Operand) : CfExpr;
 internal sealed record CfBinary(string Op, CfExpr Left, CfExpr Right) : CfExpr;
 internal sealed record CfCall(string Name, IReadOnlyList<CfExpr> Args) : CfExpr;
@@ -53,6 +58,12 @@ internal sealed class CfParser
     /// by the reader, which knows the names.
     /// </summary>
     [ThreadStatic] internal static Func<string, string?>? NameResolver;
+
+    /// <summary>Finds a table by its name; set around the parsing like <see cref="NameResolver"/>.</summary>
+    [ThreadStatic] internal static Func<string, CfTable?>? TableResolver;
+
+    /// <summary>The names of the sheets from the first to the last one (inclusive, in workbook order); null when either does not exist.</summary>
+    [ThreadStatic] internal static Func<string, string, IReadOnlyList<string>?>? SheetSpan;
 
     /// <summary>Parses a formula with or without the leading <c>=</c>.</summary>
     public static CfExpr Parse(string formula)
@@ -195,6 +206,19 @@ internal sealed class CfParser
                 }
                 return new CfCall(name, args);
             }
+            if (_i < _text.Length && _text[_i] == ':')
+            {
+                // A 3-D reference with unquoted sheet names: Sheet1:Sheet3!A1
+                int j = _i + 1;
+                while (j < _text.Length && (char.IsAsciiLetterOrDigit(_text[j]) || _text[j] is '_' or '.')) j++;
+                if (j > _i + 1 && j < _text.Length && _text[j] == '!')
+                {
+                    var last = _text[(_i + 1)..j];
+                    _i = j + 1;
+                    return ReferenceOn(word + ":" + last);
+                }
+            }
+            if (_i < _text.Length && _text[_i] == '[' && TableResolver?.Invoke(word) is { } table) return Structured(table);
             if (_i < _text.Length && _text[_i] == '!')
             {
                 _i++;
@@ -225,12 +249,140 @@ internal sealed class CfParser
     /// <summary>A reference or range on <paramref name="sheet"/>, just after the '!'.</summary>
     private CfExpr ReferenceOn(string sheet)
     {
+        int colon = sheet.IndexOf(':');
+        if (colon > 0)
+        {
+            var span = SheetSpan?.Invoke(sheet[..colon], sheet[(colon + 1)..]) ?? throw new NotSupportedException($"The sheets '{sheet}' of a 3-D reference do not exist.");
+            int at = _i;
+            var parts = new List<CfRange>();
+            foreach (var name in span)
+            {
+                _i = at;
+                var one = ReferenceOn(name);
+                parts.Add(one as CfRange ?? new CfRange((CfRef)one, (CfRef)one));
+            }
+            return new CfMulti(parts);
+        }
         SkipSpaces();
         int start = _i;
         while (_i < _text.Length && (char.IsAsciiLetterOrDigit(_text[_i]) || _text[_i] == '$')) _i++;
         var word = _text[start.._i];
         var from = Reference(word, sheet) ?? throw new NotSupportedException($"'{word}' is not a cell reference.");
         return Range(from, sheet);
+    }
+
+    /// <summary>A structured reference just after the table's name: <c>[Col]</c>, <c>[@Col]</c>, <c>[#Headers]</c>, <c>[[#Data],[Col]]</c>, <c>[[Col1]:[Col2]]</c>.</summary>
+    private CfExpr Structured(CfTable table)
+    {
+        // The text between the outermost brackets; a quote escapes the next character.
+        int depth = 0, start = _i;
+        for (; _i < _text.Length; _i++)
+        {
+            char ch = _text[_i];
+            if (ch == '\'') { _i++; continue; }
+            if (ch == '[') depth++;
+            else if (ch == ']' && --depth == 0) { _i++; break; }
+        }
+        if (depth != 0) throw new NotSupportedException("Unterminated table reference.");
+        var body = _text[(start + 1)..(_i - 1)].Trim();
+
+        // Split at top-level commas into items; an item is a name, a [bracketed name] or a [first]:[last] pair.
+        var items = new List<string>();
+        int level = 0, from = 0;
+        for (int k = 0; k < body.Length; k++)
+        {
+            if (body[k] == '\'') { k++; continue; }
+            if (body[k] == '[') level++;
+            else if (body[k] == ']') level--;
+            else if (body[k] == ',' && level == 0) { items.Add(body[from..k].Trim()); from = k + 1; }
+        }
+        items.Add(body[from..].Trim());
+
+        static string Unbracket(string text, bool unescape = true)
+        {
+            text = text.Trim();
+            if (text.Length >= 2 && text[0] == '[' && text[^1] == ']') text = text[1..^1];
+            if (!unescape) return text;
+            var sb = new System.Text.StringBuilder();
+            for (int k = 0; k < text.Length; k++)
+            {
+                if (text[k] == '\'' && k + 1 < text.Length) k++;
+                sb.Append(text[k]);
+            }
+            return sb.ToString();
+        }
+
+        bool thisRow = false, all = false, headers = false, data = false, totals = false;
+        int firstColumn = -1, lastColumn = -1;
+        int ColumnIndex(string name)
+        {
+            int index = -1;
+            for (int k = 0; k < table.Columns.Count; k++)
+                if (string.Equals(table.Columns[k], name, StringComparison.OrdinalIgnoreCase)) { index = k; break; }
+            return index >= 0 ? index : throw new NotSupportedException($"The table {table.Name} has no column '{name}'.");
+        }
+        void Columns(string first, string? last)
+        {
+            int a = ColumnIndex(first), b = last is null ? a : ColumnIndex(last);
+            (firstColumn, lastColumn) = (Math.Min(a, b), Math.Max(a, b));
+        }
+        foreach (var raw in items)
+        {
+            var item = raw;
+            if (item.Length == 0) continue;
+            if (item[0] == '@')
+            {
+                thisRow = true;
+                item = item[1..].Trim();
+                if (item.Length == 0) continue;
+            }
+            var spec = Unbracket(item, false);
+            if (spec.StartsWith('#'))
+            {
+                switch (spec.ToLowerInvariant())
+                {
+                    case "#all": all = true; break;
+                    case "#headers": headers = true; break;
+                    case "#data": data = true; break;
+                    case "#totals": totals = true; break;
+                    case "#this row": thisRow = true; break;
+                    default: throw new NotSupportedException($"Unknown table item specifier {spec}.");
+                }
+                continue;
+            }
+            // Column or column range; a range is written [first]:[last] (the colon sits outside the brackets).
+            int split = -1, depthHere = 0;
+            for (int k = 0; k < item.Length; k++)
+            {
+                if (item[k] == '\'') { k++; continue; }
+                if (item[k] == '[') depthHere++;
+                else if (item[k] == ']') depthHere--;
+                else if (item[k] == ':' && depthHere == 0) { split = k; break; }
+            }
+            if (split > 0) Columns(Unbracket(item[..split]), Unbracket(item[(split + 1)..]));
+            else Columns(Unbracket(item), null);
+        }
+
+        int dataFirst = table.FirstRow + table.HeaderRows, dataLast = table.LastRow - table.TotalsRows;
+        int row0, row1;
+        if (thisRow) (row0, row1) = (0, 0);
+        else if (all) (row0, row1) = (table.FirstRow, table.LastRow);
+        else if (!headers && !data && !totals) (row0, row1) = (dataFirst, dataLast);
+        else
+        {
+            row0 = int.MaxValue; row1 = int.MinValue;
+            void Span(int a, int b) { row0 = Math.Min(row0, a); row1 = Math.Max(row1, b); }
+            if (headers) { if (table.HeaderRows == 0) throw new NotSupportedException($"The table {table.Name} has no header row."); Span(table.FirstRow, table.FirstRow + table.HeaderRows - 1); }
+            if (data) Span(dataFirst, dataLast);
+            if (totals) { if (table.TotalsRows == 0) throw new NotSupportedException($"The table {table.Name} has no totals row."); Span(table.LastRow - table.TotalsRows + 1, table.LastRow); }
+        }
+        if (firstColumn < 0) (firstColumn, lastColumn) = (0, table.Columns.Count - 1);
+        CfRef Corner(int row, int column) => thisRow
+            ? new CfRef(0, true, table.FirstColumn + column, true, table.Sheet, ThisRow: true)
+            : new CfRef(row, true, table.FirstColumn + column, true, table.Sheet);
+        var topLeft = Corner(row0, firstColumn);
+        var bottomRight = Corner(row1, lastColumn);
+        return topLeft == bottomRight ? topLeft : new CfRange(topLeft, bottomRight);
     }
 
     private CfExpr Range(CfRef from, string? sheet)
@@ -364,7 +516,7 @@ internal sealed class CfContext(Func<int, int, object> cellAt, int originRow, in
     public DateTime Now { get; init; } = DateTime.Now;
 
     public (int Row, int Column) Resolve(CfRef r) =>
-        (r.RowAbsolute ? r.Row : r.Row + Row - OriginRow, r.ColumnAbsolute ? r.Column : r.Column + Column - OriginColumn);
+        (r.ThisRow ? Row : r.RowAbsolute ? r.Row : r.Row + Row - OriginRow, r.ColumnAbsolute ? r.Column : r.Column + Column - OriginColumn);
 }
 
 internal static class CfEvaluator
@@ -383,7 +535,7 @@ internal static class CfEvaluator
                 if (r.Sheet is null) return ctx.CellAt(row, column);
                 return ctx.Sheets?.Invoke(r.Sheet) is { } other ? other.CellAt(row, column) : CfError.Value;
             }
-            case CfRange: return CfError.Value;
+            case CfRange or CfMulti: return CfError.Value;
             case CfUnary u:
             {
                 var v = Evaluate(u.Operand, ctx);
@@ -476,6 +628,12 @@ internal static class CfEvaluator
     private static IEnumerable<object> Values(CfExpr arg, CfContext ctx)
     {
         if (arg is CfCall && ReferenceOf(arg, ctx) is { } referenced) arg = referenced;
+        if (arg is CfMulti multi)
+        {
+            foreach (var part in multi.Parts)
+                foreach (var v in Values(part, ctx)) yield return v;
+            yield break;
+        }
         if (arg is CfRange range)
         {
             var (r1, c1) = ctx.Resolve(range.From);
@@ -528,7 +686,7 @@ internal static class CfEvaluator
                     foreach (var v in Values(arg, ctx))
                     {
                         if (v is CfError) return v;
-                        if (arg is CfRange && v is string or CfBlank) continue;
+                        if (arg is CfRange or CfMulti && v is string or CfBlank) continue;
                         if (ToNumber(v) is not { } n) return CfError.Value;
                         any = true;
                         if (n != 0) trues++; else all = false;
@@ -632,7 +790,7 @@ internal static class CfEvaluator
                         if (v is CfError && call.Name != "COUNT" && call.Name != "COUNTA") return v;
                         if (v is not CfBlank) nonBlank++;
                         if (v is double d) numbers.Add(d);
-                        else if (arg is not CfRange && v is not CfError && call.Name != "COUNT" && v is not CfBlank && ToNumber(v) is { } direct) numbers.Add(direct);
+                        else if (arg is not (CfRange or CfMulti) && v is not CfError && call.Name != "COUNT" && v is not CfBlank && ToNumber(v) is { } direct) numbers.Add(direct);
                     }
                 switch (call.Name)
                 {
@@ -938,7 +1096,7 @@ internal static class CfEvaluator
                     {
                         if (v is CfError) return v;
                         if (v is double d) numbers.Add(d);
-                        else if (arg is not CfRange && v is not CfBlank && ToNumber(v) is { } direct) numbers.Add(direct);
+                        else if (arg is not (CfRange or CfMulti) && v is not CfBlank && ToNumber(v) is { } direct) numbers.Add(direct);
                     }
                 if (call.Name == "PRODUCT") return numbers.Count == 0 ? 0.0 : numbers.Aggregate(1.0, (a, b) => a * b);
                 if (numbers.Count == 0) return CfError.Value;
@@ -1086,6 +1244,25 @@ internal static class CfEvaluator
         if (expr is CfCall && ReferenceOf(expr, ctx) is { } referenced) expr = referenced;
         switch (expr)
         {
+            case CfMulti multi:
+            {
+                var grids = new List<object[,]>();
+                foreach (var part in multi.Parts)
+                {
+                    if (ArrayOf(part, ctx) is not { } g) return null;
+                    grids.Add(g);
+                }
+                int width = grids.Max(g => g.GetLength(1)), height = grids.Sum(g => g.GetLength(0));
+                var stacked = new object[height, width];
+                int at = 0;
+                foreach (var g in grids)
+                {
+                    for (int r = 0; r < g.GetLength(0); r++)
+                        for (int c = 0; c < width; c++) stacked[at + r, c] = c < g.GetLength(1) ? g[r, c] : CfBlank.Instance;
+                    at += g.GetLength(0);
+                }
+                return stacked;
+            }
             case CfRef or CfRange:
             {
                 var (cellAt, sheetName) = (ctx.CellAt, (expr as CfRef ?? ((CfRange)expr).From).Sheet);

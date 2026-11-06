@@ -62,6 +62,17 @@ internal sealed class XlsxBuilder
         return this;
     }
 
+    /// <summary>Adds table part number <paramref name="tableNumber"/> to sheet <paramref name="sheetNumber"/> (the sheet must have no other relationships).</summary>
+    public XlsxBuilder AddTable(int sheetNumber, int tableNumber, string name, string reference, string[] columns, int header = 1, int totals = 0)
+    {
+        AddPart($"xl/worksheets/_rels/sheet{sheetNumber}.xml.rels",
+            $"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RelType}table\" Target=\"../tables/table{tableNumber}.xml\"/></Relationships>");
+        AddPart($"xl/tables/table{tableNumber}.xml",
+            $"<table xmlns=\"{MainNs}\" id=\"{tableNumber}\" name=\"{name}\" displayName=\"{name}\" ref=\"{reference}\" headerRowCount=\"{header}\" totalsRowCount=\"{totals}\">" +
+            $"<tableColumns count=\"{columns.Length}\">{string.Concat(columns.Select((c, i) => $"<tableColumn id=\"{i + 1}\" name=\"{SecurityElement.Escape(c)}\"/>"))}</tableColumns></table>");
+        return this;
+    }
+
     /// <summary>The element a worksheet needs (in its tail) to use the drawing added by <see cref="AddDrawing"/>.</summary>
     public const string DrawingElement = "<drawing r:id=\"rId1\"/>";
 

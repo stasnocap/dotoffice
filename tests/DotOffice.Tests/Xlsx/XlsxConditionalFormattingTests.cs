@@ -990,4 +990,71 @@ public class XlsxConditionalFormattingTests
         var wholeColumn = "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">S!$A:$A</definedName>";
         Assert.Equal("A1,A2,A3", FilledRows(Read(Column("A", 1, 2, 3), ConditionalFormatting("A:A", Expression("TRUE", 1, 0)), definedNames: wholeColumn)));
     }
+
+    // ------------------------------------------------------------ structured table references and 3-D references
+
+    private static (Worksheet Main, ConversionWarningList Warnings) ReadTable(string rule, string? names = null)
+    {
+        // Table "T" on A1:B5 (header row, three data rows A2:B4, totals row): Qty 1, 5, 9 and Limit 2, 2, 20.
+        var rows = Row(1, Inline("A1", "Qty"), Inline("B1", "Limit")) + Row(2, C("A2", "1"), C("B2", "2")) + Row(3, C("A3", "5"), C("B3", "2")) + Row(4, C("A4", "9"), C("B4", "20")) + Row(5, C("A5", "15"), C("B5", "24"));
+        var warnings = new ConversionWarningList();
+        var builder = new XlsxBuilder { Styles = StylesWithDxfs([Dxf(Red), Dxf(Green)]), DefinedNames = names }
+            .AddSheet("S", rows, tail: ConditionalFormatting("A2:A4", Expression(rule, 1, 0))).AddTable(1, 1, "T", "A1:B5", ["Qty", "Limit"], totals: 1);
+        var sheet = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0];
+        return (sheet, warnings);
+    }
+
+    [Theory]
+    [InlineData("A2>T[@Limit]", "A3")] // this row: 1>2 no, 5>2 yes, 9>20 no
+    [InlineData("A2>T[[#This Row],[Limit]]", "A3")]
+    [InlineData("A2>AVERAGE(T[Qty])", "A4")] // the data rows only: 5
+    [InlineData("A2>=SUM(T[[#Data],[Qty]])/3", "A3,A4")]
+    [InlineData("A2=T[[#Headers],[Qty]]", "")] // text in the header is not a number
+    [InlineData("SUM(T[[#Totals],[Qty]])=15", "A2,A3,A4")]
+    [InlineData("SUM(T[#All])=78", "A2,A3,A4")] // 30 + 48: the header texts and the totals row are in it
+    [InlineData("SUM(T[[Qty]:[Limit]])=39", "A2,A3,A4")] // data of both columns: 15 + 24
+    [InlineData("COUNT(T[])=6", "A2,A3,A4")]
+    public void Structured_table_references_read_the_table_area(string rule, string expected)
+    {
+        var (sheet, warnings) = ReadTable(rule);
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal(expected, FilledRows(sheet));
+    }
+
+    [Fact]
+    public void Defined_names_may_hold_structured_references()
+    {
+        var (sheet, warnings) = ReadTable("A2>Limits", "<definedName name=\"Limits\">T[Limit]</definedName>");
+        Assert.Empty(warnings.Warnings);
+        Assert.Empty(FilledRows(sheet)); // a range alone is not a single value
+        var (average, _) = ReadTable("A2>AVERAGE(Limits)", "<definedName name=\"Limits\">T[Limit]</definedName>");
+        Assert.Equal("A4", FilledRows(average)); // the average limit is 8: only 9 is above it
+    }
+
+    [Fact]
+    public void Unknown_columns_and_tables_are_ignored_with_a_warning()
+    {
+        var (sheet, warnings) = ReadTable("A2>T[Nope]");
+        Assert.Empty(FilledRows(sheet));
+        Assert.NotEmpty(warnings.Warnings);
+        Assert.NotEmpty(ReadTable("A2>Other[Qty]").Warnings.Warnings);
+    }
+
+    [Theory]
+    [InlineData("A1>SUM(P:Q!A1)", "A1")] // 5 > 1+2? no: A1 is 5 and P:Q!A1 = 1 + 2 = 3, so yes
+    [InlineData("A1>SUM('P:Q'!A1)", "A1")]
+    [InlineData("SUM(S:Q!A1)=8", "A1")] // 5 + 1 + 2 (the reference moves with the cell: A2 sums 7 + 10 + 3)
+    [InlineData("MAX(P:Q!A1:A2)=10", "A1,A2")]
+    [InlineData("COUNT(P:Q!A1:A2)=4", "A1")] // A2 counts A2:A3 on each sheet: two cells
+    public void Three_dimensional_references_aggregate_over_the_sheets_in_between(string rule, string expected)
+    {
+        var builder = new XlsxBuilder { Styles = StylesWithDxfs([Dxf(Red), Dxf(Green)]) }
+            .AddSheet("S", Row(1, C("A1", "5")) + Row(2, C("A2", "7")), tail: ConditionalFormatting("A1:A2", Expression(rule, 1, 0)))
+            .AddSheet("P", Row(1, C("A1", "1")) + Row(2, C("A2", "10")))
+            .AddSheet("Q", Row(1, C("A1", "2")) + Row(2, C("A2", "3")));
+        var warnings = new ConversionWarningList();
+        var sheet = XlsxReader.Read(builder.BuildStream(), new XlsxReaderOptions { Warnings = warnings }).Sheets[0];
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal(expected, FilledRows(sheet));
+    }
 }

@@ -34,7 +34,7 @@ number_text=$(page_text "$number_page")
 [[ $number_text == *"ababab"* ]] || fail "the fill-aligned 'ab' should be repeated"
 
 # Every visible sheet shows up as a page header; the hidden sheet is never printed.
-for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Pivot fields" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape presets" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
+for sheet in "Formats" "Long table" "Wide" "Text" "Rich text" "Rotation" "Gradients" "Pictures" "Conditional" "Conditional links" "Conditional lookups" "Conditional tables" "Pivot" "Pivot styled" "Pivot banded" "Pivot dark" "Pivot custom" "Pivot fields" "Paper" "Areas" "Comments" "Shapes" "Shape paths" "Shape presets" "Shape fills" "Charts" "More charts" "Chart options" "Chart extras" "Chart text" "Titles" "Numbering"; do
   found=0
   for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "$sheet" ] && found=1; done
   [ "$found" = 1 ] || fail "no page has the header '$sheet'"
@@ -161,6 +161,14 @@ qpdf --qdf --object-streams=disable "$pdf" lookups-qdf.pdf
 grep -aq "^0.1804 0.4588 0.7137 RG$" lookups-qdf.pdf || fail "the x14-only data bar border color (2E75B6) is missing"
 # SUMIF, COUNTIFS, TEXT and R1C1 INDIRECT rules use the lavender fill (E4DFEC); Ann, Bob and one text match are filled in four columns.
 [ "$(grep -ac '^0.8941 0.8745 0.9255 rg$' lookups-qdf.pdf || true)" -ge 7 ] || fail "the SUMIF/COUNTIFS/TEXT/INDIRECT rules should fill their cells in lavender"
+
+# Conditional tables: structured table references and a 3-D reference apply without a warning (peach fills in three columns).
+tables_page=0
+for p in $(seq 1 "$pages"); do [ "$(header_of "$p")" = "Conditional tables" ] && tables_page=$p; done
+[ "$tables_page" != 0 ] || fail "no page for the conditional tables sheet"
+if grep -E "warning xlsx\.conditional" "$log"; then fail "the table and 3-D references should not warn"; fi
+qpdf --qdf --object-streams=disable "$pdf" tables-qdf.pdf
+[ "$(grep -ac '^0.9725 0.7961 0.6784 rg$' tables-qdf.pdf || true)" -ge 3 ] || fail "the structured and 3-D reference rules should fill cells in peach"
 
 # Shapes: drawn as vector content on a single page (themed blue fill, group parts, a dashed outline), with their text, and not reported.
 shape_pages=0; shape_page=0
