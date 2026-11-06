@@ -15,8 +15,7 @@ internal enum JoiningType : byte { NotListed, U, R, L, D, C, T }
 /// Basic OpenType shaping, after HarfBuzz's default, Arabic and Hebrew shapers: normalization, Arabic-style
 /// joining forms (isol/fina/medi/init), ligatures, kerning and mark positioning from the font's GSUB/GPOS tables.
 /// Text is split into script runs (<see cref="ScriptRuns"/>) and each is shaped with its script's features.
-/// Indic scripts go to the <see cref="IndicShaper"/>, Sinhala and Tibetan to the <see cref="UseShaper"/>, Khmer to the <see cref="KhmerShaper"/>; Myanmar (which HarfBuzz shapes with a shaper of its own) is not handled (its
-/// glyphs are mapped one to one).
+/// Indic scripts go to the <see cref="IndicShaper"/>, Sinhala and Tibetan to the <see cref="UseShaper"/>, Khmer to the <see cref="KhmerShaper"/> and Myanmar to the <see cref="MyanmarShaper"/>.
 /// </summary>
 public static class TextShaper
 {
@@ -35,7 +34,7 @@ public static class TextShaper
         int previous = -1;
         foreach (var rune in text.EnumerateRunes())
         {
-            if (ScriptRuns.TagOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value) || UseShaper.IsUse(rune.Value) || KhmerShaper.IsKhmer(rune.Value))
+            if (ScriptRuns.TagOf(rune.Value) is "arab" or "syrc" or "nko " or "hebr" || IsMark(rune.Value) || IndicShaper.IsIndic(rune.Value) || UseShaper.IsUse(rune.Value) || KhmerShaper.IsKhmer(rune.Value) || MyanmarShaper.IsMyanmar(rune.Value))
                 return true;
             int glyph = font.GetGlyphId(rune.Value);
             if (glyph == 0 && Normalizer.Covers(font, rune.Value)) return true; // decomposed or a fallback glyph
@@ -44,10 +43,6 @@ public static class TextShaper
         }
         return layout.HasSubstitutions && previous >= 0 && layout.StartsDefaultSubstitution(previous, -1);
     }
-
-    /// <summary>True for scripts whose shaping (reordering, conjuncts) is not implemented: Myanmar.</summary>
-    public static bool IsUnsupportedComplexScript(int codePoint) =>
-        codePoint is >= 0x1000 and <= 0x109F;
 
     /// <summary>
     /// Shapes one run of text in one font. <paramref name="rightToLeft"/> only affects how mark offsets are
@@ -76,7 +71,7 @@ public static class TextShaper
         {
             try
             {
-                if ((IndicShaper.Shape(font, text, script, ligatures) ?? UseShaper.Shape(font, text, script, ligatures) ?? KhmerShaper.Shape(font, text, script, ligatures)) is { } shaped)
+                if ((IndicShaper.Shape(font, text, script, ligatures) ?? UseShaper.Shape(font, text, script, ligatures) ?? KhmerShaper.Shape(font, text, script, ligatures) ?? MyanmarShaper.Shape(font, text, script, ligatures)) is { } shaped)
                     return shaped.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
             }
             catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)

@@ -5,6 +5,7 @@
                                               HarfBuzz's gen-indic-table.py)
   src/DotOffice.Fonts/Shaping/KhmerData.g.cs  the Khmer shaper's categories of the Khmer block and the shared
                                               characters (the same script, with the Khmer-only categories)
+  src/DotOffice.Fonts/Shaping/MyanmarData.g.cs  the same for the Myanmar shaper
 
 Usage: python3 tools/generate-indic-data.py [directory containing the UCD files]
 Without an argument the files are downloaded from unicode.org (version below).
@@ -29,6 +30,19 @@ KHMER_OVERRIDES = {
     **{u: "Ygroup" for u in (0x17C7, 0x17C8, 0x17DD, 0x17D3)},
     0x17D9: "PLACEHOLDER",
 }
+# The Myanmar shaper's: the "export" lines of hb-ot-shaper-myanmar-machine.rl (the others keep their Indic number).
+MYANMAR_NUMBERS = {"VAbv": 20, "VBlw": 21, "VPre": 22, "VPst": 23, "As": 32, "MH": 35, "MR": 36, "MW": 37, "MY": 38,
+                   "PT": 39, "VS": 40, "ML": 41, "SMPst": 57}
+MYANMAR_OVERRIDES = {
+    **{u: "VS" for u in range(0xFE00, 0xFE10)},
+    0x104E: "C", 0x1004: "Ra", 0x101B: "Ra", 0x105A: "Ra", 0x1032: "A", 0x1036: "A", 0x103A: "As",
+    0x103E: "MH", 0x1060: "ML", 0x103C: "MR", 0x103D: "MW", 0x1082: "MW", 0x103B: "MY", 0x105E: "MY", 0x105F: "MY",
+    **{u: "PT" for u in (0x1063, 0x1064, 0x1069, 0x106A, 0x106B, 0x106C, 0x106D, 0xAA7B)},
+    **{u: "SM" for u in (0x1038, 0x1087, 0x1088, 0x1089, 0x108A, 0x108B, 0x108C, 0x108D, 0x108F, 0x109A, 0x109B, 0x109C)},
+    0x104A: "PLACEHOLDER",
+}
+MYANMAR_BLOCKS = ["Basic Latin", "Latin-1 Supplement", "Myanmar", "Myanmar Extended-A", "Myanmar Extended-B",
+                  "Myanmar Extended-C", "General Punctuation", "Superscripts and Subscripts"]
 KHMER_BLOCKS = ["Basic Latin", "Latin-1 Supplement", "Khmer", "General Punctuation", "Superscripts and Subscripts"]
 # Must match the IndicPosition enum order (HarfBuzz's ot_position_t).
 POSITIONS = ("START RA_TO_BECOME_REPH PRE_M PRE_C BASE_C AFTER_MAIN ABOVE_C BEFORE_SUB BELOW_C AFTER_SUB "
@@ -120,11 +134,12 @@ def main():
     syllabic = dict(ranges(load("IndicSyllabicCategory.txt")))
     positional = dict(ranges(load("IndicPositionalCategory.txt")))
     blocks = dict(ranges(load("Blocks.txt")))
-    write("IndicData", build(syllabic, positional, blocks, ALLOWED_BLOCKS, False), False)
-    write("KhmerData", build(syllabic, positional, blocks, KHMER_BLOCKS, True), True)
+    write("IndicData", build(syllabic, positional, blocks, ALLOWED_BLOCKS, ""), "")
+    write("KhmerData", build(syllabic, positional, blocks, KHMER_BLOCKS, "khmer"), "khmer")
+    write("MyanmarData", build(syllabic, positional, blocks, MYANMAR_BLOCKS, "myanmar"), "myanmar")
 
 
-def build(syllabic, positional, blocks, allowed_blocks, khmer):
+def build(syllabic, positional, blocks, allowed_blocks, mode):
     data = {}
     for u in set(syllabic) | set(positional):
         block = blocks.get(u, "No_Block")
@@ -135,8 +150,9 @@ def build(syllabic, positional, blocks, allowed_blocks, khmer):
         if cat == "SM" and pos == "Not_Applicable":
             cat = "SMPst"
         data[u] = [cat, POSITION_MAP[pos], block]
-    for u, cat in {**CATEGORY_OVERRIDES, **(KHMER_OVERRIDES if khmer else {})}.items():
-        if khmer and u in CATEGORY_OVERRIDES and cat not in ("PLACEHOLDER", "DOTTEDCIRCLE"):
+    own = {"khmer": KHMER_OVERRIDES, "myanmar": MYANMAR_OVERRIDES}.get(mode, {})
+    for u, cat in {**CATEGORY_OVERRIDES, **own}.items():
+        if mode and u in CATEGORY_OVERRIDES and u not in own and cat not in ("PLACEHOLDER", "DOTTEDCIRCLE"):
             continue # the overrides of the Indic scripts do not concern Khmer
         entry = data.get(u, ["X", "END", blocks.get(u, "No_Block")])
         data[u] = [cat, entry[1], blocks.get(u, "No_Block")]
@@ -146,7 +162,7 @@ def build(syllabic, positional, blocks, allowed_blocks, khmer):
         if cat in ("C", "CS", "Ra", "CM", "V", "PLACEHOLDER", "DOTTEDCIRCLE"):
             pos = "BASE_C"
         elif cat in ("M", "MPst"):
-            if khmer and block == "Khmer":
+            if mode and block.startswith(("Khmer", "Myanmar")):
                 cat = {"PRE_C": "VPre", "ABOVE_C": "VAbv", "BELOW_C": "VBlw", "POST_C": "VPst"}[pos]
             else:
                 pos = matra_position(u, pos, block)
@@ -159,13 +175,14 @@ def build(syllabic, positional, blocks, allowed_blocks, khmer):
     return data
 
 
-def write(name, data, khmer):
+def write(name, data, mode):
 
     # Ranges of equal (category, position); code points not listed are X/END.
     starts, values, previous = [], [], None
     for u in range(0, max(data) + 2):
         cat, pos, _ = data.get(u, ["X", "END", ""])
-        value = (KHMER_NUMBERS[cat] if cat in KHMER_NUMBERS else CATEGORIES.index(cat)) if khmer \
+        numbers = {"khmer": KHMER_NUMBERS, "myanmar": MYANMAR_NUMBERS}.get(mode, {})
+        value = (numbers[cat] if cat in numbers else CATEGORIES.index(cat)) if mode \
             else CATEGORIES.index(cat) | POSITIONS.index(pos) << 8
         if value != previous:
             starts.append(u)
@@ -178,7 +195,7 @@ def write(name, data, khmer):
            "    public static ReadOnlySpan<int> RangeStarts => new int[]\n    {\n"]
     out += wrap([f"0x{u:X}" for u in starts])
     out += ["    };\n\n",
-            "    /// <summary>Per range: the category (" + ("the Khmer shaper's" if khmer else "<see cref=\"IndicCategory\"/> in the low byte, <see cref=\"IndicPosition\"/> in the next") + ").</summary>\n",
+            "    /// <summary>Per range: the category (" + (f"the {mode.capitalize()} shaper's" if mode else "<see cref=\"IndicCategory\"/> in the low byte, <see cref=\"IndicPosition\"/> in the next") + ").</summary>\n",
             "    public static ReadOnlySpan<ushort> RangeValues => new ushort[]\n    {\n"]
     out += wrap([f"0x{v:X}" for v in values])
     out += ["    };\n}\n"]

@@ -80,6 +80,9 @@ internal sealed class OpenTypeLayout
     /// </summary>
     public const uint ManualJoiners = 0x4000_0000;
 
+    /// <summary>Like <see cref="ManualJoiners"/> for ZWJ only (HarfBuzz's F_MANUAL_ZWJ; ZWNJ is still skipped automatically).</summary>
+    public const uint ManualZwj = 0x2000_0000;
+
     private const int MaxNesting = 6;
     private const int MaxOperations = 100_000;
 
@@ -470,6 +473,7 @@ internal sealed class OpenTypeLayout
         public uint Mask { get; set; }
         public bool PerSyllable { get; set; }
         public bool ManualJoiners { get; set; }
+        public bool ManualZwj { get; set; }
         public int Nesting { get; set; }
 
         /// <summary>Lookup applications so far; bounds the work on malicious fonts.</summary>
@@ -484,9 +488,10 @@ internal sealed class OpenTypeLayout
         var ctx = new Context(t, glyphs, gpos, rightToLeft);
         foreach (var (lookup, mask) in lookups)
         {
-            ctx.Mask = mask & ~(PerSyllable | ManualJoiners);
+            ctx.Mask = mask & ~(PerSyllable | ManualJoiners | ManualZwj);
             ctx.PerSyllable = (mask & PerSyllable) != 0;
             ctx.ManualJoiners = (mask & ManualJoiners) != 0;
+            ctx.ManualZwj = (mask & ManualZwj) != 0;
             if (!SetLookup(ctx, lookup)) continue;
             for (int i = 0; i < glyphs.Count;)
             {
@@ -580,7 +585,7 @@ internal sealed class OpenTypeLayout
     {
         if (!g.Ignorable || g.Hidden && !ctx.Gpos) return false;
         bool autoJoiners = !ctx.ManualJoiners;
-        bool ignoreZwnj = ctx.Gpos || (context && autoJoiners), ignoreZwj = context || autoJoiners;
+        bool ignoreZwnj = ctx.Gpos || (context && autoJoiners), ignoreZwj = context || autoJoiners && !ctx.ManualZwj;
         return (ignoreZwnj || g.CodePoint != 0x200C) && (ignoreZwj || g.CodePoint != 0x200D);
     }
 

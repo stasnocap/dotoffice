@@ -174,6 +174,5 @@ public class UseShaperTests
         Assert.Equal(2, shaped.Length);
         Assert.Equal("ཀྲཀ", string.Concat(shaped.Select(g => g.Text)));
         Assert.True(TextShaper.NeedsShaping(Tibetan, "ཀ", kerning: false));
-        Assert.False(TextShaper.IsUnsupportedComplexScript('ཀ'));
     }
 }

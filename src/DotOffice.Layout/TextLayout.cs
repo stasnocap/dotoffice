@@ -276,8 +276,6 @@ internal sealed class Itemizer(FontSelector fonts)
             bool complex = FontSelector.UsesComplexScript(props, cp);
             byte atomLevel = level(offset + start);
             var font = isSpace ? fonts.ForCharacter(props, ' ') : fonts.ForCharacterWithFallback(props, cp);
-            if (TextShaper.IsUnsupportedComplexScript(cp))
-                fonts.WarnOnce("layout.complex-script", "Myanmar needs reordering that is not implemented; its text may render incorrectly.");
             i += char.IsSurrogatePair(text, start) ? 2 : 1;
             while (i < text.Length)
             {
