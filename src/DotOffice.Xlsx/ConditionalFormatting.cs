@@ -284,6 +284,14 @@ internal static class ConditionalFormatting
 
     private static CfRule ReadRule(XElement rule, string type, List<CellRange> ranges, Func<XElement?, Color?> resolve)
     {
+        // A table reference without the table's name (`[@Col]`) means the table the rule's first cell lies in.
+        CfParser.HomeCell = ranges.Count > 0 ? (ranges.Min(r => r.FirstRow), ranges.Min(r => r.FirstColumn)) : null;
+        try { return ReadRuleCore(rule, type, ranges, resolve); }
+        finally { CfParser.HomeCell = null; }
+    }
+
+    private static CfRule ReadRuleCore(XElement rule, string type, List<CellRange> ranges, Func<XElement?, Color?> resolve)
+    {
         int Int(string name, int fallback) => int.TryParse((string?)rule.Attribute(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : fallback;
         bool Flag(string name, bool fallback) => (string?)rule.Attribute(name) switch { "1" or "true" => true, "0" or "false" => false, _ => fallback };
         XElement? Child(XElement? parent, string name) => parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name);

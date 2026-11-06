@@ -62,6 +62,12 @@ internal sealed class CfParser
     /// <summary>Finds a table by its name; set around the parsing like <see cref="NameResolver"/>.</summary>
     [ThreadStatic] internal static Func<string, CfTable?>? TableResolver;
 
+    /// <summary>Finds the table of the current sheet that holds a cell (row, column); set around the reading of one sheet.</summary>
+    [ThreadStatic] internal static Func<int, int, CfTable?>? HomeTableResolver;
+
+    /// <summary>The first cell of the rule being read, whose table an unqualified structured reference means.</summary>
+    [ThreadStatic] internal static (int Row, int Column)? HomeCell;
+
     /// <summary>The names of the sheets from the first to the last one (inclusive, in workbook order); null when either does not exist.</summary>
     [ThreadStatic] internal static Func<string, string, IReadOnlyList<string>?>? SheetSpan;
 
@@ -160,6 +166,7 @@ internal sealed class CfParser
             return inner;
         }
         if (c == '"') return new CfConst(ReadString());
+        if (c == '[' && HomeCell is { } home && HomeTableResolver?.Invoke(home.Row, home.Column) is { } homeTable) return Structured(homeTable);
         if (c == '\'')
         {
             // A quoted sheet name: 'My sheet'!A1

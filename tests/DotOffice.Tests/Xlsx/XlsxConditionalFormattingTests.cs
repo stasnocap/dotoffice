@@ -1021,6 +1021,18 @@ public class XlsxConditionalFormattingTests
         Assert.Equal(expected, FilledRows(sheet));
     }
 
+    [Theory]
+    [InlineData("A2>[@Limit]", "A3")] // the table the rule's first cell lies in
+    [InlineData("A2>[[#This Row],[Limit]]", "A3")]
+    [InlineData("A2>AVERAGE([Qty])", "A4")]
+    [InlineData("SUM([[#Totals],[Qty]])=15", "A2,A3,A4")]
+    public void Table_references_without_a_table_name_mean_the_table_of_the_rule(string rule, string expected)
+    {
+        var (sheet, warnings) = ReadTable(rule);
+        Assert.Empty(warnings.Warnings);
+        Assert.Equal(expected, FilledRows(sheet));
+    }
+
     [Fact]
     public void Defined_names_may_hold_structured_references()
     {

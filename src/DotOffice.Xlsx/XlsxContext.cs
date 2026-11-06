@@ -88,12 +88,14 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
             CfParser.NameResolver = word =>
                 (names.FirstOrDefault(n => n.LocalSheetId == position && string.Equals(n.Name, word, StringComparison.OrdinalIgnoreCase))
                  ?? names.FirstOrDefault(n => n.LocalSheetId is null && string.Equals(n.Name, word, StringComparison.OrdinalIgnoreCase)))?.Formula;
+            CfParser.HomeTableResolver = (row, column) => tables.FirstOrDefault(t => string.Equals(t.Sheet, entry.Name, StringComparison.OrdinalIgnoreCase)
+                && row >= t.FirstRow && row <= t.LastRow && column >= t.FirstColumn && column <= t.LastColumn);
             try
             {
                 using var r = Package.OpenXml(rel.Target);
                 ReadWorksheet(r, sheet);
             }
-            finally { CfParser.NameResolver = null; }
+            finally { CfParser.NameResolver = null; CfParser.HomeTableResolver = null; }
             ReadDrawing(sheet, rel.Target);
             ReadHeaderFooterPictures(sheet, rel.Target);
             ReadComments(sheet, rel.Target);
