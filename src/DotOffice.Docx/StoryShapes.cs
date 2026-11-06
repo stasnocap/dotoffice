@@ -24,7 +24,8 @@ internal sealed partial class StoryReader
         public double? Adjust1 { get; set; }
         public double? Adjust2 { get; set; }
         public GradientFill? Gradient { get; set; }
-        public bool Vertical { get; set; }
+        public TextBoxDirection Direction { get; set; }
+        public bool UnsupportedVertical { get; set; }
         public List<Block> Blocks { get; } = [];
     }
 
@@ -80,7 +81,8 @@ internal sealed partial class StoryReader
         var d = data.Insets;
         data.Insets = new Thickness(Inset(r, "tIns", d.Top), Inset(r, "rIns", d.Right), Inset(r, "bIns", d.Bottom), Inset(r, "lIns", d.Left));
         data.Anchor = r.GetAttribute("anchor") switch { "ctr" => TextBoxAnchor.Center, "b" => TextBoxAnchor.Bottom, _ => TextBoxAnchor.Top };
-        data.Vertical = r.GetAttribute("vert") is { } v && v != "horz";
+        data.Direction = r.GetAttribute("vert") switch { "vert" or "eaVert" => TextBoxDirection.Clockwise, "vert270" => TextBoxDirection.CounterClockwise, _ => TextBoxDirection.Horizontal };
+        data.UnsupportedVertical = r.GetAttribute("vert") is "wordArtVert" or "wordArtVertRtl" or "mongolianVert";
     }
 
     private void ApplyShapeProperties(ShapeData data, XElement? properties, XElement? style)
@@ -258,7 +260,7 @@ internal sealed partial class StoryReader
         height = Math.Min(height, context.Options.MaxDimension);
         var geometry = PresetGeometry(data.Geometry);
         bool hasText = data.Blocks.Count > 0;
-        if (data.Vertical) context.WarnOnce("docx.shape.vert", "Vertical text in shapes is laid out horizontally.");
+        if (data.UnsupportedVertical) context.WarnOnce("docx.shape.vert", "Stacked and Mongolian vertical text in shapes is laid out horizontally.");
         if (geometry is null)
         {
             context.WarnOnce("docx.shape.geometry", $"Shapes other than the basic presets (rectangle, rounded rectangle, ellipse, triangles, diamond, hexagon, arrows, …) are not drawn (only their text, if any); first seen: '{data.Geometry}'.");
@@ -276,6 +278,7 @@ internal sealed partial class StoryReader
             OutlineStyle = data.Dash,
             Insets = data.Insets,
             VerticalAnchor = data.Anchor,
+            TextDirection = data.Direction,
             Rotation = data.Rotation,
             Horizontal = horizontal, Vertical = vertical, Wrap = behind ? TextWrap.None : wrap, BehindText = behind, Distance = distance,
         };

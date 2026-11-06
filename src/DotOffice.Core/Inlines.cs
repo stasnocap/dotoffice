@@ -77,6 +77,9 @@ public sealed class FloatingImage(ImageData image, double width, double height, 
 
 public enum TextBoxAnchor { Top, Center, Bottom }
 
+/// <summary>Direction of the text of a text box (<c>bodyPr vert</c>): turned a quarter clockwise (<c>vert</c>, <c>eaVert</c>) or counter-clockwise (<c>vert270</c>).</summary>
+public enum TextBoxDirection { Horizontal, Clockwise, CounterClockwise }
+
 /// <summary>
 /// A text box (a DrawingML <c>wps</c> shape with <c>w:txbxContent</c>): a rectangle with optional fill and outline around block content
 /// laid out in the box minus <see cref="Insets"/>. Content that does not fit is clipped, as in Word.
@@ -90,6 +93,7 @@ public sealed class FloatingTextBox(double width, double height, RunProperties p
     public LineStyleKind OutlineStyle { get; init; }
     public Thickness Insets { get; init; } = new(3.6, 7.2, 3.6, 7.2);
     public TextBoxAnchor VerticalAnchor { get; init; }
+    public TextBoxDirection TextDirection { get; init; }
 
     /// <summary>Clockwise rotation in degrees.</summary>
     public double Rotation { get; init; }

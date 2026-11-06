@@ -46,13 +46,20 @@ internal static class TextBoxes
             inset = new Thickness(inset.Top + corner, inset.Right + corner, inset.Bottom + corner, inset.Left + corner);
         }
         double bodyWidth = w - inset.Left - inset.Right;
+        double bodyHeight = h - inset.Top - inset.Bottom;
+        var direction = box.TextDirection;
+        // Turned text is laid out horizontally in a frame as long as the body is high, and the frame is turned about the body's centre.
+        if (direction != TextBoxDirection.Horizontal) (bodyWidth, bodyHeight) = (bodyHeight, bodyWidth);
         if (box.Blocks.Count > 0 && bodyWidth > 1 && context.Depth < 8)
         {
             var nested = context.Nested();
             var stacked = new List<(double Y, Slice Slice)>();
-            double height = BlockFlow.Stack(BlockFlow.Build(box.Blocks, x + inset.Left, bodyWidth, nested), stacked);
-            double free = Math.Max(0, h - inset.Top - inset.Bottom - height);
-            double top = y + inset.Top + box.VerticalAnchor switch { TextBoxAnchor.Center => free / 2, TextBoxAnchor.Bottom => free, _ => 0 };
+            double left = direction == TextBoxDirection.Horizontal ? x + inset.Left : x + inset.Left + (w - inset.Left - inset.Right) / 2 - bodyWidth / 2;
+            double height = BlockFlow.Stack(BlockFlow.Build(box.Blocks, left, bodyWidth, nested), stacked);
+            double free = Math.Max(0, bodyHeight - height);
+            double by = y + inset.Top;
+            double cx = x + inset.Left + (w - inset.Left - inset.Right) / 2, cy = by + (h - inset.Top - inset.Bottom) / 2;
+            double top = (direction == TextBoxDirection.Horizontal ? by : cy - bodyHeight / 2) + box.VerticalAnchor switch { TextBoxAnchor.Center => free / 2, TextBoxAnchor.Bottom => free, _ => 0 };
             var content = new List<LayoutItem>();
             foreach (var (sy, slice) in stacked)
                 foreach (var item in slice.Items)
@@ -62,7 +69,11 @@ internal static class TextBoxes
                     content.Add(moved);
                 }
             items.Add(new PushItem((x, y, w, h)));
+            // PushItem turns counter-clockwise; text turned clockwise needs a negative angle.
+            if (direction != TextBoxDirection.Horizontal)
+                items.Add(new PushItem(null, direction == TextBoxDirection.CounterClockwise ? 90 : -90, cx, cy));
             items.AddRange(content);
+            if (direction != TextBoxDirection.Horizontal) items.Add(new PopItem());
             items.Add(new PopItem());
         }
 
