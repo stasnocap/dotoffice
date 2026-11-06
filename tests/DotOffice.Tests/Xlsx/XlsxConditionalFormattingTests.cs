@@ -1063,6 +1063,9 @@ public class XlsxConditionalFormattingTests
     [InlineData("LARGE(P:Q!A1:A2,2)=3", "A1,A2")]
     [InlineData("SMALL(P:Q!A1:A2,2)=2", "A1")]
     [InlineData("RANK(3,P:Q!A1:A2)=2", "A1,A2")] // the 10 is larger; RANK is #N/A for a value not in the range
+    [InlineData("AND(P:Q!A1:A2,A1>5)", "A2")] // every cell on both sheets is non-zero; only A2 is above 5
+    [InlineData("OR(P:Q!A1:A2,0)", "A1,A2")]
+    [InlineData("XOR(A1>5,P:Q!A1:A2)", "A2")] // A1: 0 + 4 true cells is even; A2: 1 + 2 is odd
     public void Three_dimensional_references_aggregate_over_the_sheets_in_between(string rule, string expected)
     {
         var builder = new XlsxBuilder { Styles = StylesWithDxfs([Dxf(Red), Dxf(Green)]) }
