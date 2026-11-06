@@ -123,4 +123,53 @@ public class SectionDirectionTests
         Assert.Equal(792 - 72 + 10 + 1.5, Centre(3, false), 0.5);
         Assert.Equal(612 - 100 + 10 + 2, Centre(4, true), 0.5);
     }
+
+    private const string TextBox =
+        "<wps:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/></a:xfrm><a:prstGeom prst=\"rect\"/><a:solidFill><a:srgbClr val=\"FFFF00\"/></a:solidFill></wps:spPr>" +
+        "<wps:txbx><w:txbxContent><w:p><w:r><w:t>BOX</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\"/>";
+
+    private static LayoutPage FloatPage(string direction)
+    {
+        // A 100 x 60 pt box at offset 200 / 300 pt of the page, with text wrapped around it. The offsets are in the turned frame, as in LibreOffice.
+        var body = P(AnchorShape(100, 60, Position("page", "2540000", "page", "3810000"), TextBox, "<wp:wrapSquare wrapText=\"bothSides\"/>") + R(Lorem, Font)) +
+                   Section(extra: $"<w:textDirection w:val=\"{direction}\"/>");
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        return new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+    }
+
+    // The physical box (x0, x1, y0, y1): 100 wide and 60 high, upright. tbRl: the turned rectangle hangs from the top right corner (312, 200), as in LibreOffice.
+    private static (double X0, double X1, double Y0, double Y1) PhysicalBox(string direction) =>
+        direction == "tbRl" ? (212, 312, 200, 260) : (300, 400, 532, 592);
+
+    [Theory]
+    [InlineData("tbRl")]
+    [InlineData("btLr")]
+    public void Floating_box_in_a_vertical_section_stays_upright(string direction)
+    {
+        var page = FloatPage(direction);
+        var fill = Assert.Single(page.Items.OfType<RectItem>());
+        Assert.Equal((100.0, 60.0), (fill.Width, fill.Height));
+        var box = PhysicalBox(direction);
+        var (x, y) = Physical(page, fill.X + fill.Width / 2, fill.Y + fill.Height / 2);
+        Assert.Equal((box.X0 + box.X1) / 2, x, 0.5);
+        Assert.Equal((box.Y0 + box.Y1) / 2, y, 0.5);
+        // The box is drawn against the turn of the page.
+        Assert.Equal(-page.Items.OfType<PushItem>().First().Rotation, page.Items.OfType<PushItem>().Skip(1).First().Rotation);
+    }
+
+    [Theory]
+    [InlineData("tbRl")]
+    [InlineData("btLr")]
+    public void Text_of_a_vertical_section_wraps_around_a_floating_box(string direction)
+    {
+        var page = FloatPage(direction);
+        var box = PhysicalBox(direction);
+        var words = Texts(page).Where(t => t.Text.Trim().Length > 0 && !t.Text.Contains("BOX"))
+            .Select(t => Physical(page, t.X, t.Baseline)).ToList();
+        Assert.True(words.Count > 100);
+        Assert.DoesNotContain(words, w => w.X > box.X0 + 1 && w.X < box.X1 - 1 && w.Y > box.Y0 + 1 && w.Y < box.Y1 - 1);
+        // Text goes on the wider side of the box, as in a horizontal section; lines through its band start right at its edge.
+        double edge = direction == "tbRl" ? box.Y1 : box.Y0;
+        Assert.Contains(words, w => w.X > box.X0 + 1 && w.X < box.X1 - 1 && Math.Abs(w.Y - edge) < 1);
+    }
 }

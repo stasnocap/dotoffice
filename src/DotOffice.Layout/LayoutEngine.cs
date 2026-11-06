@@ -509,7 +509,7 @@ public sealed class LayoutEngine
         var front = new List<LayoutItem>();
         foreach (var placed in page.Floats)
         {
-            var items = Realize(placed.Object, placed.X, placed.Y, context);
+            var items = Realize(placed.Object, placed.X, placed.Y, context, section.TextDirection);
             if (placed.Behind) output.Items.AddRange(items); else front.AddRange(items);
         }
 
@@ -522,7 +522,7 @@ public sealed class LayoutEngine
                 foreach (var f in slice.Floats)
                 {
                     var (fx, fy) = FloatOrigin(f, page, section, (page.Margins.Left, section.ContentWidth), top + y);
-                    var items = Realize(f, fx, fy, context);
+                    var items = Realize(f, fx, fy, context, section.TextDirection);
                     if (f.BehindText) output.Items.InsertRange(0, items); else front.AddRange(items);
                 }
             }
@@ -647,7 +647,14 @@ public sealed class LayoutEngine
     /// <summary>Positions a floating image on <paramref name="page"/>; <paramref name="anchorY"/> is the top of its paragraph.</summary>
     private static (double X, double Y) FloatOrigin(FloatingObject f, Page page, Section section, (double X, double Width) column, double anchorY)
     {
-        var m = page.Margins;
+        // An upright picture or box on a turned page takes the turned rectangle: its width runs across the lines, as LibreOffice places it.
+        bool turned = section.TextDirection != CellTextDirection.LeftToRight && f is FloatingImage or FloatingTextBox;
+        return FloatBox(f, page.Width, page.Height, page.Margins, page.Mirrored, column, anchorY, turned ? f.Height : f.Width, turned ? f.Width : f.Height);
+    }
+
+    private static (double X, double Y) FloatBox(FloatingObject f, double pageWidth, double pageHeight, Thickness m, bool mirrored, (double X, double Width) column, double anchorY, double width, double height)
+    {
+        var page = (Width: pageWidth, Height: pageHeight, Margins: m, Mirrored: mirrored);
         var (hx, hw) = f.Horizontal.RelativeTo switch
         {
             FloatReference.Page => (0, page.Width),
@@ -676,16 +683,25 @@ public sealed class LayoutEngine
             FloatAlignment.Outside => swap ? start : start + size - extent,
             _ => start + p.Offset,
         };
-        double x = Place(f.Horizontal, hx, hw, f.Width, page.Mirrored);
-        double y = Place(f.Vertical, vy, vh, f.Height, false);
+        double x = Place(f.Horizontal, hx, hw, width, page.Mirrored);
+        double y = Place(f.Vertical, vy, vh, height, false);
         // Keep the image on the page, as Word does for objects anchored to text.
-        y = Math.Clamp(y, 0, Math.Max(0, page.Height - f.Height));
+        y = Math.Clamp(y, 0, Math.Max(0, page.Height - height));
         return (x, y);
     }
 
     /// <summary>The layout items of a floating object whose top-left corner is at (<paramref name="x"/>, <paramref name="y"/>).</summary>
-    private static List<LayoutItem> Realize(FloatingObject f, double x, double y, FlowContext context)
+    private static List<LayoutItem> Realize(FloatingObject f, double x, double y, FlowContext context, CellTextDirection direction = CellTextDirection.LeftToRight)
     {
+        if (direction != CellTextDirection.LeftToRight && f is FloatingImage or FloatingTextBox)
+        {
+            // On a turned page (x, y) is the corner of the turned rectangle: draw the object upright about its centre, against the turn of the page.
+            double cx = x + f.Height / 2, cy = y + f.Width / 2;
+            var items = new List<LayoutItem> { new PushItem(null, direction == CellTextDirection.TopToBottom ? 90 : -90, cx, cy) };
+            items.AddRange(Realize(f, cx - f.Width / 2, cy - f.Height / 2, context));
+            items.Add(new PopItem());
+            return items;
+        }
         if (f is FloatingTable table) return table.Items.Select(i => i.Offset(x, y)).ToList();
         if (f is FloatingImage image) return [new ImageItem(x, y, f.Width, f.Height, image.Image)];
         return f is FloatingTextBox box ? TextBoxes.Realize(box, x, y, context) : [];
@@ -782,7 +798,15 @@ public sealed class LayoutEngine
                 if (f.Wrap != TextWrap.None)
                 {
                     var d = f.Distance;
-                    exclusion = new Exclusion(item.X - d.Left, item.Y - d.Top, f.Width + d.Left + d.Right, f.Height + d.Top + d.Bottom,
+                    double w = f.Width, h = f.Height;
+                    var direction = page.Region.Section.TextDirection;
+                    if (direction != CellTextDirection.LeftToRight && f is FloatingImage or FloatingTextBox)
+                    {
+                        // The rectangle is turned a quarter on the page, and so are its distances (as the margins).
+                        d = direction == CellTextDirection.TopToBottom ? new Thickness(d.Right, d.Bottom, d.Left, d.Top) : new Thickness(d.Left, d.Top, d.Right, d.Bottom);
+                        (w, h) = (h, w);
+                    }
+                    exclusion = new Exclusion(item.X - d.Left, item.Y - d.Top, w + d.Left + d.Right, h + d.Top + d.Bottom,
                         FullWidth: f.Wrap == TextWrap.TopAndBottom);
                     page.Exclusions.Add(exclusion.Value);
                 }
