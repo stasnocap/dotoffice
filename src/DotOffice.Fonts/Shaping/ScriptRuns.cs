@@ -61,9 +61,35 @@ internal static class ScriptRuns
                     break;
                 }
             }
+            if (script <= ScriptData.Inherited) script = MarkScriptIn(text, start, end);
             runs.Add((start, end - start, ScriptData.Tags[script]));
         }
         return runs;
+    }
+
+    /// <summary>
+    /// A run of only Common and Inherited characters has no script of its own, and LibreOffice leaves HarfBuzz to
+    /// guess one (hb_buffer_guess_segment_properties: the first character whose Unicode script is not Common or
+    /// Inherited). The split above treats every non-spacing mark as Inherited, so for a mark with no base before it
+    /// the guess finds the mark's own script; without it a lone Khmer or Myanmar mark would miss its dotted circle.
+    /// </summary>
+    private static byte MarkScriptIn(string text, int start, int end)
+    {
+        for (int i = start; i < end; i++)
+        {
+            int cp = char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])
+                ? char.ConvertToUtf32(text[i], text[i++ + 1]) : text[i];
+            var starts = ScriptData.MarkStarts;
+            int lo = 0, hi = starts.Length - 1;
+            while (lo < hi)
+            {
+                int mid = (lo + hi + 1) >> 1;
+                if (starts[mid] <= cp) lo = mid; else hi = mid - 1;
+            }
+            byte own = ScriptData.MarkScripts[lo];
+            if (own > ScriptData.Inherited) return own;
+        }
+        return ScriptData.Common;
     }
 
     /// <summary>The script index of a character, with LibreOffice's adjustments (see ScriptData).</summary>

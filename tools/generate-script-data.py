@@ -50,6 +50,9 @@ def main():
     for lo, hi, (name,) in ranges(load("Scripts.txt")):
         scripts[lo:hi + 1] = bytes([index[codes[name]]]) * (hi - lo + 1)
 
+    own = bytearray(scripts)  # before the adjustment below
+    marks = bytearray(len(scripts))  # script of each non-spacing mark, 0 for other characters
+
     # Non-spacing marks inherit the script of their base (LibreOffice tdf#154549).
     first = None
     for line in load("UnicodeData.txt").splitlines():
@@ -62,11 +65,17 @@ def main():
         first = None
         if fields[2] == "Mn":
             scripts[lo:cp + 1] = bytes([index["Zinh"]]) * (cp - lo + 1)
+            marks[lo:cp + 1] = own[lo:cp + 1]
 
     starts, values = [], []
     for cp in range(0x110000):
         if not values or scripts[cp] != values[-1]:
             starts.append(cp); values.append(scripts[cp])
+
+    mstarts, mvalues = [], []
+    for cp in range(0x110000):
+        if not mvalues or marks[cp] != mvalues[-1]:
+            mstarts.append(cp); mvalues.append(marks[cp])
 
     tags = ["DFLT", "DFLT", "DFLT"] + [TAG_EXCEPTIONS.get(c, c[0].lower() + c[1:]) for c in names[3:]]
     out = os.path.join(ROOT, "src", "DotOffice.Fonts", "Shaping", "ScriptData.g.cs")
@@ -92,6 +101,16 @@ def main():
         f.write("    public static ReadOnlySpan<byte> RangeScripts =>\n    [\n")
         for i in range(0, len(values), 24):
             f.write("        " + ", ".join(str(v) for v in values[i:i + 24]) + ",\n")
+        f.write("    ];\n\n")
+        f.write("    /// <summary>First code point of each range of <see cref=\"MarkScripts\"/>.</summary>\n")
+        f.write("    public static ReadOnlySpan<int> MarkStarts => new int[]\n    {\n")
+        for i in range(0, len(mstarts), 12):
+            f.write("        " + ", ".join(f"0x{s:X}" for s in mstarts[i:i + 12]) + ",\n")
+        f.write("    };\n\n")
+        f.write("    /// <summary>The Unicode script of each non-spacing mark (which RangeScripts makes Inherited), 0 elsewhere.</summary>\n")
+        f.write("    public static ReadOnlySpan<byte> MarkScripts =>\n    [\n")
+        for i in range(0, len(mvalues), 24):
+            f.write("        " + ", ".join(str(v) for v in mvalues[i:i + 24]) + ",\n")
         f.write("    ];\n}\n")
     print(f"{len(starts)} ranges, {len(names)} scripts written to {os.path.normpath(out)}")
 
