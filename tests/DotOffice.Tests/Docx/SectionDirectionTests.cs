@@ -101,4 +101,26 @@ public class SectionDirectionTests
         Assert.Contains(pages[0].Items, i => i is PushItem);
         Assert.DoesNotContain(pages[1].Items, i => i is PushItem);
     }
+
+    [Fact]
+    public void Page_borders_of_a_section_running_down_stay_on_their_physical_edges()
+    {
+        // Margins: left 50, right 100, top and bottom 72. Distinct widths tell the edges apart; LibreOffice puts the box around the text, 10pt out.
+        string borders = "<w:pgBorders w:offsetFrom=\"text\"><w:top w:val=\"single\" w:sz=\"8\" w:space=\"10\"/><w:left w:val=\"single\" w:sz=\"16\" w:space=\"10\"/>" +
+                         "<w:bottom w:val=\"single\" w:sz=\"24\" w:space=\"10\"/><w:right w:val=\"single\" w:sz=\"32\" w:space=\"10\"/></w:pgBorders>";
+        var body = P(R(Lorem, Font)) + "<w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"2000\" w:bottom=\"1440\" w:left=\"1000\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/>" +
+                   borders + "<w:textDirection w:val=\"tbRl\"/></w:sectPr>";
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+        double Centre(double width, bool x)
+        {
+            var line = page.Items.OfType<LineItem>().Single(l => Math.Abs(l.Width - width) < 0.01);
+            var a = Physical(page, line.X1, line.Y1);
+            return x ? a.X : a.Y;
+        }
+        Assert.Equal(72 - 10 - 0.5, Centre(1, false), 0.5);
+        Assert.Equal(50 - 10 - 1, Centre(2, true), 0.5);
+        Assert.Equal(792 - 72 + 10 + 1.5, Centre(3, false), 0.5);
+        Assert.Equal(612 - 100 + 10 + 2, Centre(4, true), 0.5);
+    }
 }

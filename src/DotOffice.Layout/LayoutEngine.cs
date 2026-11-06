@@ -407,10 +407,19 @@ public sealed class LayoutEngine
             DifferentFirstPage = s.DifferentFirstPage, PageNumberStart = s.PageNumberStart, PageNumberFormat = s.PageNumberFormat,
             DefaultHeader = s.DefaultHeader, FirstHeader = s.FirstHeader, EvenHeader = s.EvenHeader,
             DefaultFooter = s.DefaultFooter, FirstFooter = s.FirstFooter, EvenFooter = s.EvenFooter,
-            Columns = s.Columns, LineNumbering = s.LineNumbering, PageBorders = s.PageBorders,
+            Columns = s.Columns, LineNumbering = s.LineNumbering, PageBorders = TurnedBorders(s.PageBorders, s.TextDirection),
         };
         turned.Blocks.AddRange(s.Blocks);
         return turned;
+    }
+
+    /// <summary>Page borders for the turned page: each logical edge takes the border of the physical edge it lies on, as the margins do.</summary>
+    private static PageBorders? TurnedBorders(PageBorders? b, CellTextDirection direction)
+    {
+        if (b is null) return null;
+        return direction == CellTextDirection.TopToBottom
+            ? b with { Top = b.Right, Right = b.Bottom, Bottom = b.Left, Left = b.Top }
+            : b with { Top = b.Left, Right = b.Top, Bottom = b.Right, Left = b.Bottom };
     }
 
     private Page NewPage(Section section, int number, bool sectionStart, DocumentSettings settings)
