@@ -33,6 +33,9 @@ internal class Slice
 
     public bool IsHeaderRow { get; set; }
 
+    /// <summary>For a numbered paragraph line: its baseline in the slice and the font of its number (w:lnNumType).</summary>
+    public (double Baseline, DotOffice.Fonts.TrueTypeFont Font, double Size)? LineNumber { get; set; }
+
     /// <summary>Footnotes referenced in this slice; they go to the bottom of the page the slice lands on.</summary>
     public IReadOnlyList<Note> Footnotes { get; set; } = [];
 
@@ -272,6 +275,11 @@ internal static class ParagraphLayouter
             breakBefore = line.EndsWithPageBreak && !line.EndsWithColumnBreak;
             columnBreakBefore = line.EndsWithColumnBreak;
 
+            if (!props.SuppressLineNumbers)
+            {
+                var numberFont = ctx.Fonts.ForCharacter(p.MarkProperties, '0');
+                slice.LineNumber = (lineTop + baseline, numberFont.Font, p.MarkProperties.FontSize);
+            }
             if (props.Shading is { } shading)
                 slice.Items.Add(new RectItem(areaLeft, areaTop, areaRight - areaLeft, y - areaTop, shading));
             DrawLine(line, x0, lineTop + baseline, slice.Items, ctx);

@@ -64,12 +64,28 @@ public sealed class Section
 
     public SectionColumns Columns { get; init; } = SectionColumns.Single;
 
+    /// <summary>Line numbers in the margin (w:lnNumType), or null.</summary>
+    public LineNumbering? LineNumbering { get; init; }
+
     /// <summary>Page borders (w:pgBorders), or null.</summary>
     public PageBorders? PageBorders { get; init; }
 
     public List<Block> Blocks { get; } = [];
 
     public double ContentWidth => PageWidth - Margins.Left - Margins.Right;
+}
+
+public enum LineNumberRestart { NewPage, NewSection, Continuous }
+
+/// <summary>Line numbering of a section (w:lnNumType): every <see cref="CountBy"/>th line gets its number, <see cref="Distance"/> points left of the text.</summary>
+public sealed record LineNumbering
+{
+    public int CountBy { get; init; } = 1;
+    public int Start { get; init; } = 1;
+
+    /// <summary>Space between the number and the text; null is Word's automatic distance.</summary>
+    public double? Distance { get; init; }
+    public LineNumberRestart Restart { get; init; } = LineNumberRestart.Continuous;
 }
 
 public enum PageBorderDisplay { AllPages, FirstPage, NotFirstPage }

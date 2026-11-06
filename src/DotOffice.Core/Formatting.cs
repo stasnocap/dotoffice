@@ -138,6 +138,9 @@ public sealed record ParagraphProperties
     public bool ContextualSpacing { get; init; }
 
     public bool KeepWithNext { get; init; }
+
+    /// <summary>The paragraph's lines are not numbered (w:suppressLineNumbers).</summary>
+    public bool SuppressLineNumbers { get; init; }
     public bool KeepLinesTogether { get; init; }
     public bool PageBreakBefore { get; init; }
     public bool WidowControl { get; init; } = true;

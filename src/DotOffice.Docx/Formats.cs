@@ -218,6 +218,7 @@ internal sealed record ParaFormat
     public bool? AfterAuto { get; init; }
     public LineSpacing? Line { get; init; }
     public bool? KeepNext { get; init; }
+    public bool? SuppressLineNumbers { get; init; }
     public bool? KeepLines { get; init; }
     public bool? PageBreakBefore { get; init; }
     public bool? WidowControl { get; init; }
@@ -246,6 +247,7 @@ internal sealed record ParaFormat
         AfterAuto = over.AfterAuto ?? AfterAuto,
         Line = over.Line ?? Line,
         KeepNext = over.KeepNext ?? KeepNext,
+        SuppressLineNumbers = over.SuppressLineNumbers ?? SuppressLineNumbers,
         KeepLines = over.KeepLines ?? KeepLines,
         PageBreakBefore = over.PageBreakBefore ?? PageBreakBefore,
         WidowControl = over.WidowControl ?? WidowControl,
@@ -319,6 +321,7 @@ internal sealed record ParaFormat
                     };
                     break;
                 case "keepNext": f = f with { KeepNext = r.OnOff() }; break;
+                case "suppressLineNumbers": f = f with { SuppressLineNumbers = r.OnOff() }; break;
                 case "bidi": f = f with { Bidi = r.OnOff() }; break;
                 case "keepLines": f = f with { KeepLines = r.OnOff() }; break;
                 case "pageBreakBefore": f = f with { PageBreakBefore = r.OnOff() }; break;

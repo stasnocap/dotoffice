@@ -721,6 +721,20 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     d.Header = r.TwipsAttr("header");
                     d.Footer = r.TwipsAttr("footer");
                     break;
+                case "lnNumType":
+                    d.LineNumbering = new LineNumbering
+                    {
+                        CountBy = Math.Max(1, r.IntAttr("countBy") ?? 1),
+                        Start = r.IntAttr("start") ?? 1,
+                        Distance = r.TwipsAttr("distance"),
+                        Restart = r.WAttr("restart") switch
+                        {
+                            "newPage" => LineNumberRestart.NewPage,
+                            "newSection" => LineNumberRestart.NewSection,
+                            _ => LineNumberRestart.Continuous,
+                        },
+                    };
+                    break;
                 case "pgBorders":
                     d.PageBorders = ReadPageBorders(r);
                     continue;

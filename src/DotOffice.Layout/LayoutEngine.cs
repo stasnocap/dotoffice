@@ -148,10 +148,11 @@ public sealed class LayoutEngine
         var fields = new FieldValues(pages.Count, Bookmarks(pages),
             pages.GroupBy(p => p.Section).ToDictionary(g => g.Key, g => g.Count()));
         var result = new LayoutDocument { Title = document.Title, Author = document.Author };
+        var lineNumbers = NumberLines(pages);
         foreach (var page in pages)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            result.Pages.Add(Render(page, fields, settings));
+            result.Pages.Add(Render(page, fields, settings, lineNumbers));
         }
         return result;
     }
@@ -391,7 +392,33 @@ public sealed class LayoutEngine
         return page;
     }
 
-    private LayoutPage Render(Page page, FieldValues fields, DocumentSettings settings)
+    /// <summary>The line number of each numbered paragraph line (w:lnNumType): restarted per page or section, or running on.</summary>
+    private static Dictionary<Slice, int> NumberLines(List<Page> pages)
+    {
+        var numbers = new Dictionary<Slice, int>(ReferenceEqualityComparer.Instance);
+        int count = 0;
+        Section? previous = null;
+        foreach (var page in pages)
+        {
+            bool newPage = true;
+            foreach (var placement in page.Placed)
+            {
+                if (placement.Slice.LineNumber is null || placement.Region.Section.LineNumbering is not { } rule) continue;
+                if (!ReferenceEquals(previous, placement.Region.Section) && (rule.Restart == LineNumberRestart.NewSection || previous is null)
+                    || newPage && rule.Restart == LineNumberRestart.NewPage)
+                    count = rule.Start - 1;
+                previous = placement.Region.Section;
+                newPage = false;
+                numbers[placement.Slice] = ++count;
+            }
+        }
+        return numbers;
+    }
+
+    /// <summary>Word's automatic distance between line numbers and text (a guess: 0.25 inch).</summary>
+    private const double AutoLineNumberDistance = 18;
+
+    private LayoutPage Render(Page page, FieldValues fields, DocumentSettings settings, Dictionary<Slice, int> lineNumbers)
     {
         var output = new LayoutPage(page.Width, page.Height);
         var section = page.Section;
@@ -430,7 +457,16 @@ public sealed class LayoutEngine
             double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, section.Margins.Left, section.ContentWidth, context), stacked);
             Story(stacked, page.Height - section.FooterDistance - h);
         }
-        foreach (var placement in page.Placed) Emit(output, placement.Slice, placement.Dx, placement.Y, page, fields);
+        foreach (var placement in page.Placed)
+        {
+            Emit(output, placement.Slice, placement.Dx, placement.Y, page, fields);
+            if (!lineNumbers.TryGetValue(placement.Slice, out int number) || placement.Slice.LineNumber is not { } style) continue;
+            var rule = placement.Region.Section.LineNumbering!;
+            if (number % rule.CountBy != 0) continue;
+            string text = number.ToString(CultureInfo.InvariantCulture);
+            double right = placement.Region.Columns[placement.Column].X - (rule.Distance ?? AutoLineNumberDistance);
+            output.Items.Add(new TextItem(right - style.Font.MeasureText(text, style.Size), placement.Y + style.Baseline, style.Font, style.Size, text, Color.Black));
+        }
         foreach (var area in page.NoteAreas)
         {
             if (area.Lines.Count == 0) continue;
