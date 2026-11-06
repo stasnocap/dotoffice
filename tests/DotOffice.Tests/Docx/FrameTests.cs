@@ -87,4 +87,29 @@ public class FrameTests
         var beside = Texts(page).Where(t => t.Text.Contains("lorem") && t.X < 300).OrderBy(t => t.Baseline).ToList();
         Assert.True(beside.Count(t => Right(t) < 612 - 72 - 120 + 1) >= 8);
     }
+
+    private static LayoutPage WithStory(bool footer, string framePr)
+    {
+        var b = new DocxBuilder();
+        var story = P(R("RUNNING", Font)) + Framed("FRAMED", framePr);
+        var rel = footer ? b.AddFooter(story) : b.AddHeader(story);
+        var tag = footer ? "footerReference" : "headerReference";
+        b.Body = P(R("body", Font)) + Section(extra: $"<w:{tag} w:type=\"default\" r:id=\"{rel}\"/>");
+        var doc = DocxReader.Read(b.BuildStream());
+        return new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Frames_in_headers_and_footers_sit_at_their_position_and_stay_out_of_the_story(bool footer)
+    {
+        var page = WithStory(footer, "w:w=\"2400\" w:wrap=\"around\" w:hAnchor=\"margin\" w:xAlign=\"right\" w:vAnchor=\"page\" w:y=\"1440\"");
+        var frame = Texts(page).Single(t => t.Text.StartsWith("FRAMED"));
+        Assert.Equal(612 - 72 - 120, frame.X, 0.5);
+        Assert.InRange(frame.Baseline, 72 + 1, 72 + 25);
+        var running = Texts(page).Single(t => t.Text.StartsWith("RUNNING"));
+        Assert.Equal(72, running.X, 0.5);
+        Assert.NotEqual(frame.Baseline, running.Baseline);
+    }
 }

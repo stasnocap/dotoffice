@@ -473,17 +473,51 @@ public sealed class LayoutEngine
             }
         }
 
+        // Framed paragraphs of a header or footer float at their frame position and push nothing aside; the rest is the story.
+        List<(Paragraph[] Group, FloatingTable Box)> Frames(IReadOnlyList<Block> blocks, out List<Block> rest)
+        {
+            rest = [];
+            var frames = new List<(Paragraph[], FloatingTable)>();
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                if (blocks[i] is Paragraph { Properties.Frame: { } frame })
+                {
+                    var group = new List<Paragraph>();
+                    for (; i < blocks.Count && blocks[i] is Paragraph fp && fp.Properties.Frame == frame; i++) group.Add(fp);
+                    i--;
+                    if (FloatingTable.BuildFrame(group, frame, section.ContentWidth, page.Height, context) is { } box) { frames.Add(([.. group], box)); continue; }
+                    rest.AddRange(group);
+                    continue;
+                }
+                rest.Add(blocks[i]);
+            }
+            return frames;
+        }
+
+        void Framed(List<(Paragraph[] Group, FloatingTable Box)> frames, double top)
+        {
+            foreach (var (_, box) in frames)
+            {
+                var (fx, fy) = FloatOrigin(box, page, section, (page.Margins.Left, section.ContentWidth), top);
+                front.AddRange(Realize(box, fx, fy, context));
+            }
+        }
+
         if (page.Header is not null)
         {
+            var frames = Frames(page.Header.Blocks, out var rest);
             var stacked = new List<(double Y, Slice Slice)>();
-            BlockFlow.Stack(BlockFlow.Build(page.Header.Blocks, page.Margins.Left, section.ContentWidth, context), stacked);
+            BlockFlow.Stack(BlockFlow.Build(rest, page.Margins.Left, section.ContentWidth, context), stacked);
             Story(stacked, section.HeaderDistance);
+            Framed(frames, section.HeaderDistance);
         }
         if (page.Footer is not null)
         {
+            var frames = Frames(page.Footer.Blocks, out var rest);
             var stacked = new List<(double Y, Slice Slice)>();
-            double h = BlockFlow.Stack(BlockFlow.Build(page.Footer.Blocks, page.Margins.Left, section.ContentWidth, context), stacked);
+            double h = BlockFlow.Stack(BlockFlow.Build(rest, page.Margins.Left, section.ContentWidth, context), stacked);
             Story(stacked, page.Height - section.FooterDistance - h);
+            Framed(frames, page.Height - section.FooterDistance - h);
         }
         foreach (var placement in page.Placed)
         {
