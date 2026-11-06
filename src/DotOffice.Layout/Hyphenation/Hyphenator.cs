@@ -50,7 +50,14 @@ internal sealed class Hyphenator
         {
             if (Cache.TryGetValue(language, out var cached)) return cached;
             var assembly = typeof(Hyphenator).Assembly;
-            using var stream = assembly.GetManifestResourceStream($"DotOffice.Hyphenation.hyph_{language.Replace('-', '_')}.dic");
+            // Exact tag first, then the primary language ("de-AT" -> "de" -> any "de_*" file, so "en-GB" uses en_US).
+            string tag = language.Replace('-', '_');
+            string primary = tag.Split('_')[0];
+            string[] names = assembly.GetManifestResourceNames();
+            string? resource = new[] { tag, primary }.Select(t => $"DotOffice.Hyphenation.hyph_{t}.dic")
+                .FirstOrDefault(n => names.Contains(n, StringComparer.OrdinalIgnoreCase))
+                ?? names.Where(n => n.StartsWith($"DotOffice.Hyphenation.hyph_{primary}_", StringComparison.OrdinalIgnoreCase)).Order().FirstOrDefault();
+            using var stream = resource is null ? null : assembly.GetManifestResourceStream(resource);
             return Cache[language] = stream is null ? null : new Hyphenator(new StreamReader(stream));
         }
     }

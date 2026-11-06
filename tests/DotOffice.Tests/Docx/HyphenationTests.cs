@@ -152,4 +152,35 @@ public class HyphenationTests
         Assert.EndsWith("-", lines[0]);
         Assert.Equal(word, lines[0].Split(' ')[^1].TrimEnd('-') + lines[1]);
     }
+
+    private static string LangPara(string lang, string text) =>
+        $"<w:p><w:r><w:rPr><w:rFonts w:ascii=\"Noto Sans\" w:hAnsi=\"Noto Sans\"/><w:lang w:val=\"{lang}\"/></w:rPr><w:t>{text}</w:t></w:r></w:p>";
+
+    [Theory]
+    [InlineData("en-US", true)]
+    [InlineData("en-GB", true)]  // falls back to the primary language's patterns
+    [InlineData("en", true)]
+    [InlineData("de-AT", false)] // no German patterns: the word moves whole
+    [InlineData("xx", false)]
+    public void Language_selects_the_patterns(string lang, bool hyphenated)
+    {
+        int n = Straddling();
+        var lines = Lines(LangPara(lang, Filled(n)), hyphenate: true);
+        Assert.Equal(hyphenated, lines[0].EndsWith('-'));
+        if (!hyphenated) Assert.Equal(Word, lines[1]);
+    }
+
+    [Fact]
+    public void Language_from_the_style_defaults_applies()
+    {
+        int n = Straddling();
+        var doc = DocxReader.Read(new DocxBuilder
+        {
+            Body = Para(Filled(n)) + Section(),
+            Settings = On,
+            Styles = "<w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val=\"de-DE\"/></w:rPr></w:rPrDefault></w:docDefaults>",
+        }.BuildStream());
+        var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+        Assert.DoesNotContain(Texts(page), t => t.Text.EndsWith('-'));
+    }
 }

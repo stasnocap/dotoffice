@@ -250,6 +250,7 @@ internal sealed class StyleSheet
             Strike = Toggle(static f => f.Strike),
             DoubleStrike = Toggle(static f => f.DoubleStrike),
             Hidden = Toggle(static f => f.Vanish),
+            Language = merged.Lang,
             Underline = merged.Underline ?? UnderlineStyle.None,
             Color = merged.Color?.Value,
             Highlight = merged.Highlight?.Value,

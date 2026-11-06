@@ -35,6 +35,7 @@ internal sealed record RunFormat
     public bool? Strike { get; init; }
     public bool? DoubleStrike { get; init; }
     public bool? Vanish { get; init; }
+    public string? Lang { get; init; }
     public UnderlineStyle? Underline { get; init; }
     public ColorSpec? Color { get; init; }
     public ColorSpec? Highlight { get; init; }
@@ -68,6 +69,7 @@ internal sealed record RunFormat
         Strike = over.Strike ?? Strike,
         DoubleStrike = over.DoubleStrike ?? DoubleStrike,
         Vanish = over.Vanish ?? Vanish,
+        Lang = over.Lang ?? Lang,
         Underline = over.Underline ?? Underline,
         Color = over.Color ?? Color,
         Highlight = over.Highlight ?? Highlight,
@@ -125,6 +127,7 @@ internal sealed record RunFormat
                 case "smallCaps": f = f with { SmallCaps = r.OnOff() }; break;
                 case "strike": f = f with { Strike = r.OnOff() }; break;
                 case "dstrike": f = f with { DoubleStrike = r.OnOff() }; break;
+                case "lang": f = f with { Lang = r.WAttr("val") is { Length: > 0 } lang ? lang : f.Lang }; break;
                 case "vanish": f = f with { Vanish = r.OnOff() }; break;
                 case "u": f = f with { Underline = ParseUnderline(r.WAttr("val")) }; break;
                 case "color":

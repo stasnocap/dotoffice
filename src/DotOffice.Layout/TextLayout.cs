@@ -590,7 +590,7 @@ internal static class LineBuilder
     /// <summary>
     /// Splits the word starting at atom <paramref name="at"/> (its text may span several runs) at its last hyphenation
     /// point that fits the line, ending the first part with a hyphen. Words of letters, accented ones included, are
-    /// hyphenated with the English patterns; a word with digits or other symbols inside stays whole.
+    /// hyphenated with the patterns of the first run's language (US English when none is named); a word with digits or other symbols inside stays whole.
     /// </summary>
     private static bool TryHyphenate(List<Atom> atoms, int from, int at, int wordEnd, double startX, double maxX, LineFrame frame, HyphenationOptions options)
     {
@@ -608,7 +608,7 @@ internal static class LineBuilder
         while (last > first && !char.IsLetter(text[last - 1])) last--;
         for (int k = first; k < last; k++) if (!char.IsLetter(text[k])) return false;
         if (options.SkipCaps && text.Count(char.IsLetter) > 1 && !text.Any(char.IsLower)) return false;
-        if (Hyphenator.ForLanguage("en-US") is not { } hyphenator) return false;
+        if (Hyphenator.ForLanguage(atoms[at].Props.Language ?? "en-US") is not { } hyphenator) return false;
 
         // The zone: when the text before the word already ends within it of the right margin, the word moves whole.
         int before = at;
