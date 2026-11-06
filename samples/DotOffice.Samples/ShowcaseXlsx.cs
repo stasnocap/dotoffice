@@ -606,7 +606,7 @@ internal static class ShowcaseXlsx
         var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
         const string Unjoined = "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>";
         var stock = "<c:stockChart>" + ChartSeries(0, true, Unjoined + NoMarker) + ChartSeries(1, true, Unjoined + NoMarker) + ChartSeries(2, true, Unjoined + "<c:marker><c:symbol val=\"dash\"/><c:size val=\"7\"/></c:marker>") +
-                    "<c:hiLowLines/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" + Axes();
+                    "<c:hiLowLines/><c:upDownBars><c:gapWidth val=\"150\"/></c:upDownBars><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" + Axes();
         var surface = "<c:surfaceChart/>";
         string[] charts =
         [

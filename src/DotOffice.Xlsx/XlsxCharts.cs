@@ -555,7 +555,7 @@ internal static class XlsxCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, Grouping = grouping, Title = title, TitleSize = titleSize, Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize, Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),

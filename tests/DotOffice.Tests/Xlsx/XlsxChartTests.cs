@@ -262,6 +262,16 @@ public class XlsxChartTests
     }
 
     [Fact]
+    public void Up_down_bars_of_a_stock_chart_are_read_with_their_gap()
+    {
+        var stock = "<c:stockChart>" + Ser(0, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + Ser(1, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + "<c:upDownBars><c:gapWidth val=\"80\"/></c:upDownBars><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" +
+                    "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+        var chart = Assert.Single(Read(Space(stock)).Sheet.Charts);
+        Assert.True(chart.UpDownBars);
+        Assert.Equal(80, chart.UpDownGap);
+    }
+
+    [Fact]
     public void Reads_doughnut_and_radar_charts()
     {
         var doughnut = "<c:doughnutChart><c:varyColors val=\"1\"/>" + Ser(0, "S!$B$1", "S!$A$2:$A$4", "S!$B$2:$B$4").Replace("</c:ser>", "<c:dLbls><c:showVal val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") +

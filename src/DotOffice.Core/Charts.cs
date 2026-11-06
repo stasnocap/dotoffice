@@ -126,6 +126,12 @@ public sealed record SheetChart : SheetObject
     /// <summary>Whether a vertical line joins the highest and lowest value of every category (stock charts, <c>hiLowLines</c>).</summary>
     public bool HiLowLines { get; init; }
 
+    /// <summary>Whether a body joins the first and last series of every category (candlesticks, <c>upDownBars</c>): white when the last is above the first, black otherwise.</summary>
+    public bool UpDownBars { get; init; }
+
+    /// <summary>The gap between up/down bars as a percentage of their width.</summary>
+    public double UpDownGap { get; init; } = 150;
+
     public string? Title { get; init; }
 
     public double TitleSize { get; init; } = 14;

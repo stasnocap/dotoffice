@@ -482,6 +482,17 @@ public sealed partial class SheetLayoutEngine
                         var vs = list.Where(q => i < q.Values.Count && q.Values[i] is not null).Select(q => q.Values[i]!.Value).ToList();
                         if (vs.Count >= 2) items.Add(new LineItem(CategoryX(i), ValueY(scale, vs.Max()), CategoryX(i), ValueY(scale, vs.Min()), 1, new Color(0x40, 0x40, 0x40)));
                     }
+                if (chart.UpDownBars && !group.Secondary && list.Count >= 2)
+                {
+                    double bodyWidth = plotWidth / categories / (1 + chart.UpDownGap / 100);
+                    for (int i = 0; i < categories; i++)
+                    {
+                        if (i >= list[0].Values.Count || i >= list[^1].Values.Count || list[0].Values[i] is not { } open || list[^1].Values[i] is not { } close) continue;
+                        double bodyTop = ValueY(scale, Math.Max(open, close)), bodyBottom = ValueY(scale, Math.Min(open, close)), bodyLeft = CategoryX(i) - bodyWidth / 2;
+                        items.Add(new RectItem(bodyLeft, bodyTop, bodyWidth, Math.Max(bodyBottom - bodyTop, 0.75), Color.Black));
+                        if (close > open && bodyWidth > 1.5 && bodyBottom - bodyTop > 1.5) items.Add(new RectItem(bodyLeft + 0.75, bodyTop + 0.75, bodyWidth - 1.5, bodyBottom - bodyTop - 1.5, Color.White));
+                    }
+                }
                 for (int j = 0; j < seriesCount; j++)
                 {
                     var s = list[j];
