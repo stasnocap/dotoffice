@@ -563,8 +563,11 @@ public sealed class LayoutEngine
         {
             FloatReference.Page => (0, page.Width),
             FloatReference.Column or FloatReference.Character => column,
-            FloatReference.LeftMargin or FloatReference.InsideMargin => (0, m.Left),
-            FloatReference.RightMargin or FloatReference.OutsideMargin => (page.Width - m.Right, m.Right),
+            FloatReference.LeftMargin => (0, m.Left),
+            FloatReference.RightMargin => (page.Width - m.Right, m.Right),
+            // Inside is the left margin, except on the even pages of mirrored margins, where it is the right one.
+            FloatReference.InsideMargin => page.Mirrored ? (page.Width - m.Right, m.Right) : (0, m.Left),
+            FloatReference.OutsideMargin => page.Mirrored ? (0, m.Left) : (page.Width - m.Right, m.Right),
             _ => (m.Left, page.Width - m.Left - m.Right),
         };
         var (vy, vh) = f.Vertical.RelativeTo switch
@@ -575,15 +578,17 @@ public sealed class LayoutEngine
             FloatReference.BottomMargin => (page.Height - m.Bottom, m.Bottom),
             _ => (anchorY, 0.0),
         };
-        static double Place(FloatPosition p, double start, double size, double extent) => p.Alignment switch
+        static double Place(FloatPosition p, double start, double size, double extent, bool swap) => p.Alignment switch
         {
             FloatAlignment.Start => start,
             FloatAlignment.Center => start + (size - extent) / 2,
             FloatAlignment.End => start + size - extent,
+            FloatAlignment.Inside => swap ? start + size - extent : start,
+            FloatAlignment.Outside => swap ? start : start + size - extent,
             _ => start + p.Offset,
         };
-        double x = Place(f.Horizontal, hx, hw, f.Width);
-        double y = Place(f.Vertical, vy, vh, f.Height);
+        double x = Place(f.Horizontal, hx, hw, f.Width, page.Mirrored);
+        double y = Place(f.Vertical, vy, vh, f.Height, false);
         // Keep the image on the page, as Word does for objects anchored to text.
         y = Math.Clamp(y, 0, Math.Max(0, page.Height - f.Height));
         return (x, y);

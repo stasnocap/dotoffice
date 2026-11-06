@@ -408,9 +408,11 @@ internal sealed record ParaFormat
         };
         static FloatAlignment Align(string? spec) => spec switch
         {
-            "left" or "inside" or "top" => FloatAlignment.Start,
+            "left" or "top" => FloatAlignment.Start,
+            "inside" => FloatAlignment.Inside,
             "center" => FloatAlignment.Center,
-            "right" or "outside" or "bottom" => FloatAlignment.End,
+            "right" or "bottom" => FloatAlignment.End,
+            "outside" => FloatAlignment.Outside,
             _ => FloatAlignment.Offset,
         };
         string? yAlign = r.WAttr("yAlign");
@@ -586,9 +588,11 @@ internal sealed record TableFormat
         };
         static FloatAlignment Align(string? spec) => spec switch
         {
-            "left" or "inside" or "top" => FloatAlignment.Start,
+            "left" or "top" => FloatAlignment.Start,
+            "inside" => FloatAlignment.Inside,
             "center" => FloatAlignment.Center,
-            "right" or "outside" or "bottom" => FloatAlignment.End,
+            "right" or "bottom" => FloatAlignment.End,
+            "outside" => FloatAlignment.Outside,
             _ => FloatAlignment.Offset,
         };
         string? xSpec = r.WAttr("tblpXSpec"), ySpec = r.WAttr("tblpYSpec");

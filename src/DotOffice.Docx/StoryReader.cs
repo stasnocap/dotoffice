@@ -614,9 +614,11 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     case "align":
                         var alignment = r.ReadElementContentAsString().Trim() switch
                         {
-                            "left" or "top" or "inside" => FloatAlignment.Start,
+                            "left" or "top" => FloatAlignment.Start,
+                            "inside" => FloatAlignment.Inside,
                             "center" => FloatAlignment.Center,
-                            "right" or "bottom" or "outside" => FloatAlignment.End,
+                            "right" or "bottom" => FloatAlignment.End,
+                            "outside" => FloatAlignment.Outside,
                             _ => FloatAlignment.Offset,
                         };
                         if (inHorizontal) horizontal = horizontal with { Alignment = alignment };

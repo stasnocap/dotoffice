@@ -32,6 +32,27 @@ public class FrameTests
         Assert.All(Texts(page).Where(t => t.Baseline == frame.Baseline && t.X < frame.X), t => Assert.True(Right(t) <= frame.X - 9 + 0.5));
     }
 
+    private static LayoutDocument TwoPages(string align, bool mirror)
+    {
+        var body = Framed("FRAMED", $"w:w=\"2400\" w:wrap=\"around\" w:hAnchor=\"margin\" w:xAlign=\"{align}\" w:vAnchor=\"text\" w:y=\"1\"")
+            + P("<w:r><w:br w:type=\"page\"/></w:r>") + Framed("FRAMED", $"w:w=\"2400\" w:wrap=\"around\" w:hAnchor=\"margin\" w:xAlign=\"{align}\" w:vAnchor=\"text\" w:y=\"1\"")
+            + Section();
+        var doc = DocxReader.Read(new DocxBuilder { Body = body, Settings = mirror ? "<w:mirrorMargins/>" : null }.BuildStream());
+        return new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc);
+    }
+
+    [Theory]
+    [InlineData("inside", true, 72, 612 - 72 - 120)]
+    [InlineData("outside", true, 612 - 72 - 120, 72)]
+    [InlineData("inside", false, 72, 72)]
+    [InlineData("outside", false, 612 - 72 - 120, 612 - 72 - 120)]
+    public void Inside_and_outside_swap_on_even_pages_with_mirrored_margins(string align, bool mirror, double odd, double even)
+    {
+        var doc = TwoPages(align, mirror);
+        Assert.Equal(odd, Texts(doc.Pages[0]).First(t => t.Text.StartsWith("FRAMED")).X, 0.5);
+        Assert.Equal(even, Texts(doc.Pages[1]).First(t => t.Text.StartsWith("FRAMED")).X, 0.5);
+    }
+
     [Fact]
     public void Frame_without_width_is_as_wide_as_its_text_and_consecutive_equal_frames_share_one_box()
     {

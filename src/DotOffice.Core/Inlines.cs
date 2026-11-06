@@ -38,7 +38,7 @@ public enum FloatReference
 }
 
 /// <summary>Alignment within the reference area; <see cref="Offset"/> uses <see cref="FloatPosition.Offset"/>.</summary>
-public enum FloatAlignment { Offset, Start, Center, End }
+public enum FloatAlignment { Offset, Start, Center, End, Inside, Outside }
 
 /// <summary>One axis of a floating object's position; <see cref="Offset"/> is in points from the reference's start.</summary>
 public readonly record struct FloatPosition(FloatReference RelativeTo, FloatAlignment Alignment, double Offset);
