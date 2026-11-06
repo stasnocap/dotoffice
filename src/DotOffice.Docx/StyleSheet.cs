@@ -254,6 +254,8 @@ internal sealed class StyleSheet
             Color = merged.Color?.Value,
             Highlight = merged.Highlight?.Value,
             Shading = merged.Shading?.Value,
+            Border = merged.Border is { IsVisible: true } b ? b : null,
+            Emphasis = merged.Emphasis ?? EmphasisMark.None,
             VerticalPosition = merged.VerticalAlign ?? VerticalPosition.Baseline,
             CharacterSpacing = Math.Clamp(merged.Spacing ?? 0, -100, 100),
             BaselineShift = Math.Clamp(merged.Position ?? 0, -500, 500),

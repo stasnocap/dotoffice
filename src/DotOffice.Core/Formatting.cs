@@ -2,6 +2,8 @@ namespace DotOffice.Core;
 
 public enum UnderlineStyle { None, Single, Double, Thick, Dotted, Dashed, Wavy, Words }
 
+public enum EmphasisMark { None, Dot, Comma, Circle, UnderDot }
+
 public enum VerticalPosition { Baseline, Superscript, Subscript }
 
 /// <summary>Fully resolved character formatting. All lengths in points.</summary>
@@ -34,6 +36,12 @@ public sealed record RunProperties
     public Color? Shading { get; init; }
 
     public VerticalPosition VerticalPosition { get; init; }
+
+    /// <summary>Box drawn around the run (w:bdr); null for none.</summary>
+    public Border? Border { get; init; }
+
+    /// <summary>Emphasis mark drawn over (or under) every character (w:em).</summary>
+    public EmphasisMark Emphasis { get; init; }
     public bool Caps { get; init; }
     public bool SmallCaps { get; init; }
     public bool Hidden { get; init; }

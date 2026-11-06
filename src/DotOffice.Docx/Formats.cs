@@ -39,6 +39,8 @@ internal sealed record RunFormat
     public ColorSpec? Color { get; init; }
     public ColorSpec? Highlight { get; init; }
     public ColorSpec? Shading { get; init; }
+    public Border? Border { get; init; }
+    public EmphasisMark? Emphasis { get; init; }
     public VerticalPosition? VerticalAlign { get; init; }
     public double? Spacing { get; init; }
     public double? Position { get; init; }
@@ -70,6 +72,8 @@ internal sealed record RunFormat
         Color = over.Color ?? Color,
         Highlight = over.Highlight ?? Highlight,
         Shading = over.Shading ?? Shading,
+        Border = over.Border ?? Border,
+        Emphasis = over.Emphasis ?? Emphasis,
         VerticalAlign = over.VerticalAlign ?? VerticalAlign,
         Spacing = over.Spacing ?? Spacing,
         Position = over.Position ?? Position,
@@ -128,6 +132,20 @@ internal sealed record RunFormat
                     break;
                 case "highlight": f = f with { Highlight = new ColorSpec(HighlightColor(r.WAttr("val"))) }; break;
                 case "shd": f = f with { Shading = ParseShading(r) }; break;
+                case "bdr": f = f with { Border = Borders.Parse(r) }; break;
+                case "em":
+                    f = f with
+                    {
+                        Emphasis = r.WAttr("val") switch
+                        {
+                            "dot" => EmphasisMark.Dot,
+                            "comma" => EmphasisMark.Comma,
+                            "circle" => EmphasisMark.Circle,
+                            "underDot" => EmphasisMark.UnderDot,
+                            _ => EmphasisMark.None,
+                        },
+                    };
+                    break;
                 case "vertAlign":
                     f = f with
                     {

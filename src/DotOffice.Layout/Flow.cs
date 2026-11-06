@@ -1,3 +1,4 @@
+using System.Text;
 using DotOffice.Core;
 
 namespace DotOffice.Layout;
@@ -385,6 +386,78 @@ internal static class ParagraphLayouter
         }
 
         DrawDecorations(atoms, visible, x0, baseline, items);
+        DrawRunBorders(atoms, visible, x0, baseline, items);
+        DrawEmphasis(atoms, visible, x0, baseline, items);
+    }
+
+    /// <summary>One box per stretch of adjacent atoms sharing a run border (w:bdr), padded by its space.</summary>
+    private static void DrawRunBorders(List<Atom> atoms, int visible, double x0, double baseline, List<LayoutItem> items)
+    {
+        for (int k = 0; k < visible; k++)
+        {
+            if (atoms[k].Props.Border is not { } border || atoms[k].Font is null || atoms[k].Kind is AtomKind.Image or AtomKind.LineBreak or AtomKind.PageBreak) continue;
+            int end = k;
+            double top = double.MaxValue, bottom = double.MinValue;
+            for (; end < visible && atoms[end].Font is not null && atoms[end].Props.Border == border; end++)
+            {
+                var m = atoms[end].Metrics;
+                top = Math.Min(top, baseline - atoms[end].Rise - m.Ascent);
+                bottom = Math.Max(bottom, baseline - atoms[end].Rise - m.Ascent + m.Height);
+            }
+            var last = atoms[end - 1];
+            double x1 = x0 + atoms[k].X - border.Space, x2 = x0 + last.X + last.Advance + border.Space;
+            top -= border.Space; bottom += border.Space;
+            var colored = border with { Color = border.Color ?? atoms[k].Props.Color };
+            AddBorder(items, colored, x1, top, x2, top);
+            AddBorder(items, colored, x1, bottom, x2, bottom);
+            AddBorder(items, colored, x1, top, x1, bottom);
+            AddBorder(items, colored, x2, top, x2, bottom);
+            k = end - 1;
+        }
+    }
+
+    /// <summary>Emphasis marks (w:em): one mark centred over, or for underDot under, each non-space character.</summary>
+    private static void DrawEmphasis(List<Atom> atoms, int visible, double x0, double baseline, List<LayoutItem> items)
+    {
+        for (int k = 0; k < visible; k++)
+        {
+            var a = atoms[k];
+            if (a.Props.Emphasis == EmphasisMark.None || a.Kind != AtomKind.Text || a.Font is null) continue;
+            var color = a.Props.Color ?? Color.Black;
+            var m = a.Metrics;
+            double d = Math.Max(0.6, a.Size * 0.09);
+            double cy = a.Props.Emphasis == EmphasisMark.UnderDot
+                ? baseline - a.Rise - m.Ascent + m.Height - d
+                : baseline - a.Rise - m.Ascent + d;
+            double x = x0 + a.X;
+            foreach (var rune in a.Text.EnumerateRunes())
+            {
+                string s = rune.ToString();
+                double advance = a.Font.Font.MeasureText(s, a.Size) + a.Props.CharacterSpacing;
+                if (!Rune.IsWhiteSpace(rune))
+                {
+                    double cx = x + advance / 2;
+                    switch (a.Props.Emphasis)
+                    {
+                        case EmphasisMark.Circle:
+                            for (int i = 0; i < 12; i++)
+                            {
+                                double t1 = i * Math.PI / 6, t2 = (i + 1) * Math.PI / 6, r = d * 0.9;
+                                items.Add(new LineItem(cx + r * Math.Cos(t1), cy + r * Math.Sin(t1), cx + r * Math.Cos(t2), cy + r * Math.Sin(t2), d * 0.2, color));
+                            }
+                            break;
+                        case EmphasisMark.Comma:
+                            items.Add(new EllipseItem(cx - d / 2, cy - d / 2, d, d, color));
+                            items.Add(new LineItem(cx, cy, cx - d * 0.8, cy + d * 1.6, d * 0.5, color));
+                            break;
+                        default:
+                            items.Add(new EllipseItem(cx - d / 2, cy - d / 2, d, d, color));
+                            break;
+                    }
+                }
+                x += advance;
+            }
+        }
     }
 
     /// <summary>Emits bookmark anchors and one link rectangle per run of atoms sharing a hyperlink.</summary>
