@@ -29,6 +29,18 @@ public class SheetChartLayoutTests
     private static string Text(LayoutPage page) => string.Concat(page.Items.OfType<TextItem>().Select(t => t.Text));
 
     [Fact]
+    public void Candlestick_bodies_are_white_when_the_close_rises_and_black_when_it_falls()
+    {
+        var chart = Chart(ChartKind.Line, Series(Red, 5, 15, 10), Series(Blue, 8, 18, 14), Series(Red, 9, 6, 10)) with { UpDownBars = true };
+        var page = Page(chart);
+        var black = page.Items.OfType<RectItem>().Where(r => r.Fill == Color.Black).OrderBy(r => r.X).ToList();
+        var white = page.Items.OfType<RectItem>().Where(r => r.Fill == Color.White && r.Width < 40 && r.Height < 100).ToList();
+        Assert.Equal(3, black.Count(b => b.Height > 0 && b.Width < 40 && b.Width > 5)); // an outline per category (the third is flat)
+        Assert.Single(white); // only the first rises (5 -> 9); the second falls, the third is unchanged
+        Assert.True(white[0].X > black[0].X && white[0].Width < black[0].Width);
+    }
+
+    [Fact]
     public void Columns_are_rectangles_whose_heights_follow_the_values()
     {
         var page = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20)));

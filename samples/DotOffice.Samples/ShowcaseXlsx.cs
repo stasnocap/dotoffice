@@ -573,12 +573,15 @@ internal static class ShowcaseXlsx
     private static readonly double[][] ChartData = [[12, 19, 28, 24, 35, 41], [8, 14, 11, 22, 18, 30], [5, 9, 16, 12, 20, 15]];
     private static readonly string[] SeriesNames = ["North", "South", "East"];
 
-    private static string ChartSeries(int i, bool cached, string extra = "")
+    // The stock chart's close: above the open (series 0) in four categories, below it in two, so white and black bodies both appear.
+    private static readonly double[] StockClose = [14, 17, 30, 20, 38, 36];
+
+    private static string ChartSeries(int i, bool cached, string extra = "", double[]? data = null)
     {
         string column = ((char)('B' + i)).ToString();
         string name = cached ? $"<c:strCache><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>{SeriesNames[i]}</c:v></c:pt></c:strCache>" : "";
         string cats = cached ? "<c:strCache><c:ptCount val=\"6\"/>" + string.Concat(Quarters.Select((q, k) => $"<c:pt idx=\"{k}\"><c:v>{q}</c:v></c:pt>")) + "</c:strCache>" : "";
-        string vals = cached ? "<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"6\"/>" + string.Concat(ChartData[i].Select((v, k) => $"<c:pt idx=\"{k}\"><c:v>{v}</c:v></c:pt>")) + "</c:numCache>" : "";
+        string vals = cached ? "<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"6\"/>" + string.Concat((data ?? ChartData[i]).Select((v, k) => $"<c:pt idx=\"{k}\"><c:v>{v}</c:v></c:pt>")) + "</c:numCache>" : "";
         return $"<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/><c:tx><c:strRef><c:f>Charts!${column}$3</c:f>{name}</c:strRef></c:tx>{extra}" +
                $"<c:cat><c:strRef><c:f>Charts!$A$4:$A$9</c:f>{cats}</c:strRef></c:cat><c:val><c:numRef><c:f>Charts!${column}$4:${column}$9</c:f>{vals}</c:numRef></c:val></c:ser>";
     }
@@ -605,7 +608,7 @@ internal static class ShowcaseXlsx
         var line = "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>" + ChartSeries(0, true) + ChartSeries(1, true, NoMarker) + "<c:marker val=\"1\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" + Axes();
         var pie = "<c:pieChart><c:varyColors val=\"1\"/>" + ChartSeries(0, true).Replace("</c:ser>", "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/></c:dLbls></c:ser>") + "</c:pieChart>";
         const string Unjoined = "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>";
-        var stock = "<c:stockChart>" + ChartSeries(0, true, Unjoined + NoMarker) + ChartSeries(1, true, Unjoined + NoMarker) + ChartSeries(2, true, Unjoined + "<c:marker><c:symbol val=\"dash\"/><c:size val=\"7\"/></c:marker>") +
+        var stock = "<c:stockChart>" + ChartSeries(0, true, Unjoined + NoMarker) + ChartSeries(1, true, Unjoined + NoMarker) + ChartSeries(2, true, Unjoined + "<c:marker><c:symbol val=\"dash\"/><c:size val=\"7\"/></c:marker>", StockClose) +
                     "<c:hiLowLines/><c:upDownBars><c:gapWidth val=\"150\"/></c:upDownBars><c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" + Axes();
         var surface = "<c:surfaceChart/>";
         string[] charts =

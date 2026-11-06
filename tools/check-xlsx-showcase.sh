@@ -271,6 +271,9 @@ for color in "0.2667 0.4471 0.7686" "0.9294 0.4902 0.1922" "0.6471 0.6471 0.6471
 done
 grep -E "warning xlsx\.drawing" "$log" | grep -q "surface chart" || fail "the surface chart should be reported"
 if grep -E "warning xlsx\.drawing" "$log" | grep -q "stock chart"; then fail "the stock chart should be drawn"; fi
+# Candlesticks: the close is above the open in some categories (white body, 9.51 pt wide inside its outline) and below it in others (black body).
+white_bodies=$(grep -a -A1 "^1 1 1 rg$" charts-qdf.pdf | grep -acE "^[0-9.]+ [0-9.]+ 9\.5108 [0-9.]+ re$" || true)
+[ "$white_bodies" -ge 3 ] || fail "the rising candlestick bodies (white) are missing"
 if grep -E "warning xlsx\.(chart|drawing-approximated)" "$log"; then fail "the supported charts should not warn"; fi
 
 # More chart types: area, doughnut, scatter, bubble and radar are drawn on one page and not reported.
