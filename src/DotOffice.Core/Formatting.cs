@@ -38,6 +38,9 @@ public sealed record RunProperties
     public bool SmallCaps { get; init; }
     public bool Hidden { get; init; }
 
+    /// <summary>Optional ligatures (liga, clig) may form. On by default; DOCX turns them off unless the run asks (w14:ligatures).</summary>
+    public bool Ligatures { get; init; } = true;
+
     /// <summary>Extra space added after every character.</summary>
     public double CharacterSpacing { get; init; }
 

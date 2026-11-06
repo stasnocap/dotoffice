@@ -27,6 +27,7 @@ internal sealed record RunFormat
     public bool? RightToLeft { get; init; }
     public bool? UseComplexScript { get; init; }
     public double? Kerning { get; init; }
+    public string? Ligatures { get; init; }
     public bool? Bold { get; init; }
     public bool? Italic { get; init; }
     public bool? Caps { get; init; }
@@ -57,6 +58,7 @@ internal sealed record RunFormat
         RightToLeft = over.RightToLeft ?? RightToLeft,
         UseComplexScript = over.UseComplexScript ?? UseComplexScript,
         Kerning = over.Kerning ?? Kerning,
+        Ligatures = over.Ligatures ?? Ligatures,
         Bold = over.Bold ?? Bold,
         Italic = over.Italic ?? Italic,
         Caps = over.Caps ?? Caps,
@@ -81,6 +83,12 @@ internal sealed record RunFormat
         if (!r.Enter()) return f;
         while (r.NextChild(depth))
         {
+            if (r.NamespaceURI == WordXml.W14 && r.LocalName == "ligatures")
+            {
+                f = f with { Ligatures = r.GetAttribute("val", WordXml.W14) ?? "none" };
+                r.Skip();
+                continue;
+            }
             if (!r.IsW()) { r.Skip(); continue; }
             switch (r.LocalName)
             {

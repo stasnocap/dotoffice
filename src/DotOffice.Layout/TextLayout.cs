@@ -337,7 +337,7 @@ internal sealed class Itemizer(FontSelector fonts)
         bool kerning = props.KerningMinSize is { } min && size >= min;
         if (!rtl && !TextShaper.NeedsShaping(font.Font, text, kerning)) return (Measure(font, text, size, props, rtl, shape: false), null);
         // Like LibreOffice, text with character spacing has no optional ligatures.
-        var glyphs = TextShaper.Shape(font.Font, rtl ? Mirror(text) : text, rtl, kerning, ligatures: props.CharacterSpacing == 0);
+        var glyphs = TextShaper.Shape(font.Font, rtl ? Mirror(text) : text, rtl, kerning, ligatures: props.Ligatures && props.CharacterSpacing == 0);
         // Mirrored glyphs still stand for the logical character in extracted text.
         if (rtl)
             for (int i = 0; i < glyphs.Length; i++) glyphs[i] = glyphs[i] with { Text = Mirror(glyphs[i].Text) };

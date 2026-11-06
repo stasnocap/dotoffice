@@ -265,6 +265,8 @@ internal sealed class StyleSheet
             RightToLeft = merged.RightToLeft ?? false,
             ComplexScript = merged.UseComplexScript ?? false,
             KerningMinSize = merged.Kerning is > 0 ? merged.Kerning : null,
+            // Word draws no ligatures unless the run has w14:ligatures (other than "none").
+            Ligatures = merged.Ligatures is not (null or "none"),
         };
     }
 

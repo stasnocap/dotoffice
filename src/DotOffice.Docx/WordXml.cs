@@ -15,6 +15,7 @@ internal static class WordXml
     public const string AStrict = "http://purl.oclc.org/ooxml/drawingml/main";
     public const string WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
     public const string WPStrict = "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing";
+    public const string W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
     public const string MC = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
     public static XmlReaderSettings Settings(long maxCharacters) => new()
