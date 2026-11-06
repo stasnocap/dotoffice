@@ -117,6 +117,7 @@ internal sealed class SectionData
 {
     public double? Width, Height, Top, Right, Bottom, Left, Header, Footer, Gutter;
     public bool Landscape, TitlePage;
+    public CellTextDirection TextDirection;
     public SectionStart Start;
     public int? PageNumberStart;
     public PageNumberFormat PageNumberFormat;
@@ -371,6 +372,7 @@ internal sealed class DocxContext
             Margins = new Thickness(Clamp(d.Top, 72, height), Clamp(d.Right, 72, width), Clamp(d.Bottom, 72, height), Clamp(d.Left, 72, width) + Math.Max(0, d.Gutter ?? 0)),
             HeaderDistance = Clamp(d.Header, 36, height),
             FooterDistance = Clamp(d.Footer, 36, height),
+            TextDirection = d.TextDirection,
             Start = d.Start,
             DifferentFirstPage = d.TitlePage,
             PageNumberStart = d.PageNumberStart,

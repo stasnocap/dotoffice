@@ -59,6 +59,9 @@ public sealed class Section
     public Orientation Orientation { get; init; }
     public Thickness Margins { get; init; } = new(72, 72, 72, 72);
 
+    /// <summary>Direction of the lines of the section (<c>w:textDirection</c>); vertical sections lay out on the page turned a quarter.</summary>
+    public CellTextDirection TextDirection { get; init; }
+
     /// <summary>Distance from the top page edge to the top of the header.</summary>
     public double HeaderDistance { get; init; } = 36;
 

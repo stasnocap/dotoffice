@@ -186,11 +186,13 @@ public sealed class LayoutEngine
         var carry = new List<NoteLine>(); // footnote lines continued on the next page
         int pageNumber = 0;
         Section? numberingSection = null;
-        foreach (var section in document.Sections)
+        var sections = document.Sections.Select(Turned).ToList();
+        foreach (var section in sections)
         {
             cancellationToken.ThrowIfCancellationRequested();
             bool sameSize = current is not null && Math.Abs(current.Width - section.PageWidth) < 0.5
-                                                && Math.Abs(current.Height - section.PageHeight) < 0.5;
+                                                && Math.Abs(current.Height - section.PageHeight) < 0.5
+                                                && current.Section.TextDirection == section.TextDirection;
             if (current is null || section.Start != SectionStart.Continuous || !sameSize)
             {
                 if (current is not null && section.Start is SectionStart.EvenPage or SectionStart.OddPage)
@@ -297,10 +299,10 @@ public sealed class LayoutEngine
                     j = k - 1;
                 }
             }
-            int index = document.Sections.IndexOf(section);
-            var next = index + 1 < document.Sections.Count ? document.Sections[index + 1] : null;
+            int index = sections.IndexOf(section);
+            var next = index + 1 < sections.Count ? sections[index + 1] : null;
             // A continuous section break balances the columns above it, as in Word.
-            if (next is { Start: SectionStart.Continuous } && Math.Abs(next.PageWidth - section.PageWidth) < 0.5
+            if (next is { Start: SectionStart.Continuous } && next.TextDirection == section.TextDirection && Math.Abs(next.PageWidth - section.PageWidth) < 0.5
                                                         && Math.Abs(next.PageHeight - section.PageHeight) < 0.5)
                 paginator.Balance();
             current = pages[^1];
@@ -385,6 +387,32 @@ public sealed class LayoutEngine
         Fonts = _fonts, Itemizer = _itemizer, Settings = settings, FieldText = fieldText, Warnings = _options.Warnings,
     };
 
+    /// <summary>
+    /// A section whose lines run up or down is laid out on the page turned a quarter, so that its lines are horizontal: the page's width and
+    /// height and its margins are turned with it. <see cref="Render"/> turns the finished page back. Other sections are returned as they are.
+    /// </summary>
+    private static Section Turned(Section s)
+    {
+        if (s.TextDirection == CellTextDirection.LeftToRight) return s;
+        var m = s.Margins;
+        // Turned clockwise (lines run down), the top of the page becomes the right side, so the logical top margin is the physical right one.
+        var margins = s.TextDirection == CellTextDirection.TopToBottom
+            ? new Thickness(m.Right, m.Bottom, m.Left, m.Top)
+            : new Thickness(m.Left, m.Top, m.Right, m.Bottom);
+        double header = s.HeaderDistance, footer = s.FooterDistance;
+        var turned = new Section
+        {
+            PageWidth = s.PageHeight, PageHeight = s.PageWidth, Orientation = s.Orientation, Margins = margins,
+            TextDirection = s.TextDirection, HeaderDistance = header, FooterDistance = footer, Start = s.Start,
+            DifferentFirstPage = s.DifferentFirstPage, PageNumberStart = s.PageNumberStart, PageNumberFormat = s.PageNumberFormat,
+            DefaultHeader = s.DefaultHeader, FirstHeader = s.FirstHeader, EvenHeader = s.EvenHeader,
+            DefaultFooter = s.DefaultFooter, FirstFooter = s.FirstFooter, EvenFooter = s.EvenFooter,
+            Columns = s.Columns, LineNumbering = s.LineNumbering, PageBorders = s.PageBorders,
+        };
+        turned.Blocks.AddRange(s.Blocks);
+        return turned;
+    }
+
     private Page NewPage(Section section, int number, bool sectionStart, DocumentSettings settings)
     {
         bool first = sectionStart && section.DifferentFirstPage;
@@ -449,6 +477,22 @@ public sealed class LayoutEngine
     private const double AutoLineNumberDistance = 14.5;
 
     private LayoutPage Render(Page page, FieldValues fields, DocumentSettings settings, Dictionary<Slice, int> lineNumbers)
+    {
+        var logical = RenderLogical(page, fields, settings, lineNumbers);
+        var direction = page.Section.TextDirection;
+        if (direction == CellTextDirection.LeftToRight) return logical;
+
+        // The page was laid out turned: turn its items back about the center of the physical page.
+        var physical = new LayoutPage(page.Height, page.Width);
+        double cx = physical.Width / 2, cy = physical.Height / 2;
+        double dx = cx - page.Width / 2, dy = cy - page.Height / 2;
+        physical.Items.Add(new PushItem(null, direction == CellTextDirection.TopToBottom ? -90 : 90, cx, cy));
+        foreach (var item in logical.Items) physical.Items.Add(item.Offset(dx, dy));
+        physical.Items.Add(new PopItem());
+        return physical;
+    }
+
+    private LayoutPage RenderLogical(Page page, FieldValues fields, DocumentSettings settings, Dictionary<Slice, int> lineNumbers)
     {
         var output = new LayoutPage(page.Width, page.Height);
         var section = page.Section;

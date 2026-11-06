@@ -742,6 +742,14 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     d.PageBorders = ReadPageBorders(r);
                     continue;
                 case "titlePg": d.TitlePage = r.OnOff(); break;
+                case "textDirection":
+                    d.TextDirection = r.WAttr("val") switch
+                    {
+                        "btLr" => CellTextDirection.BottomToTop,
+                        "tbRl" or "tbRlV" => CellTextDirection.TopToBottom,
+                        _ => CellTextDirection.LeftToRight,
+                    };
+                    break;
                 case "type":
                     d.Start = r.WAttr("val") switch
                     {
