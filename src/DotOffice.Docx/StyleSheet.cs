@@ -315,6 +315,7 @@ internal sealed class StyleSheet
             LineSpacing = f.Line ?? LineSpacing.Single,
             ContextualSpacing = f.ContextualSpacing ?? false,
             KeepWithNext = f.KeepNext ?? false,
+            Frame = f.Frame,
             SuppressLineNumbers = f.SuppressLineNumbers ?? false,
             KeepLinesTogether = f.KeepLines ?? false,
             PageBreakBefore = f.PageBreakBefore ?? false,

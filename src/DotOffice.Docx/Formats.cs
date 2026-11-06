@@ -251,6 +251,7 @@ internal sealed record ParaFormat
     public int? NumId { get; init; }
     public int? Ilvl { get; init; }
     public bool? Bidi { get; init; }
+    public FrameProperties? Frame { get; init; }
 
     public ParaFormat Merge(ParaFormat? over) => over is null ? this : new ParaFormat
     {
@@ -280,6 +281,7 @@ internal sealed record ParaFormat
         NumId = over.NumId ?? NumId,
         Ilvl = over.Ilvl ?? Ilvl,
         Bidi = over.Bidi ?? Bidi,
+        Frame = over.Frame ?? Frame,
     };
 
     /// <summary>Parses w:pPr. The paragraph mark's w:rPr and w:sectPr are handed to the callbacks.</summary>
@@ -341,6 +343,7 @@ internal sealed record ParaFormat
                 case "keepNext": f = f with { KeepNext = r.OnOff() }; break;
                 case "suppressLineNumbers": f = f with { SuppressLineNumbers = r.OnOff() }; break;
                 case "bidi": f = f with { Bidi = r.OnOff() }; break;
+                case "framePr": f = f with { Frame = ParseFrame(r) }; break;
                 case "keepLines": f = f with { KeepLines = r.OnOff() }; break;
                 case "pageBreakBefore": f = f with { PageBreakBefore = r.OnOff() }; break;
                 case "widowControl": f = f with { WidowControl = r.OnOff() }; break;
@@ -392,6 +395,37 @@ internal sealed record ParaFormat
             r.Skip();
         }
         return tabs;
+    }
+
+    /// <summary>w:framePr. Anchors default to the text (column, paragraph); drop caps are plain frames.</summary>
+    private static FrameProperties? ParseFrame(XmlReader r)
+    {
+        static FloatReference Ref(string? anchor, FloatReference text) => anchor switch
+        {
+            "margin" => FloatReference.Margin,
+            "page" => FloatReference.Page,
+            _ => text,
+        };
+        static FloatAlignment Align(string? spec) => spec switch
+        {
+            "left" or "inside" or "top" => FloatAlignment.Start,
+            "center" => FloatAlignment.Center,
+            "right" or "outside" or "bottom" => FloatAlignment.End,
+            _ => FloatAlignment.Offset,
+        };
+        string? yAlign = r.WAttr("yAlign");
+        double? w = r.TwipsAttr("w"), h = r.TwipsAttr("h");
+        string? hRule = r.WAttr("hRule");
+        return new FrameProperties
+        {
+            Width = w is > 0 ? w : null,
+            Height = h is > 0 && hRule != "auto" ? h : null,
+            HeightExact = hRule == "exact",
+            Horizontal = new FloatPosition(Ref(r.WAttr("hAnchor"), FloatReference.Column), Align(r.WAttr("xAlign")), r.TwipsAttr("x") ?? 0),
+            Vertical = new FloatPosition(Ref(r.WAttr("vAnchor"), FloatReference.Paragraph), yAlign == "inline" ? FloatAlignment.Offset : Align(yAlign), r.TwipsAttr("y") ?? 0),
+            Distance = new Thickness(r.TwipsAttr("vSpace") ?? 0, r.TwipsAttr("hSpace") ?? 0, r.TwipsAttr("vSpace") ?? 0, r.TwipsAttr("hSpace") ?? 0),
+            Wrap = r.WAttr("wrap") is "none" or "notBeside" ? TextWrap.TopAndBottom : TextWrap.Square,
+        };
     }
 
     private static ParaFormat ParseBorders(XmlReader r, ParaFormat f)

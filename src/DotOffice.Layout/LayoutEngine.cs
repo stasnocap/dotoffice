@@ -220,6 +220,22 @@ public sealed class LayoutEngine
             bool keepWithNext = false;
             for (int i = 0; i < section.Blocks.Count; i++)
             {
+                if (section.Blocks[i] is Paragraph { Properties.Frame: { } frame })
+                {
+                    // Consecutive paragraphs with equal frames share one frame.
+                    var group = new List<Paragraph>();
+                    int end = i;
+                    while (end < section.Blocks.Count && section.Blocks[end] is Paragraph fp && fp.Properties.Frame == frame) group.Add((Paragraph)section.Blocks[end++]);
+                    var (fx, fw) = paginator.Column;
+                    var box = FloatingTable.BuildFrame(group, frame, fw, paginator.BodyHeight, bodyContext);
+                    if (box is not null)
+                    {
+                        paginator.PlaceTable(box);
+                        i = end - 1;
+                        continue;
+                    }
+                    bodyContext.Warnings.Warn("docx.frame", "A paragraph frame that does not fit on a page is laid out in the text flow.");
+                }
                 if (section.Blocks[i] is Table { Properties.Position: not null } floating)
                 {
                     var (fx, fw) = paginator.Column;

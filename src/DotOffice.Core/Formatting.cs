@@ -123,6 +123,24 @@ public sealed record BorderSet
                           || InsideHorizontal.IsVisible || InsideVertical.IsVisible;
 }
 
+/// <summary>A paragraph frame (<c>w:framePr</c>): the paragraph floats; consecutive paragraphs with equal frames share one.</summary>
+public sealed record FrameProperties
+{
+    /// <summary>Frame width in points; null means as wide as the text, up to the column.</summary>
+    public double? Width { get; init; }
+
+    /// <summary>Frame height in points; null means as tall as the text.</summary>
+    public double? Height { get; init; }
+
+    /// <summary>The height is fixed (w:hRule exact) rather than a minimum.</summary>
+    public bool HeightExact { get; init; }
+
+    public FloatPosition Horizontal { get; init; } = new(FloatReference.Column, FloatAlignment.Offset, 0);
+    public FloatPosition Vertical { get; init; } = new(FloatReference.Paragraph, FloatAlignment.Offset, 0);
+    public Thickness Distance { get; init; }
+    public TextWrap Wrap { get; init; } = TextWrap.Square;
+}
+
 /// <summary>Fully resolved paragraph formatting. All lengths in points.</summary>
 public sealed record ParagraphProperties
 {
@@ -146,6 +164,9 @@ public sealed record ParagraphProperties
     public bool ContextualSpacing { get; init; }
 
     public bool KeepWithNext { get; init; }
+
+    /// <summary>Set when the paragraph floats in a frame (w:framePr).</summary>
+    public FrameProperties? Frame { get; init; }
 
     /// <summary>The paragraph's lines are not numbered (w:suppressLineNumbers).</summary>
     public bool SuppressLineNumbers { get; init; }
