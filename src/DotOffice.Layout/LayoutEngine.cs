@@ -228,7 +228,8 @@ public sealed class LayoutEngine
                     int end = i;
                     while (end < section.Blocks.Count && section.Blocks[end] is Paragraph fp && fp.Properties.Frame == frame) group.Add((Paragraph)section.Blocks[end++]);
                     var (fx, fw) = paginator.Column;
-                    var box = FloatingTable.BuildFrame(group, frame, fw, paginator.BodyHeight, bodyContext);
+                    var box = FloatingTable.BuildFrame(group, frame, fw, paginator.BodyHeight, bodyContext,
+                        end < section.Blocks.Count ? section.Blocks[end] as Paragraph : null);
                     if (box is not null)
                     {
                         paginator.PlaceTable(box);

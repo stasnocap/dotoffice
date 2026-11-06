@@ -74,9 +74,22 @@ public class FrameTests
             + P(R(Lorem, Font)));
         var cap = Texts(page).First(t => t.Text == "D");
         Assert.Equal(72, cap.X, 0.5);
-        var lines = Texts(page).Where(t => t.Text.Contains("lorem")).OrderBy(t => t.Baseline).ToList();
-        Assert.True(lines[0].X >= Right(cap));
-        Assert.True(lines.Last().X < 80);
+        var lines = Texts(page).Where(t => t.Text.Trim().Length > 0 && t.Text != "D").GroupBy(t => Math.Round(t.Baseline, 1)).OrderBy(g => g.Key)
+            .Select(g => g.Min(t => t.X)).ToList();
+        Assert.True(lines[0] >= Right(cap));
+        Assert.True(lines.Last() < 80);
+    }
+
+    [Fact]
+    public void Drop_cap_wraps_exactly_the_number_of_lines_it_spans_even_if_the_letter_is_taller()
+    {
+        var page = Layout(P(R("D", "<w:rFonts w:ascii=\"Noto Sans\" w:hAnsi=\"Noto Sans\"/><w:sz w:val=\"200\"/>"),
+                "<w:framePr w:dropCap=\"drop\" w:lines=\"3\" w:wrap=\"around\" w:vAnchor=\"text\" w:hAnchor=\"text\"/>")
+            + P(R(Lorem + " " + Lorem, Font)));
+        var cap = Texts(page).First(t => t.Text == "D");
+        var lines = Texts(page).Where(t => t.Text.Trim().Length > 0 && t.Text != "D").GroupBy(t => Math.Round(t.Baseline, 1)).OrderBy(g => g.Key).ToList();
+        Assert.Equal(3, lines.Count(g => g.Min(t => t.X) >= Right(cap)));
+        Assert.True(lines[3].Min(t => t.X) < 80);
     }
 
     [Fact]

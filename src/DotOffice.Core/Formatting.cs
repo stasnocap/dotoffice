@@ -135,6 +135,9 @@ public sealed record FrameProperties
     /// <summary>The height is fixed (w:hRule exact) rather than a minimum.</summary>
     public bool HeightExact { get; init; }
 
+    /// <summary>For a drop cap (w:dropCap drop or margin): how many lines of the following paragraph it spans (w:lines).</summary>
+    public int? DropLines { get; init; }
+
     public FloatPosition Horizontal { get; init; } = new(FloatReference.Column, FloatAlignment.Offset, 0);
     public FloatPosition Vertical { get; init; } = new(FloatReference.Paragraph, FloatAlignment.Offset, 0);
     public Thickness Distance { get; init; }

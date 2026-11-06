@@ -12,7 +12,7 @@ internal sealed class FloatingTable(double width, double height, IReadOnlyList<L
     /// Lays out paragraphs sharing one <c>w:framePr</c> as a floating box. Without a frame width the box is as wide as the
     /// widest paragraph's text (indents included), at most the column; the height is the text's unless the frame sets one.
     /// </summary>
-    public static FloatingTable? BuildFrame(IReadOnlyList<Paragraph> paragraphs, FrameProperties frame, double columnWidth, double maxHeight, FlowContext ctx)
+    public static FloatingTable? BuildFrame(IReadOnlyList<Paragraph> paragraphs, FrameProperties frame, double columnWidth, double maxHeight, FlowContext ctx, Paragraph? following = null)
     {
         double width = frame.Width ?? Math.Min(columnWidth, paragraphs.Max(p =>
             ctx.Itemizer.Itemize(p, ctx.FieldText).Where(a => a.Kind != AtomKind.LineBreak).Sum(a => a.Width)
@@ -22,6 +22,10 @@ internal sealed class FloatingTable(double width, double height, IReadOnlyList<L
         if (slices.Count == 0) return null;
         var stacked = new List<(double Y, Slice Slice)>();
         double height = BlockFlow.Stack(slices, stacked);
+        // A drop cap spans exactly `lines` lines of the paragraph after it, whatever the letter's own height.
+        if (frame.DropLines is { } n && frame.Height is null && following is not null
+            && BlockFlow.Build([following], 0, columnWidth, ctx) is [{ } first, ..] && first.Height > 0)
+            height = n * (first.Height - first.LeadingSpace);
         if (frame.Height is { } fixedHeight) height = frame.HeightExact ? fixedHeight : Math.Max(height, fixedHeight);
         if (height <= 0 || height > maxHeight) return null;
         var items = new List<LayoutItem>();

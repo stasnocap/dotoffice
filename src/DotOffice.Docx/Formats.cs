@@ -426,6 +426,7 @@ internal sealed record ParaFormat
             Width = w is > 0 ? w : null,
             Height = h is > 0 && hRule != "auto" ? h : null,
             HeightExact = hRule == "exact",
+            DropLines = r.WAttr("dropCap") is "drop" or "margin" && int.TryParse(r.WAttr("lines"), out var lines) && lines > 0 ? lines : null,
             Horizontal = new FloatPosition(Ref(r.WAttr("hAnchor"), FloatReference.Column), Align(r.WAttr("xAlign")), r.TwipsAttr("x") ?? 0),
             Vertical = new FloatPosition(Ref(r.WAttr("vAnchor"), FloatReference.Paragraph), yAlign == "inline" ? FloatAlignment.Offset : Align(yAlign), r.TwipsAttr("y") ?? 0),
             Distance = new Thickness(r.TwipsAttr("vSpace") ?? 0, r.TwipsAttr("hSpace") ?? 0, r.TwipsAttr("vSpace") ?? 0, r.TwipsAttr("hSpace") ?? 0),
