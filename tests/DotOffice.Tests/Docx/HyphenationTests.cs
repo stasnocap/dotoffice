@@ -148,6 +148,18 @@ public class HyphenationTests
     }
 
     [Fact]
+    public void Text_followed_by_a_field_is_hyphenated_before_the_field()
+    {
+        string Fielded(int n) => $"<w:p><w:r>{Run}<w:t xml:space=\"preserve\">{string.Join(' ', Enumerable.Repeat("lorem", n))} {Word}</w:t></w:r>"
+            + $"<w:fldSimple w:instr=\" PAGE \"><w:r>{Run}<w:t>7</w:t></w:r></w:fldSimple></w:p>";
+        int fill = Enumerable.Range(1, 14).First(n => Lines(Fielded(n), false) is [_, _, ..] && Lines(Fielded(n), false)[1] == Word + "1");
+        var lines = Lines(Fielded(fill), true);
+        Assert.EndsWith("-", lines[0]);
+        string head = lines[0].Split(' ')[^1].TrimEnd('-');
+        Assert.Equal(Word + "1", head + lines[1]);
+    }
+
+    [Fact]
     public void Word_with_digits_stays_whole()
     {
         string word = "character1stically";

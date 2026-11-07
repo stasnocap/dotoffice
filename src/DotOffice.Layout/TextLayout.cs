@@ -642,7 +642,7 @@ internal static class LineBuilder
     /// <summary>
     /// Splits the word starting at atom <paramref name="at"/> (its text may span several runs) at its last hyphenation
     /// point that fits the line, ending the first part with a hyphen. Words of letters, accented ones included, are
-    /// hyphenated with the patterns of the first run's language (US English when none is named); a word with digits or other symbols inside stays whole.
+    /// hyphenated with the patterns of the first run's language (US English when none is named); a word with digits or other symbols inside stays whole. Text followed directly by a field or picture is hyphenated on its own part.
     /// </summary>
     private static bool TryHyphenate(List<Atom> atoms, int from, int at, int wordEnd, double startX, double maxX, LineFrame frame, HyphenationOptions options)
     {
@@ -652,7 +652,9 @@ internal static class LineBuilder
         while (stop < wordEnd && (atoms[stop].Kind == AtomKind.Marker || atoms[stop].Kind == AtomKind.Text && atoms[stop].Field is null
             && !(atoms[stop].Glyphs is not null && atoms[stop].RightToLeft))) stop++;
         while (stop > at && atoms[stop - 1].Kind == AtomKind.Marker) stop--;
-        if (stop == at || !TrailingSpacesOnly(atoms, stop, wordEnd)) return false;
+        if (stop == at) return false;
+        // A field or picture right after the text continues the word: only the text before it is looked at, and no hyphen goes at its end.
+        bool continues = !TrailingSpacesOnly(atoms, stop, wordEnd);
 
         var starts = new int[stop - at + 1];
         for (int k = at; k < stop; k++) starts[k - at + 1] = starts[k - at] + (atoms[k].Kind == AtomKind.Text ? atoms[k].Text.Length : 0);
@@ -674,6 +676,7 @@ internal static class LineBuilder
         for (int p = points.Count - 1; p >= 0; p--)
         {
             int cut = first + points[p], a = 0;
+            if (continues && cut >= text.Length) continue;
             while (starts[a + 1] < cut) a++;
             var atom = original[a];
             int inside = cut - starts[a];
