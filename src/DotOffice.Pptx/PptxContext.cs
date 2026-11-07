@@ -289,6 +289,14 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                         ReadDiagram(slide, element, relIds, scope, placement, ref z);
                         break;
                     }
+                    // An embedded or linked OLE object is drawn from the preview picture saved with it; the object itself is not opened.
+                    if (uri.EndsWith("/ole", StringComparison.Ordinal) && Path(element, "graphic", "graphicData", "oleObj") is { } ole)
+                    {
+                        if (Content(ole).FirstOrDefault(e => e.Name.LocalName == "pic") is { } preview)
+                            ReadPicture(slide, preview, scope, placement ?? Own(Child(element, "xfrm")), ref z);
+                        else Skip("embedded objects without a preview picture");
+                        break;
+                    }
                     Skip(uri.EndsWith("/chart", StringComparison.Ordinal) ? "charts"
                         : uri.EndsWith("/diagram", StringComparison.Ordinal) ? "SmartArt diagrams"
                         : "embedded objects");

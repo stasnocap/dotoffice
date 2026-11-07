@@ -175,6 +175,21 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void Embedded_objects_are_drawn_from_their_preview_picture_in_the_frame()
+    {
+        static string Frame(string inner) =>
+            "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"7\" name=\"o\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(127000, 254000, 1270000, 635000).Replace("a:xfrm", "p:xfrm") +
+            "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/presentationml/2006/ole\"><p:oleObj progId=\"Excel.Sheet.12\" r:id=\"rIdOle\">" + inner +
+            "</p:oleObj></a:graphicData></a:graphic></p:graphicFrame>";
+        var pic = "<p:embed/><p:pic><p:nvPicPr><p:cNvPr id=\"0\" name=\"\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/></p:blipFill>" +
+                  "<p:spPr>" + Xfrm(127000, 254000, 1270000, 635000) + "</p:spPr></p:pic>";
+        var (presentation, warnings) = Read(new PptxBuilder().AddImage(Png).AddSlide(Frame(pic) + Frame("<p:embed/>")));
+        var image = Assert.IsType<SheetImage>(Assert.Single(presentation.Slides[0].Objects));
+        Assert.Equal((10.0, 20.0, 100.0, 50.0), (image.X, image.Y, image.Width, image.Height));
+        Assert.Contains("1 embedded objects without a preview picture", Assert.Single(warnings.Warnings).Message);
+    }
+
+    [Fact]
     public void Charts_and_diagrams_are_reported()
     {
         var frame = "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"6\" name=\"c\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(0, 0, 12700, 12700).Replace("a:xfrm", "p:xfrm") +
