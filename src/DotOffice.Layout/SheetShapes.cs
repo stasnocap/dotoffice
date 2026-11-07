@@ -523,11 +523,14 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>The text of a shape inside its insets, wrapped to the shape's width and placed by its vertical anchor.</summary>
-    private void EmitShapeText(SheetShape shape, double x, double y, double width, double height, List<LayoutItem> items)
+    /// <summary>The height a shape of this width needs for its text: the lines, the paragraph spacing and the top and bottom insets.</summary>
+    private double ShapeTextHeight(SheetShape shape, double width) =>
+        ShapeTextBlocks(shape, width, out double total).Count == 0 ? 0 : total + shape.TextInsets.Top + shape.TextInsets.Bottom;
+
+    /// <summary>The shape's paragraphs broken into lines for a text area as wide as the frame less the insets, and their total height.</summary>
+    private List<(TextBlock Block, ShapeParagraph Paragraph)> ShapeTextBlocks(SheetShape shape, double width, out double total)
     {
-        double left = x + shape.TextInsets.Left, right = x + width - shape.TextInsets.Right;
-        double top = y + shape.TextInsets.Top, bottom = y + height - shape.TextInsets.Bottom;
-        double areaWidth = Math.Max(right - left, 1);
+        double areaWidth = Math.Max(width - shape.TextInsets.Left - shape.TextInsets.Right, 1);
         var blocks = new List<(TextBlock Block, ShapeParagraph Paragraph)>();
         foreach (var paragraph in shape.Paragraphs)
         {
@@ -549,8 +552,7 @@ public sealed partial class SheetLayoutEngine
             foreach (var (block, _) in blocks)
                 for (int i = 0; i < block.Metrics.Count; i++)
                     block.Metrics[i] = block.Metrics[i] with { Pitch = block.Metrics[i].Ascent + block.Metrics[i].Descent };
-        static double Spaced(ShapeParagraph paragraph, double pitch) => paragraph.LinePitch ?? pitch * paragraph.LineSpacing;
-        double total = 0;
+        total = 0;
         for (int b = 0; b < blocks.Count; b++)
         {
             var (block, paragraph) = blocks[b];
@@ -558,6 +560,16 @@ public sealed partial class SheetLayoutEngine
             total += paragraph.SpaceBefore;
             if (b < blocks.Count - 1) total += paragraph.SpaceAfter;
         }
+        return blocks;
+    }
+
+    private static double Spaced(ShapeParagraph paragraph, double pitch) => paragraph.LinePitch ?? pitch * paragraph.LineSpacing;
+
+    private void EmitShapeText(SheetShape shape, double x, double y, double width, double height, List<LayoutItem> items)
+    {
+        double left = x + shape.TextInsets.Left, right = x + width - shape.TextInsets.Right;
+        double top = y + shape.TextInsets.Top, bottom = y + height - shape.TextInsets.Bottom;
+        var blocks = ShapeTextBlocks(shape, width, out double total);
         double lineTop = shape.TextAnchor switch
         {
             ShapeTextAnchor.Middle => (top + bottom) / 2 - total / 2,

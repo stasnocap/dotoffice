@@ -49,4 +49,64 @@ public class SlideLayoutTests
         Assert.Equal(40, Gap(Paragraph("second") with { LinePitch = 40 }), 3);
         Assert.Equal(single, Gap(Paragraph("second") with { SpaceAfter = 50 }), 3);
     }
+
+    private static List<LayoutItem> Lay(params SheetShape[] shapes)
+    {
+        var slide = new Slide(400, 300);
+        slide.Objects.AddRange(shapes);
+        var presentation = new Presentation();
+        presentation.Slides.Add(slide);
+        var engine = new SheetLayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(LayoutTestHelpers.Noto)) });
+        return engine.Layout(presentation).Pages[0].Items;
+    }
+
+    /// <summary>The top and bottom of each filled rectangle or polygon, in drawing order.</summary>
+    private static List<(double Top, double Bottom)> Fills(List<LayoutItem> items) =>
+    [
+        .. items.Select(i => i switch
+        {
+            RectItem r => ((double, double)?)(r.Y, r.Y + r.Height),
+            PolygonItem p => (p.Points.Min(q => q.Y), p.Points.Max(q => q.Y)),
+            _ => null,
+        }).OfType<(double, double)>(),
+    ];
+
+    private static SheetShape Box(double y, double height, params ShapeParagraph[] paragraphs) => new()
+    {
+        Anchor = ImageAnchorKind.Absolute, X = 10, Y = y, Width = 100, Height = height, Fill = Color.Black,
+        Geometry = ShapeGeometry.Rectangle, TextInsets = new Thickness(0, 0, 0, 0), Paragraphs = [.. paragraphs],
+    };
+
+    [Fact]
+    public void A_shape_that_fits_its_text_grows_down_from_its_top_and_never_shrinks()
+    {
+        var lines = Enumerable.Range(0, 6).Select(i => Paragraph($"line {i}")).ToArray();
+        var grown = Assert.Single(Fills(Lay(Box(20, 10, lines) with { GrowToFit = true })));
+        Assert.Equal(20, grown.Top, 3);
+        Assert.True(grown.Bottom - 20 > 60);
+        Assert.Equal(220, Assert.Single(Fills(Lay(Box(20, 200, lines) with { GrowToFit = true }))).Bottom, 3);
+        Assert.Equal(30, Assert.Single(Fills(Lay(Box(20, 10, lines)))).Bottom, 3);
+    }
+
+    [Fact]
+    public void A_table_row_grows_to_fit_its_cell_text_and_moves_the_rows_below_down()
+    {
+        double[] heights = [10, 20];
+        var tall = Enumerable.Range(0, 4).Select(i => Paragraph($"line {i}")).ToArray();
+        var first = Box(0, 10, tall) with { TableRows = new TableRowSpan(0, 0, 1, heights) };
+        var second = Box(10, 20, Paragraph("x")) with { TableRows = new TableRowSpan(0, 1, 1, heights), Fill = Color.White };
+        var rule = new SheetShape
+        {
+            Anchor = ImageAnchorKind.Absolute, X = 10, Y = 10, Width = 100, Height = 0, Geometry = ShapeGeometry.Line, LineColor = Color.Black,
+            TableRows = new TableRowSpan(0, 1, 0, heights),
+        };
+        var items = Lay(first, second, rule);
+        var fills = Fills(items);
+        double firstBottom = fills[0].Bottom;
+        Assert.True(firstBottom > 40);
+        Assert.Equal(firstBottom, fills[1].Top, 3);
+        Assert.Equal(firstBottom + 20, fills[1].Bottom, 3);
+        var line = items.OfType<LineItem>().Single();
+        Assert.Equal(firstBottom, line.Y1, 3);
+    }
 }

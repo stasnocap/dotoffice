@@ -197,6 +197,7 @@ internal static class DmlShapes
             TextAnchor = (string?)body?.Attribute("anchor") switch { "ctr" => ShapeTextAnchor.Middle, "b" => ShapeTextAnchor.Bottom, _ => ShapeTextAnchor.Top },
             TextInsets = new Thickness(Inset("tIns", 3.6), Inset("rIns", 7.2), Inset("bIns", 3.6), Inset("lIns", 7.2)),
             WrapText = (string?)body?.Attribute("wrap") != "none",
+            GrowToFit = Child(body, "spAutoFit") is not null,
         };
     }
 

@@ -63,6 +63,16 @@ internal sealed partial class PptxContext
         return null;
     }
 
+    private int _tables;
+
+    /// <summary>Reads a cell or border through <see cref="ReadObject"/> and marks the shape it gives with the rows it covers.</summary>
+    private void ReadTablePart(Slide slide, XElement element, Scope scope, Placement place, TableRowSpan rows, ref int z)
+    {
+        int count = slide.Objects.Count;
+        ReadObject(slide, element, scope, place, ref z);
+        if (slide.Objects.Count == count + 1 && slide.Objects[count] is SheetShape shape) slide.Objects[count] = shape with { TableRows = rows };
+    }
+
     private sealed record TableCell(XElement Tc, int Row, int Column, int RowSpan, int ColumnSpan);
 
     private void ReadTable(Slide slide, XElement table, Scope scope, Placement place, ref int z)
@@ -132,7 +142,9 @@ internal sealed partial class PptxContext
         XElement Xfrm(double x, double y, double w, double h) =>
             new(a + "xfrm", new XElement(a + "off", new XAttribute("x", Num(x)), new XAttribute("y", Num(y))), new XElement(a + "ext", new XAttribute("cx", Num(w)), new XAttribute("cy", Num(h))));
 
-        var borders = new List<(XElement Line, double X, double Y, double W, double H)>();
+        int tableId = _tables++;
+        TableRowSpan Rows(int first, int count) => new(tableId, first, count, heights);
+        var borders = new List<(XElement Line, double X, double Y, double W, double H, TableRowSpan Rows)>();
         foreach (var cell in cells)
         {
             double x = xs[cell.Column], y = ys[cell.Row], w = xs[cell.Column + cell.ColumnSpan] - x, h = ys[cell.Row + cell.RowSpan] - y;
@@ -194,7 +206,7 @@ internal sealed partial class PptxContext
                 new XElement(p + "spPr", Xfrm(x, y, w, h), new XElement(a + "prstGeom", new XAttribute("prst", "rect")),
                     fill is null ? new XElement(a + "noFill") : new XElement(fill), new XElement(a + "ln", new XElement(a + "noFill"))),
                 body);
-            ReadObject(slide, sp, scope with { IsSlide = false }, Within(x, y, w, h), ref z);
+            ReadTablePart(slide, sp, scope with { IsSlide = false }, Within(x, y, w, h), Rows(cell.Row, cell.RowSpan), ref z);
 
             // Borders: each edge takes the outer border of the part when the cell is on that part's edge, its inside border otherwise; then the cell's own line.
             int r0 = cell.Row, r1 = cell.Row + cell.RowSpan - 1, c0 = cell.Column, c1 = cell.Column + cell.ColumnSpan - 1;
@@ -211,24 +223,24 @@ internal sealed partial class PptxContext
                 if (Child(tcPr, ownName) is { } own) line = own;
                 return line;
             }
-            void Border(XElement? line, double bx, double by, double bw, double bh)
+            void Border(XElement? line, double bx, double by, double bw, double bh, TableRowSpan rows)
             {
                 if (line is null || line.Elements().All(e => e.Name.LocalName != "solidFill" && e.Name.LocalName != "gradFill")) return;
-                borders.Add((new XElement(line) { Name = a + "ln" }, bx, by, bw, bh));
+                borders.Add((new XElement(line) { Name = a + "ln" }, bx, by, bw, bh, rows));
             }
-            Border(Edge("top", "insideH", t => r0 == t.R0, "lnT"), x, y, w, 0);
-            Border(Edge("bottom", "insideH", t => r1 == t.R1, "lnB"), x, y + h, w, 0);
-            Border(Edge("left", "insideV", t => c0 == t.C0, "lnL"), x, y, 0, h);
-            Border(Edge("right", "insideV", t => c1 == t.C1, "lnR"), x + w, y, 0, h);
+            Border(Edge("top", "insideH", t => r0 == t.R0, "lnT"), x, y, w, 0, Rows(r0, 0));
+            Border(Edge("bottom", "insideH", t => r1 == t.R1, "lnB"), x, y + h, w, 0, Rows(r1 + 1, 0));
+            Border(Edge("left", "insideV", t => c0 == t.C0, "lnL"), x, y, 0, h, Rows(r0, cell.RowSpan));
+            Border(Edge("right", "insideV", t => c1 == t.C1, "lnR"), x + w, y, 0, h, Rows(r0, cell.RowSpan));
         }
 
         // Borders go over every cell fill, so a neighbour's fill does not hide half of a shared edge.
-        foreach (var (line, x, y, w, h) in borders)
+        foreach (var (line, x, y, w, h, lineRows) in borders)
         {
             var cxn = new XElement(p + "cxnSp",
                 new XElement(p + "nvCxnSpPr", new XElement(p + "cNvPr", new XAttribute("id", 0), new XAttribute("name", "")), new XElement(p + "cNvCxnSpPr"), new XElement(p + "nvPr")),
                 new XElement(p + "spPr", Xfrm(x, y, w, h), new XElement(a + "prstGeom", new XAttribute("prst", "line")), line));
-            ReadObject(slide, cxn, scope with { IsSlide = false }, Within(x, y, w, h), ref z);
+            ReadTablePart(slide, cxn, scope with { IsSlide = false }, Within(x, y, w, h), lineRows, ref z);
         }
     }
 }

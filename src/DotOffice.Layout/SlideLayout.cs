@@ -39,9 +39,10 @@ public sealed partial class SheetLayoutEngine
             else if (slide.Background is { } color) items.Add(new RectItem(0, 0, slide.Width, slide.Height, color));
 
             var whole = (0.0, 0.0, slide.Width, slide.Height);
-            foreach (var obj in slide.Objects.OrderBy(o => o.ZOrder))
+            var placed = slide.Objects.OrderBy(o => o.ZOrder).Select(o => (Object: o, Rect: PlaceInFrame(o, o.X, o.Y, o.Width, o.Height))).ToList();
+            FitText(placed);
+            foreach (var (obj, (x, y, w, h)) in placed)
             {
-                var (x, y, w, h) = PlaceInFrame(obj, obj.X, obj.Y, obj.Width, obj.Height);
                 if (w <= 0 && h <= 0) continue;
                 switch (obj)
                 {
@@ -51,6 +52,58 @@ public sealed partial class SheetLayoutEngine
                 }
             }
             document.Pages.Add(page);
+        }
+    }
+
+    /// <summary>
+    /// Grows frames to fit their text: shapes that fit their size to the text (<see cref="SheetShape.GrowToFit"/>) get taller, keeping their
+    /// top; table rows get taller when a cell's text needs more than the row's height, moving the rows below down. Frames never shrink.
+    /// </summary>
+    private void FitText(List<(SheetObject Object, (double X, double Y, double Width, double Height) Rect)> placed)
+    {
+        for (int i = 0; i < placed.Count; i++)
+            if (placed[i].Object is SheetShape { GrowToFit: true, TableRows: null } shape && shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
+            {
+                var rect = placed[i].Rect;
+                if (ShapeTextHeight(shape, rect.Width) is var need && need > rect.Height) placed[i] = (shape, rect with { Height = need });
+            }
+
+        foreach (var table in placed.Select((p, i) => (p, i)).Where(t => t.p.Object is SheetShape { TableRows: not null }).GroupBy(t => ((SheetShape)t.p.Object).TableRows!.Table))
+        {
+            var parts = table.ToList();
+            var heights = ((SheetShape)parts[0].p.Object).TableRows!.RowHeights;
+            double sum = heights.Sum();
+            if (sum <= 0) continue;
+            // The table's height on the page, from a cell (the rows keep their proportions there).
+            double scale = 0;
+            foreach (var (p, _) in parts)
+            {
+                var rows = ((SheetShape)p.Object).TableRows!;
+                double span = heights.Skip(rows.First).Take(rows.Count).Sum();
+                if (rows.Count > 0 && span > 0 && p.Rect.Height > 0) { scale = p.Rect.Height / span; break; }
+            }
+            if (scale <= 0) continue;
+            var grow = new double[heights.Count];
+            // Cells of one row first, then merged cells, which only grow their last row by what their rows still lack.
+            foreach (var (p, _) in parts.Where(t => ((SheetShape)t.p.Object).TableRows!.Count > 0 && ((SheetShape)t.p.Object).Paragraphs.Count > 0)
+                         .OrderBy(t => ((SheetShape)t.p.Object).TableRows!.Count))
+            {
+                var shape = (SheetShape)p.Object;
+                var rows = shape.TableRows!;
+                double have = 0;
+                for (int r = rows.First; r < rows.First + rows.Count; r++) have += heights[r] * scale + grow[r];
+                double lack = ShapeTextHeight(shape, p.Rect.Width) - have;
+                if (lack > 0.01) grow[rows.First + rows.Count - 1] += lack;
+            }
+            var shift = new double[heights.Count + 1];
+            for (int r = 0; r < heights.Count; r++) shift[r + 1] = shift[r] + grow[r];
+            if (shift[^1] <= 0) continue;
+            foreach (var (p, i) in parts)
+            {
+                var rows = ((SheetShape)p.Object).TableRows!;
+                int first = Math.Clamp(rows.First, 0, heights.Count), end = Math.Clamp(rows.First + rows.Count, 0, heights.Count);
+                placed[i] = (p.Object, p.Rect with { Y = p.Rect.Y + shift[first], Height = p.Rect.Height + shift[end] - shift[first] });
+            }
         }
     }
 }

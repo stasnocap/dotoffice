@@ -210,4 +210,19 @@ public sealed record SheetShape : SheetObject
 
     /// <summary>Whether text wraps at the right edge of the text area.</summary>
     public bool WrapText { get; init; } = true;
+
+    /// <summary>
+    /// Whether the shape grows taller to fit its text (DrawingML <c>spAutoFit</c>); its top stays where it is. Applied when slides are laid out.
+    /// </summary>
+    public bool GrowToFit { get; init; }
+
+    /// <summary>The rows of a table this shape is a cell or border of; null for a shape outside tables. Rows grow to fit their cells' text.</summary>
+    public TableRowSpan? TableRows { get; init; }
 }
+
+/// <summary>
+/// Where a cell or a border line lies in a table drawn as separate shapes: from row <paramref name="First"/> over <paramref name="Count"/> rows
+/// (a horizontal border has no rows and sits at the top of <paramref name="First"/>). <paramref name="RowHeights"/> are the heights of all the
+/// table's rows in any one unit, and <paramref name="Table"/> tells the tables of a slide apart.
+/// </summary>
+public sealed record TableRowSpan(int Table, int First, int Count, IReadOnlyList<double> RowHeights);

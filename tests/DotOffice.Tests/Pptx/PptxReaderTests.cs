@@ -208,6 +208,29 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void Table_cells_and_borders_carry_the_rows_they_cover()
+    {
+        var rows = Row(254000, Tc("A", "rowSpan=\"2\"", tcPr: "<a:lnB w=\"12700\"><a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill></a:lnB>"
+            + "<a:lnR w=\"12700\"><a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill></a:lnR>")) + Row(381000, Tc("", "vMerge=\"1\""));
+        var objects = ReadSlide(new PptxBuilder().AddSlide(Table([1270000], "", rows))).Objects.OfType<SheetShape>().ToList();
+        var cell = objects.Single(s => s.Geometry != ShapeGeometry.Line);
+        Assert.Equal((0, 2), (cell.TableRows!.First, cell.TableRows.Count));
+        Assert.Equal([254000.0, 381000.0], cell.TableRows.RowHeights);
+        var lines = objects.Where(s => s.Geometry == ShapeGeometry.Line).Select(l => (l.TableRows!.First, l.TableRows.Count)).ToList();
+        Assert.Equal([(2, 0), (0, 2)], lines);
+    }
+
+    [Fact]
+    public void A_shape_that_fits_its_size_to_the_text_is_marked_to_grow()
+    {
+        var body = "<a:bodyPr><a:spAutoFit/></a:bodyPr><a:lstStyle/>" + P("text");
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(
+            Sp(Xfrm(0, 0, 1270000, 127000) + "<a:prstGeom prst=\"rect\"/>", body).Replace("<p:txBody><a:bodyPr/><a:lstStyle/>", "<p:txBody>"))).Objects));
+        Assert.True(shape.GrowToFit);
+        Assert.Null(shape.TableRows);
+    }
+
+    [Fact]
     public void Cell_margins_anchor_and_fill_come_from_the_cell_properties()
     {
         var rows = Row(254000, Tc("A", tcPrAttributes: "marL=\"0\" marT=\"12700\" anchor=\"ctr\"", tcPr: Red));
