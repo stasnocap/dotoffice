@@ -1,17 +1,28 @@
 using System.Globalization;
 using System.Xml.Linq;
 using DotOffice.Core;
-using DotOffice.Dml;
+using DotOffice.Xlsx;
 using static DotOffice.Dml.DrawingMl;
 
-namespace DotOffice.Xlsx;
+namespace DotOffice.Dml;
+
+/// <summary>What a chart reads besides its own part: the theme, the date system, and the cells its series refer to.</summary>
+internal interface IChartData
+{
+    DmlTheme Theme { get; }
+
+    bool Date1904 { get; }
+
+    /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
+    IEnumerable<Cell?> Cells(string formula);
+}
 
 /// <summary>
 /// Reads a chart part (<c>c:chartSpace</c>) into a <see cref="SheetChart"/>: column, bar, line, area, pie, doughnut, scatter, bubble and radar charts. The data comes from the
 /// chart's cached values when it has them and from the cells it refers to otherwise; the axis scale and the labels are computed here, so
 /// that the layout only has to draw.
 /// </summary>
-internal static class XlsxCharts
+internal static class DmlCharts
 {
     private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart", "scatterChart", "bubbleChart", "radarChart", "stockChart"];
 
@@ -25,9 +36,9 @@ internal static class XlsxCharts
 
     /// <summary>
     /// Prepares a chart: the unsupported chart type's name when it cannot be drawn, otherwise a function that builds the chart once all
-    /// sheets are known (the chart may refer to cells of other sheets). <paramref name="notes"/> receives approximations.
+    /// data is known (the chart may refer to cells of any sheet). <paramref name="notes"/> receives approximations.
     /// </summary>
-    public static (string? Unsupported, Func<IReadOnlyList<Worksheet>, SheetChart>? Build) Prepare(XlsxContext context, Worksheet owner, XDocument doc, SheetChart template, List<string> notes)
+    public static (string? Unsupported, Func<IChartData, SheetChart>? Build) Prepare(XDocument doc, SheetChart template, List<string> notes)
     {
         var space = doc.Root;
         var plot = Path(space, "chart", "plotArea");
@@ -46,25 +57,15 @@ internal static class XlsxCharts
         if (dropped.Count > 0)
             notes.Add($"a combination chart draws only its {Describe(first.Name.LocalName)} part and not the {string.Join(" and ", dropped.Select(g => Describe(g.Name.LocalName)))} part");
         if (first.Name.LocalName is not ("scatterChart" or "bubbleChart") && extras.Count == 0 && plot.Elements().Count(e => e.Name.LocalName == "valAx") > 1) notes.Add("secondary axes are ignored");
-        return (null, sheets => Build(context, owner, sheets, space, plot, first, extras, template));
+        return (null, data => Build(data, space, plot, first, extras, template));
     }
 
-    private static SheetChart Build(XlsxContext context, Worksheet owner, IReadOnlyList<Worksheet> sheets, XElement space, XElement plot, XElement group, IReadOnlyList<XElement> extras, SheetChart template)
+    private static SheetChart Build(IChartData context, XElement space, XElement plot, XElement group, IReadOnlyList<XElement> extras, SheetChart template)
     {
         var theme = context.Theme;
         var chart = Child(space, "chart");
         // ---- data
-        IEnumerable<Cell?> CellsOf(string formula)
-        {
-            foreach (var area in CellReference.ParseAreas(formula))
-            {
-                if (area.Range is not { } range) continue;
-                var sheet = area.Sheet is null ? owner : sheets.FirstOrDefault(s => string.Equals(s.Name, area.Sheet, StringComparison.OrdinalIgnoreCase));
-                for (int r = range.FirstRow; r <= range.LastRow; r++)
-                    for (int c = range.FirstColumn; c <= range.LastColumn; c++)
-                        yield return sheet is not null && sheet.Cells.TryGetValue((r, c), out var cell) ? cell : null;
-            }
-        }
+        IEnumerable<Cell?> CellsOf(string formula) => context.Cells(formula);
 
         string Format(double value, string? code) =>
             string.IsNullOrEmpty(code) || code == "General" ? NumberFormat.Parse("General").FormatNumber(value, context.Date1904).Text : NumberFormat.Parse(code, null).FormatNumber(value, context.Date1904).Text;

@@ -134,14 +134,15 @@ internal static class XlsxDrawings
         }
         var (kind, from, to, x, y, width, height) = Placement(anchor, Child(graphicFrame, "xfrm"), frame);
         var template = new SheetChart { Anchor = kind, From = from, To = to, X = x, Y = y, Width = width, Height = height, Frame = frame, GroupTurns = state.Turns.ToArray(), Rotation = state.Turned(0), ZOrder = state.ZOrder++ };
-        var (unsupported, build) = XlsxCharts.Prepare(context, state.Sheet, doc, template, state.Notes);
+        var (unsupported, build) = DmlCharts.Prepare(doc, template, state.Notes);
         if (build is null)
         {
             state.Charts++;
             state.ChartKinds.Add(unsupported ?? "unknown");
             return;
         }
-        context.DeferChart(state.Sheet, build);
+        var owner = state.Sheet;
+        context.DeferChart(owner, sheets => build(new ChartCells(context, owner, sheets)));
     }
 
     /// <summary>
@@ -250,5 +251,25 @@ internal static class XlsxDrawings
     {
         var text = attribute is null ? e?.Value : (string?)e?.Attribute(attribute);
         return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) ? v : 0;
+    }
+
+    /// <summary>A chart's cells: references without a sheet name mean the sheet that holds the chart.</summary>
+    private sealed class ChartCells(XlsxContext context, Worksheet owner, IReadOnlyList<Worksheet> sheets) : IChartData
+    {
+        public DmlTheme Theme => context.Theme;
+
+        public bool Date1904 => context.Date1904;
+
+        public IEnumerable<Cell?> Cells(string formula)
+        {
+            foreach (var area in CellReference.ParseAreas(formula))
+            {
+                if (area.Range is not { } range) continue;
+                var sheet = area.Sheet is null ? owner : sheets.FirstOrDefault(s => string.Equals(s.Name, area.Sheet, StringComparison.OrdinalIgnoreCase));
+                for (int r = range.FirstRow; r <= range.LastRow; r++)
+                    for (int c = range.FirstColumn; c <= range.LastColumn; c++)
+                        yield return sheet is not null && sheet.Cells.TryGetValue((r, c), out var cell) ? cell : null;
+            }
+        }
     }
 }

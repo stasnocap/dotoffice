@@ -33,21 +33,6 @@ internal sealed record Dxf
 /// <summary>Reads <c>styles.xml</c> into a table of <see cref="CellFormat"/> indexed by a cell's <c>s</c> attribute.</summary>
 internal static class XlsxStyles
 {
-    private static readonly string[] LegacyPalette =
-    [
-        "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
-        "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
-        "800000", "008000", "000080", "808000", "800080", "008080", "C0C0C0", "808080",
-        "9999FF", "993366", "FFFFCC", "CCFFFF", "660066", "FF8080", "0066CC", "CCCCFF",
-        "000080", "FF00FF", "FFFF00", "00FFFF", "800080", "800000", "008080", "0000FF",
-        "00CCFF", "CCFFFF", "CCFFCC", "FFFF99", "99CCFF", "FF99CC", "CC99FF", "FFCC99",
-        "3366FF", "33CCCC", "99CC00", "FFCC00", "FF9900", "FF6600", "666699", "969696",
-        "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333",
-    ];
-
-    /// <summary>An entry of Excel's default indexed palette (the one <c>[ColorN]</c> number formats use, as index N + 7).</summary>
-    internal static Color DefaultIndexedColor(int index) => Color.TryParseHex(LegacyPalette[Math.Clamp(index, 0, LegacyPalette.Length - 1)])!.Value;
-
     /// <summary>The cell formats of a workbook plus the color resolver that rich-text runs share with them.</summary>
     public sealed record Result(List<CellFormat> Formats, Func<XElement?, Color?> Resolve, List<Dxf> Dxfs, IReadOnlyList<Color?> Palette, Func<XElement, Dxf> ReadInlineDxf,
         IReadOnlyDictionary<string, IReadOnlyList<(string Type, int DxfId)>>? PivotStyles = null);
@@ -57,8 +42,8 @@ internal static class XlsxStyles
         var doc = XDocument.Load(reader);
         var root = doc.Root;
         var formats = new List<CellFormat>();
-        var palette = new Color?[LegacyPalette.Length];
-        for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(LegacyPalette[i]);
+        var palette = new Color?[NumberFormat.LegacyPalette.Length];
+        for (int i = 0; i < palette.Length; i++) palette[i] = Color.TryParseHex(NumberFormat.LegacyPalette[i]);
         Color? Resolve(XElement? color) => ResolveColor(color, theme, palette);
         var dxfs = new List<Dxf>();
         if (root is null) return new Result(formats, Resolve, dxfs, palette, _ => new Dxf());

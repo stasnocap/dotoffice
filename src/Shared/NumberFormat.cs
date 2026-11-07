@@ -10,6 +10,22 @@ internal readonly record struct FormattedValue(string Text, Color? Color);
 /// <summary>A parsed Excel number-format code (<c>pos;neg;zero;text</c>) that can format numbers, dates and text.</summary>
 internal sealed class NumberFormat
 {
+    /// <summary>Excel's default indexed color palette, also the base of a workbook's own (<c>indexedColors</c>).</summary>
+    internal static readonly string[] LegacyPalette =
+    [
+        "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+        "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+        "800000", "008000", "000080", "808000", "800080", "008080", "C0C0C0", "808080",
+        "9999FF", "993366", "FFFFCC", "CCFFFF", "660066", "FF8080", "0066CC", "CCCCFF",
+        "000080", "FF00FF", "FFFF00", "00FFFF", "800080", "800000", "008080", "0000FF",
+        "00CCFF", "CCFFFF", "CCFFCC", "FFFF99", "99CCFF", "FF99CC", "CC99FF", "FFCC99",
+        "3366FF", "33CCCC", "99CC00", "FFCC00", "FF9900", "FF6600", "666699", "969696",
+        "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333",
+    ];
+
+    /// <summary>An entry of Excel's default indexed palette (the one <c>[ColorN]</c> number formats use, as index N + 7).</summary>
+    internal static Color DefaultIndexedColor(int index) => Color.TryParseHex(LegacyPalette[Math.Clamp(index, 0, LegacyPalette.Length - 1)])!.Value;
+
     private enum Kind { Literal, Digit, Point, Comma, Percent, Exponent, Text, General, Year, Month, Day, Hour, Minute, Second, Elapsed, AmPm, SubSecond, Fraction }
 
     private readonly record struct Token(Kind Kind, string Text = "", int Count = 0);
@@ -291,7 +307,7 @@ internal sealed class NumberFormat
         {
             // [ColorN] is entry N + 7 of the indexed palette (Color1 = black … Color56): the workbook's own, else the default one.
             if (int.TryParse(content.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n is >= 1 and <= 56)
-                s.Color = n + 7 < palette?.Count && palette[n + 7] is { } own ? own : XlsxStyles.DefaultIndexedColor(n + 7);
+                s.Color = n + 7 < palette?.Count && palette[n + 7] is { } own ? own : DefaultIndexedColor(n + 7);
             return;
         }
         if (content[0] is '<' or '>' or '=')
