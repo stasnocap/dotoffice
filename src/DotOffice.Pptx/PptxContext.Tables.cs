@@ -197,7 +197,8 @@ internal sealed partial class PptxContext
                     new XAttribute("wrap", "square"),
                     new XAttribute("lIns", Margin("marL", 91_440)), new XAttribute("rIns", Margin("marR", 91_440)),
                     new XAttribute("tIns", Margin("marT", 45_720)), new XAttribute("bIns", Margin("marB", 45_720)),
-                    new XAttribute("anchor", (string?)tcPr?.Attribute("anchor") ?? "t")),
+                    new XAttribute("anchor", (string?)tcPr?.Attribute("anchor") ?? "t"),
+                    (string?)tcPr?.Attribute("vert") is { } vert ? new XAttribute("vert", vert) : null),
                 lstStyle);
             body.Name = p + "txBody";
 

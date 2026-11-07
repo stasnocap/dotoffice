@@ -212,6 +212,12 @@ public sealed record SheetShape : SheetObject
     public bool WrapText { get; init; } = true;
 
     /// <summary>
+    /// How the text is turned inside the shape, in degrees counter-clockwise: -90 for text running down (DrawingML <c>vert</c>), 90 for text
+    /// running up (<c>vert270</c>). The text is laid out across the text area's height and turned about its center.
+    /// </summary>
+    public double TextRotation { get; init; }
+
+    /// <summary>
     /// Whether the shape grows taller to fit its text (DrawingML <c>spAutoFit</c>); its top stays where it is. Applied when slides are laid out.
     /// </summary>
     public bool GrowToFit { get; init; }

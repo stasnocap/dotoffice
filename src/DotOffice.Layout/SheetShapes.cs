@@ -567,6 +567,17 @@ public sealed partial class SheetLayoutEngine
 
     private void EmitShapeText(SheetShape shape, double x, double y, double width, double height, List<LayoutItem> items)
     {
+        if (shape.TextRotation != 0)
+        {
+            // Vertical text: the text area (the frame less the insets) turned on its side, laid out there and turned back about its center.
+            var insets = shape.TextInsets;
+            double areaW = Math.Max(width - insets.Left - insets.Right, 1), areaH = Math.Max(height - insets.Top - insets.Bottom, 1);
+            double cx = x + insets.Left + areaW / 2, cy = y + insets.Top + areaH / 2;
+            items.Add(new PushItem(null, shape.TextRotation, cx, cy));
+            EmitShapeText(shape with { TextRotation = 0, TextInsets = new Thickness(0, 0, 0, 0) }, cx - areaH / 2, cy - areaW / 2, areaH, areaW, items);
+            items.Add(new PopItem());
+            return;
+        }
         double left = x + shape.TextInsets.Left, right = x + width - shape.TextInsets.Right;
         double top = y + shape.TextInsets.Top, bottom = y + height - shape.TextInsets.Bottom;
         var blocks = ShapeTextBlocks(shape, width, out double total);

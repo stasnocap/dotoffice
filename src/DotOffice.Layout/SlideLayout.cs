@@ -62,7 +62,7 @@ public sealed partial class SheetLayoutEngine
     private void FitText(List<(SheetObject Object, (double X, double Y, double Width, double Height) Rect)> placed)
     {
         for (int i = 0; i < placed.Count; i++)
-            if (placed[i].Object is SheetShape { GrowToFit: true, TableRows: null } shape && shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
+            if (placed[i].Object is SheetShape { GrowToFit: true, TableRows: null, TextRotation: 0 } shape && shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
             {
                 var rect = placed[i].Rect;
                 if (ShapeTextHeight(shape, rect.Width) is var need && need > rect.Height) placed[i] = (shape, rect with { Height = need });
@@ -85,7 +85,8 @@ public sealed partial class SheetLayoutEngine
             if (scale <= 0) continue;
             var grow = new double[heights.Count];
             // Cells of one row first, then merged cells, which only grow their last row by what their rows still lack.
-            foreach (var (p, _) in parts.Where(t => ((SheetShape)t.p.Object).TableRows!.Count > 0 && ((SheetShape)t.p.Object).Paragraphs.Count > 0)
+            // Cells of vertical text wrap at the row's height and leave it as it is.
+            foreach (var (p, _) in parts.Where(t => t.p.Object is SheetShape { TableRows.Count: > 0, TextRotation: 0, Paragraphs.Count: > 0 })
                          .OrderBy(t => ((SheetShape)t.p.Object).TableRows!.Count))
             {
                 var shape = (SheetShape)p.Object;

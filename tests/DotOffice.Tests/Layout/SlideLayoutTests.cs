@@ -109,4 +109,24 @@ public class SlideLayoutTests
         var line = items.OfType<LineItem>().Single();
         Assert.Equal(firstBottom, line.Y1, 3);
     }
+
+    [Fact]
+    public void Vertical_text_is_laid_out_across_the_height_and_turned_about_the_text_area()
+    {
+        var shape = Box(20, 200, Paragraph("one two three four five six seven")) with
+        {
+            TextRotation = -90, TextInsets = new Thickness(10, 0, 0, 0),
+        };
+        var items = Lay(shape);
+        int push = items.FindIndex(i => i is PushItem { Rotation: -90 });
+        Assert.True(push >= 0);
+        var turn = (PushItem)items[push];
+        Assert.Equal((60, 125), (turn.CenterX, turn.CenterY));
+        // Unturned, the text runs over the area's height (190 points) from its left edge, so it fits in one line here.
+        var texts = items.Skip(push).OfType<TextItem>().ToList();
+        Assert.Single(texts.Select(t => t.Baseline).Distinct());
+        Assert.Equal(60 - 95, texts.Min(t => t.X), 3);
+        Assert.True(texts.Max(t => t.X) > 60 - 95 + 100); // wider than the frame, so not wrapped at its width
+        Assert.True(texts.Max(t => t.X) < 60 + 95);
+    }
 }

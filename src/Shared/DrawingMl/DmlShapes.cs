@@ -198,7 +198,25 @@ internal static class DmlShapes
             TextInsets = new Thickness(Inset("tIns", 3.6), Inset("rIns", 7.2), Inset("bIns", 3.6), Inset("lIns", 7.2)),
             WrapText = (string?)body?.Attribute("wrap") != "none",
             GrowToFit = Child(body, "spAutoFit") is not null,
+            TextRotation = TextTurn(host, body),
         };
+    }
+
+    /// <summary>
+    /// The turn of vertical text (<c>bodyPr vert</c>): <c>vert</c> runs down, <c>vert270</c> runs up. Stacked East Asian, Mongolian and WordArt
+    /// vertical text is drawn horizontally with a note.
+    /// </summary>
+    internal static double TextTurn(IDmlHost host, XElement? bodyPr)
+    {
+        switch ((string?)bodyPr?.Attribute("vert"))
+        {
+            case "vert": return -90;
+            case "vert270": return 90;
+            case "eaVert" or "mongolianVert" or "wordArtVert" or "wordArtVertRtl":
+                host.Note("stacked vertical text (East Asian, Mongolian or WordArt) is drawn horizontally");
+                return 0;
+            default: return 0;
+        }
     }
 
     /// <summary>

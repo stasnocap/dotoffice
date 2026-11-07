@@ -220,6 +220,30 @@ public class PptxReaderTests
         Assert.Equal([(2, 0), (0, 2)], lines);
     }
 
+    [Theory]
+    [InlineData("vert", -90.0)]
+    [InlineData("vert270", 90.0)]
+    [InlineData("horz", 0.0)]
+    public void Vertical_text_turns_the_text_of_shapes_and_table_cells(string vert, double turn)
+    {
+        var body = $"<a:bodyPr vert=\"{vert}\"/><a:lstStyle/>" + P("text");
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(
+            Sp(Xfrm(0, 0, 1270000, 127000) + "<a:prstGeom prst=\"rect\"/>", body).Replace("<p:txBody><a:bodyPr/><a:lstStyle/>", "<p:txBody>"))).Objects));
+        Assert.Equal(turn, shape.TextRotation);
+        var cell = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(Table([1270000], "", Row(254000, Tc("A", tcPrAttributes: $"vert=\"{vert}\""))))).Objects));
+        Assert.Equal(turn, cell.TextRotation);
+    }
+
+    [Fact]
+    public void Stacked_vertical_text_is_drawn_horizontally_with_a_note()
+    {
+        var body = "<a:bodyPr vert=\"eaVert\"/><a:lstStyle/>" + P("text");
+        var (presentation, warnings) = Read(new PptxBuilder().AddSlide(
+            Sp(Xfrm(0, 0, 1270000, 127000) + "<a:prstGeom prst=\"rect\"/>", body).Replace("<p:txBody><a:bodyPr/><a:lstStyle/>", "<p:txBody>")));
+        Assert.Equal(0, Assert.IsType<SheetShape>(Assert.Single(presentation.Slides[0].Objects)).TextRotation);
+        Assert.Contains(warnings.Warnings, w => w.Message.Contains("stacked vertical text"));
+    }
+
     [Fact]
     public void A_shape_that_fits_its_size_to_the_text_is_marked_to_grow()
     {
