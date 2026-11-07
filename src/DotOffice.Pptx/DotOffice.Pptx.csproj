@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\Shared\OpcPackage.cs" Link="Shared\OpcPackage.cs" />
+    <Compile Include="..\Shared\DrawingMl\*.cs" LinkBase="Shared\DrawingMl" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DotOffice.Core\DotOffice.Core.csproj" />
   </ItemGroup>
 

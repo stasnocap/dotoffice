@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Xml.Linq;
 using DotOffice.Core;
 
-namespace DotOffice.Xlsx;
+namespace DotOffice.Dml;
 
 /// <summary>Helpers for DrawingML (the markup of shapes and charts): colors with their modifiers and numbers.</summary>
 internal static class DrawingMl
@@ -24,7 +24,7 @@ internal static class DrawingMl
     /// The color a DrawingML color element describes (<c>srgbClr</c>, <c>schemeClr</c>, <c>sysClr</c>, <c>prstClr</c>), with luminance, tint and
     /// shade modifiers applied; <paramref name="placeholder"/> is what <c>phClr</c> stands for.
     /// </summary>
-    public static Color? Resolve(XElement? holder, XlsxTheme theme, Color? placeholder = null)
+    public static Color? Resolve(XElement? holder, DmlTheme theme, Color? placeholder = null)
     {
         var element = holder?.Elements().FirstOrDefault(e => e.Name.LocalName is "srgbClr" or "schemeClr" or "sysClr" or "prstClr" or "scrgbClr");
         if (element is null) return null;
@@ -112,7 +112,7 @@ internal static class DrawingMl
     /// The solid color of a fill property holder (<c>spPr</c> and the like): the <c>solidFill</c> color, null for <c>noFill</c>, and
     /// <paramref name="whenAbsent"/> when no fill is specified. Gradient fills take the color of their first stop.
     /// </summary>
-    public static Color? SolidFill(XElement? holder, XlsxTheme theme, Color? whenAbsent = null, Color? placeholder = null)
+    public static Color? SolidFill(XElement? holder, DmlTheme theme, Color? whenAbsent = null, Color? placeholder = null)
     {
         if (holder is null) return whenAbsent;
         foreach (var child in holder.Elements())

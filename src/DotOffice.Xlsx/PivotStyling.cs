@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DotOffice.Core;
+using DotOffice.Dml;
 
 namespace DotOffice.Xlsx;
 
@@ -56,7 +57,7 @@ internal static partial class PivotStyling
         public bool IsSubtotalRow(int row) => RowTypes.GetValueOrDefault(row) == "default";
     }
 
-    public static Result Apply(Worksheet sheet, XElement definition, XlsxTheme theme, ConditionalFormatting.Environment env,
+    public static Result Apply(Worksheet sheet, XElement definition, DmlTheme theme, ConditionalFormatting.Environment env,
         IReadOnlyDictionary<string, IReadOnlyList<(string Type, int DxfId)>>? customStyles = null)
     {
         XElement? Child(XElement? parent, string name) => parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name);
@@ -319,7 +320,7 @@ internal static partial class PivotStyling
     /// and the family it belongs to. Only the families named below are drawn; the exact fills and borders of Excel's own definitions are
     /// not reproduced, so what is drawn follows their structure (what is highlighted) rather than every shade.
     /// </summary>
-    private static Look? LookOf(string name, XlsxTheme theme)
+    private static Look? LookOf(string name, DmlTheme theme)
     {
         var match = StyleName().Match(name);
         if (!match.Success) return null;

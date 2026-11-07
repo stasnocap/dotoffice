@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\OpcPackage.cs" Link="Shared\OpcPackage.cs" />
+    <Compile Include="..\Shared\DrawingMl\*.cs" LinkBase="Shared\DrawingMl" />
   </ItemGroup>
 
   <ItemGroup>

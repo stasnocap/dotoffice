@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Xml.Linq;
 using DotOffice.Core;
-using static DotOffice.Xlsx.DrawingMl;
+using DotOffice.Dml;
+using static DotOffice.Dml.DrawingMl;
 
 namespace DotOffice.Xlsx;
 
@@ -390,7 +391,7 @@ internal static class XlsxDrawings
     /// A gradient fill of a shape: the stops, and either the angle of a linear gradient or the focus of a path gradient (which is drawn
     /// radially). Null when the fill is not a gradient.
     /// </summary>
-    private static GradientFill? ReadGradientFill(XElement? first, XlsxTheme theme, State state, Color? placeholder)
+    private static GradientFill? ReadGradientFill(XElement? first, DmlTheme theme, State state, Color? placeholder)
     {
         if (first is null || first.Name.LocalName != "gradFill") return null;
         var stops = new List<GradientStop>();
@@ -449,7 +450,7 @@ internal static class XlsxDrawings
     }
 
     /// <summary>The hatching of a <c>pattFill</c> (null for any other fill): the preset's lines, their spacing and weight, or a tint for dot patterns.</summary>
-    private static ShapePattern? ReadPattern(XElement? fill, XlsxTheme theme)
+    private static ShapePattern? ReadPattern(XElement? fill, DmlTheme theme)
     {
         if (fill is null || fill.Name.LocalName != "pattFill") return null;
         var foreground = Resolve(Child(fill, "fgClr"), theme) ?? Color.Black;
@@ -471,7 +472,7 @@ internal static class XlsxDrawings
     }
 
     /// <summary>An outer shadow from an <c>effectLst</c>: how far and in which direction it falls, in what color, how opaque and how blurred.</summary>
-    private static ShapeShadow? ReadShadow(XElement? effects, XlsxTheme theme, Color? placeholder)
+    private static ShapeShadow? ReadShadow(XElement? effects, DmlTheme theme, Color? placeholder)
     {
         var shadow = Child(effects, "outerShdw");
         if (shadow is null) return null;
@@ -500,7 +501,7 @@ internal static class XlsxDrawings
     }
 
     /// <summary>A glow from an <c>effectLst</c>: its radius, color and opacity.</summary>
-    private static ShapeGlow? ReadGlow(XElement? effects, XlsxTheme theme, Color? placeholder)
+    private static ShapeGlow? ReadGlow(XElement? effects, DmlTheme theme, Color? placeholder)
     {
         var glow = Child(effects, "glow");
         if (glow is null) return null;
@@ -726,7 +727,7 @@ internal static class XlsxDrawings
         return result.Count > 0 ? result : null;
     }
 
-    private static List<ShapeParagraph> ReadText(XElement? txBody, XlsxTheme theme, Color? defaultColor, out XElement? bodyProperties)
+    private static List<ShapeParagraph> ReadText(XElement? txBody, DmlTheme theme, Color? defaultColor, out XElement? bodyProperties)
     {
         bodyProperties = Child(txBody, "bodyPr");
         var result = new List<ShapeParagraph>();

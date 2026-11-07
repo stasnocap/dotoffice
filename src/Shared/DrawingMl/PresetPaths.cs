@@ -1,6 +1,6 @@
 using DotOffice.Core;
 
-namespace DotOffice.Xlsx;
+namespace DotOffice.Dml;
 
 /// <summary>
 /// Preset shapes that have no enumerated geometry of their own, built as paths in fractions of the frame (the form custom geometry

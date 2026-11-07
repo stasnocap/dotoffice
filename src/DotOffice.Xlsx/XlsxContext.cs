@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Xml;
 using DotOffice.Core;
+using DotOffice.Dml;
 using DotOffice.Opc;
 
 namespace DotOffice.Xlsx;
@@ -232,18 +233,18 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
     // ------------------------------------------------------------------ styles.xml and theme
 
     /// <summary>The workbook theme (the Office default when the file has none).</summary>
-    internal XlsxTheme Theme { get; private set; } = XlsxTheme.Default;
+    internal DmlTheme Theme { get; private set; } = DmlTheme.Default;
 
     private void ReadStyles()
     {
-        var theme = XlsxTheme.Default;
+        var theme = DmlTheme.Default;
         var themeRel = Package.FindRelationship(WorkbookPart, "theme");
         if (themeRel is not null && Package.Exists(themeRel.Target))
         {
             try
             {
                 using var r = Package.OpenXml(themeRel.Target);
-                theme = XlsxTheme.Read(r);
+                theme = DmlTheme.Read(r);
             }
             catch (XmlException)
             {

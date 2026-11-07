@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Xml.Linq;
 using DotOffice.Core;
-using static DotOffice.Xlsx.DrawingMl;
+using DotOffice.Dml;
+using static DotOffice.Dml.DrawingMl;
 
 namespace DotOffice.Xlsx;
 
@@ -584,7 +585,7 @@ internal static class XlsxCharts
     /// The text formatting a <c>txPr</c> or rich text body asks for: the paragraph's default run properties, overridden by the first
     /// run's. Null when it sets nothing.
     /// </summary>
-    internal static ChartTextStyle? TextStyleOf(XElement? holder, XlsxTheme theme)
+    internal static ChartTextStyle? TextStyleOf(XElement? holder, DmlTheme theme)
     {
         if (holder is null) return null;
         ChartTextStyle? style = null;
@@ -624,7 +625,7 @@ internal static class XlsxCharts
         root?.Descendants().FirstOrDefault(e => names.Contains(e.Name.LocalName));
 
     /// <summary>The default color of the i-th series: the theme's accents, then darker and lighter variants of them.</summary>
-    internal static Color PaletteColor(XlsxTheme theme, int index)
+    internal static Color PaletteColor(DmlTheme theme, int index)
     {
         var accent = theme[4 + index % 6] ?? new Color(0x44, 0x72, 0xC4);
         return (index / 6) switch
