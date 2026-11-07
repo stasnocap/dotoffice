@@ -30,6 +30,9 @@ internal sealed class Atom
 
     /// <summary>The part of <see cref="Width"/> that is the auto-space after the atom.</summary>
     public double TrailingSpace { get; set; }
+
+    /// <summary>The part of <see cref="Width"/> before the text: the space and line of a run border (w:bdr).</summary>
+    public double LeadingSpace { get; set; }
     public ImageRun? Image { get; init; }
 
     /// <summary>The shape of an <see cref="AtomKind.Image"/> atom that holds a shape instead of a picture.</summary>
@@ -196,6 +199,7 @@ internal sealed class Itemizer(FontSelector fonts)
             offset += s.Text.Length;
         }
         AutoSpace(atoms, paragraph.Properties);
+        BorderSpace(atoms);
         return atoms;
     }
 
@@ -357,6 +361,23 @@ internal sealed class Itemizer(FontSelector fonts)
             if (!Spaced(lastEa ? first : last, props)) continue;
             a.TrailingSpace = a.Size / 4;
             a.Width += a.TrailingSpace;
+        }
+    }
+
+    /// <summary>Widens a stretch of atoms sharing a run border (w:bdr) by the border's space and line on each side, as LibreOffice does.</summary>
+    private static void BorderSpace(List<Atom> atoms)
+    {
+        for (int k = 0; k < atoms.Count; k++)
+        {
+            if (atoms[k].Props.Border is not { } border || atoms[k].Font is null || atoms[k].Kind is AtomKind.Image or AtomKind.LineBreak or AtomKind.PageBreak) continue;
+            int end = k;
+            while (end < atoms.Count && atoms[end].Font is not null && atoms[end].Props.Border == border) end++;
+            double pad = border.Space + border.Width;
+            atoms[k].LeadingSpace = pad;
+            atoms[k].Width += pad;
+            atoms[end - 1].TrailingSpace += pad;
+            atoms[end - 1].Width += pad;
+            k = end - 1;
         }
     }
 

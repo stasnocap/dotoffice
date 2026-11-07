@@ -364,7 +364,7 @@ internal static class ParagraphLayouter
             {
                 case AtomKind.Text:
                 case AtomKind.Space:
-                    items.Add(new TextItem(x0 + a.X, baseline - a.Rise, a.Font!.Font, a.Size, a.Text, color,
+                    items.Add(new TextItem(x0 + a.X + a.LeadingSpace, baseline - a.Rise, a.Font!.Font, a.Size, a.Text, color,
                         a.Font.SyntheticBold, a.Font.SyntheticItalic, a.Props.CharacterSpacing)
                     {
                         Field = a.Field, Glyphs = a.Glyphs, RightToLeft = a.RightToLeft,
@@ -410,7 +410,7 @@ internal static class ParagraphLayouter
                 bottom = Math.Max(bottom, baseline - atoms[end].Rise - m.Ascent + m.Height);
             }
             var last = atoms[end - 1];
-            double x1 = x0 + atoms[k].X - border.Space, x2 = x0 + last.X + last.Advance + border.Space;
+            double x1 = x0 + atoms[k].X + border.Width / 2, x2 = x0 + last.X + last.Advance - border.Width / 2;
             top -= border.Space; bottom += border.Space;
             var colored = border with { Color = border.Color ?? atoms[k].Props.Color };
             AddBorder(items, colored, x1, top, x2, top);
@@ -434,7 +434,7 @@ internal static class ParagraphLayouter
             double cy = a.Props.Emphasis == EmphasisMark.UnderDot
                 ? baseline - a.Rise - m.Ascent + m.Height - d
                 : baseline - a.Rise - m.Ascent + d;
-            double x = x0 + a.X;
+            double x = x0 + a.X + a.LeadingSpace;
             foreach (var rune in a.Text.EnumerateRunes())
             {
                 string s = rune.ToString();

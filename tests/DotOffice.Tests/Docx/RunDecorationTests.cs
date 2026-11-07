@@ -25,8 +25,22 @@ public class RunDecorationTests
         var lines = page.Items.OfType<LineItem>().Where(l => l.Color == new Color(255, 0, 0)).ToList();
         Assert.Equal(4, lines.Count);
         var text = Texts(page).First(t => t.Text == "boxed");
-        Assert.Equal(text.X - 2, lines.Min(l => Math.Min(l.X1, l.X2)), 0.01);
+        Assert.Equal(text.X - 2 - 0.5, lines.Min(l => Math.Min(l.X1, l.X2)), 0.01);
         Assert.True(lines.Max(l => Math.Max(l.X1, l.X2)) > text.X + 20);
+    }
+
+    [Fact]
+    public void Run_border_pushes_the_text_by_its_space_and_line_on_each_side()
+    {
+        var bare = Texts(Layout("")).ToList();
+        var page = Layout("<w:bdr w:val=\"single\" w:sz=\"8\" w:space=\"4\" w:color=\"FF0000\"/>");
+        var boxed = Texts(page).ToList();
+        var bareRun = bare.First(t => t.Text == "boxed");
+        var run = boxed.First(t => t.Text == "boxed");
+        Assert.Equal(bareRun.X + 5, run.X, 0.01);
+        var bareAfter = bare.Last();
+        var after = boxed.Last();
+        Assert.Equal(bareAfter.X + 10, after.X, 0.01);
     }
 
     [Fact]
