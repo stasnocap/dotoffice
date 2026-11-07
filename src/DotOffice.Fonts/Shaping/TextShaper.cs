@@ -146,6 +146,29 @@ public static class TextShaper
         return glyphs.Select(g => new ShapedGlyph(g.Glyph, g.Cluster, g.Text, g.XAdvance, g.XOffset, g.YOffset)).ToArray();
     }
 
+    /// <summary>
+    /// The glyph that the font's vertical forms (<c>vert</c>) give <paramref name="codePoint"/> for upright text running down, or
+    /// null when the font has none for it (or the character has no glyph).
+    /// </summary>
+    public static ushort? VerticalGlyph(TrueTypeFont font, int codePoint)
+    {
+        var layout = font.OpenTypeLayout;
+        if (!layout.HasSubstitutions || font.GetGlyphId(codePoint) == 0) return null;
+        try
+        {
+            var chars = Normalizer.Normalize(font, [(codePoint, 0)], Normalizer.Shaper.Default, hasGposMark: false);
+            var glyphs = Nominal(font, chars, Common);
+            var lookups = layout.Lookups(false, ScriptRuns.TagOf(codePoint), [("vert", Common)]);
+            if (lookups.Count == 0) return null;
+            layout.Apply(false, glyphs, lookups);
+            return glyphs.Count == 1 && glyphs[0].Glyph != font.GetGlyphId(codePoint) ? glyphs[0].Glyph : null;
+        }
+        catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     private static ShapedGlyph[] ShapeReversed(TrueTypeFont font, string text, string script, bool kerning, bool ligatures)
     {
         var graphemes = new List<(int Start, int Length)>();

@@ -1,3 +1,4 @@
+using DotOffice.Fonts;
 using DotOffice.Fonts.Shaping;
 
 namespace DotOffice.Layout;
@@ -49,6 +50,19 @@ internal static class UprightText
         return result;
     }
 
+    /// <summary>The glyph in its vertical form (the font's <c>vert</c> feature: 、。「」ー and the like), or unchanged when it has none.</summary>
+    private static ShapedGlyph Vertical(TrueTypeFont font, ShapedGlyph glyph) =>
+        glyph.Text.Length > 0 && TextShaper.VerticalGlyph(font, char.ConvertToUtf32(glyph.Text, 0)) is { } vertical
+            ? glyph with { GlyphId = vertical }
+            : glyph;
+
+    private static IReadOnlyList<ShapedGlyph>? VerticalForm(TrueTypeFont font, string ch)
+    {
+        int cp = char.ConvertToUtf32(ch, 0);
+        if (TextShaper.VerticalGlyph(font, cp) is not { } vertical) return null;
+        return [new ShapedGlyph(vertical, 0, ch, font.GetAdvanceWidth(font.GetGlyphId(cp)), 0, 0)];
+    }
+
     /// <summary>Adds the pieces of <paramref name="text"/> to <paramref name="output"/>; false (adding nothing) when it holds no upright character.</summary>
     private static bool Split(TextItem text, List<LayoutItem> output)
     {
@@ -73,7 +87,7 @@ internal static class UprightText
                 if (upright)
                 {
                     Flush();
-                    pieces.Add((g.Text, new[] { g }, x, advance, true));
+                    pieces.Add((g.Text, new[] { Vertical(text.Font, g) }, x, advance, true));
                     any = true;
                     runX = x + advance;
                 }
@@ -100,7 +114,7 @@ internal static class UprightText
                 if (IsUpright(char.ConvertToUtf32(text.Text, i)))
                 {
                     if (i > start) pieces.Add((text.Text[start..i], null, startX, x - startX, false));
-                    pieces.Add((ch, null, x, advance, true));
+                    pieces.Add((ch, VerticalForm(text.Font, ch), x, advance, true));
                     any = true;
                     start = i + length;
                     startX = x + advance;
