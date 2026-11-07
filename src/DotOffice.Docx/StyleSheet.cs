@@ -319,6 +319,8 @@ internal sealed class StyleSheet
             Frame = f.Frame,
             SuppressLineNumbers = f.SuppressLineNumbers ?? false,
             SuppressAutoHyphens = f.SuppressAutoHyphens ?? false,
+            AutoSpaceLatin = f.AutoSpaceLatin ?? true,
+            AutoSpaceDigits = f.AutoSpaceDigits ?? true,
             KeepLinesTogether = f.KeepLines ?? false,
             PageBreakBefore = f.PageBreakBefore ?? false,
             WidowControl = f.WidowControl ?? true,

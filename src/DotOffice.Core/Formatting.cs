@@ -179,6 +179,12 @@ public sealed record ParagraphProperties
 
     /// <summary>The paragraph's words are not hyphenated (w:suppressAutoHyphens).</summary>
     public bool SuppressAutoHyphens { get; init; }
+
+    /// <summary>A quarter em separates East Asian text from Latin text (w:autoSpaceDE, on by default).</summary>
+    public bool AutoSpaceLatin { get; init; } = true;
+
+    /// <summary>A quarter em separates East Asian text from digits (w:autoSpaceDN, on by default).</summary>
+    public bool AutoSpaceDigits { get; init; } = true;
     public bool KeepLinesTogether { get; init; }
     public bool PageBreakBefore { get; init; }
     public bool WidowControl { get; init; } = true;

@@ -241,6 +241,8 @@ internal sealed record ParaFormat
     public bool? KeepNext { get; init; }
     public bool? SuppressLineNumbers { get; init; }
     public bool? SuppressAutoHyphens { get; init; }
+    public bool? AutoSpaceLatin { get; init; }
+    public bool? AutoSpaceDigits { get; init; }
     public bool? KeepLines { get; init; }
     public bool? PageBreakBefore { get; init; }
     public bool? WidowControl { get; init; }
@@ -272,6 +274,8 @@ internal sealed record ParaFormat
         KeepNext = over.KeepNext ?? KeepNext,
         SuppressLineNumbers = over.SuppressLineNumbers ?? SuppressLineNumbers,
         SuppressAutoHyphens = over.SuppressAutoHyphens ?? SuppressAutoHyphens,
+        AutoSpaceLatin = over.AutoSpaceLatin ?? AutoSpaceLatin,
+        AutoSpaceDigits = over.AutoSpaceDigits ?? AutoSpaceDigits,
         KeepLines = over.KeepLines ?? KeepLines,
         PageBreakBefore = over.PageBreakBefore ?? PageBreakBefore,
         WidowControl = over.WidowControl ?? WidowControl,
@@ -347,6 +351,8 @@ internal sealed record ParaFormat
                     break;
                 case "keepNext": f = f with { KeepNext = r.OnOff() }; break;
                 case "suppressAutoHyphens": f = f with { SuppressAutoHyphens = r.OnOff() }; break;
+                case "autoSpaceDE": f = f with { AutoSpaceLatin = r.OnOff() }; break;
+                case "autoSpaceDN": f = f with { AutoSpaceDigits = r.OnOff() }; break;
                 case "suppressLineNumbers": f = f with { SuppressLineNumbers = r.OnOff() }; break;
                 case "bidi": f = f with { Bidi = r.OnOff() }; break;
                 case "framePr": f = f with { Frame = ParseFrame(r) }; break;

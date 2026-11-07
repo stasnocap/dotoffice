@@ -26,7 +26,7 @@ internal sealed class Atom
     /// <summary>Baseline raise in points (superscript, w:position).</summary>
     public double Rise { get; init; }
 
-    public double Width { get; init; }
+    public double Width { get; set; }
     public ImageRun? Image { get; init; }
 
     /// <summary>The shape of an <see cref="AtomKind.Image"/> atom that holds a shape instead of a picture.</summary>
@@ -190,6 +190,7 @@ internal sealed class Itemizer(FontSelector fonts)
             }
             offset += s.Text.Length;
         }
+        AutoSpace(atoms, paragraph.Properties);
         return atoms;
     }
 
@@ -331,6 +332,30 @@ internal sealed class Itemizer(FontSelector fonts)
             });
         }
     }
+
+    /// <summary>
+    /// Widens the atom before each boundary between East Asian text and Latin text or digits by a quarter em
+    /// (w:autoSpaceDE, w:autoSpaceDN). LibreOffice adds a fifth of an em instead.
+    /// </summary>
+    private static void AutoSpace(List<Atom> atoms, ParagraphProperties props)
+    {
+        if (!props.AutoSpaceLatin && !props.AutoSpaceDigits) return;
+        for (int i = 0; i + 1 < atoms.Count; i++)
+        {
+            var a = atoms[i];
+            var b = atoms[i + 1];
+            if (a.Kind != AtomKind.Text || b.Kind != AtomKind.Text || a.Text.Length == 0 || b.Text.Length == 0) continue;
+            int last = char.ConvertToUtf32(a.Text, char.IsLowSurrogate(a.Text[^1]) && a.Text.Length > 1 ? a.Text.Length - 2 : a.Text.Length - 1);
+            int first = char.ConvertToUtf32(b.Text, 0);
+            bool lastEa = FontSelector.IsEastAsian(last), firstEa = FontSelector.IsEastAsian(first);
+            if (lastEa == firstEa) continue;
+            if (!Spaced(lastEa ? first : last, props)) continue;
+            a.Width += a.Size / 4;
+        }
+    }
+
+    private static bool Spaced(int latin, ParagraphProperties props) =>
+        latin is >= '0' and <= '9' ? props.AutoSpaceDigits : props.AutoSpaceLatin && Rune.IsLetter(new Rune(latin)) && !FontSelector.IsEastAsian(latin);
 
     /// <summary>
     /// Shapes text when it needs it (complex script, marks, kerning, or right-to-left so its glyphs can be drawn
