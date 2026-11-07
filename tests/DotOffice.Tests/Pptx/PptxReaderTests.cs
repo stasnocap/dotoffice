@@ -125,9 +125,20 @@ public class PptxReaderTests
                          "<a:lvl2pPr marL=\"742950\" indent=\"-285750\"><a:buChar char=\"–\"/><a:defRPr sz=\"2800\"/></a:lvl2pPr></p:bodyStyle>",
         }.AddSlide(Sp(Xfrm(0, 0, 5080000, 2540000), P("One") + P("Two", "<a:pPr lvl=\"1\"/>") + P("No bullet", "<a:pPr><a:buNone/></a:pPr>"), "type=\"body\""));
         var paragraphs = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(builder).Objects)).Paragraphs;
-        Assert.Equal(["• One", "– Two", "No bullet"], paragraphs.Select(p => string.Concat(p.Runs.Select(r => r.Text))));
-        Assert.Equal((0.0, 36.0), (paragraphs[0].Indent, paragraphs[1].Indent));
+        Assert.Equal(["•\tOne", "–\tTwo", "No bullet"], paragraphs.Select(p => string.Concat(p.Runs.Select(r => r.Text))));
+        Assert.Equal((0.0, 27.0, 36.0, 58.5), (paragraphs[0].Indent, paragraphs[0].Margin!.Value, paragraphs[1].Indent, paragraphs[1].Margin!.Value));
         Assert.Equal(28.0, paragraphs[1].Runs[0].Font.FontSize);
+    }
+
+    [Fact]
+    public void Paragraph_and_line_spacing_are_read_in_points_and_percent()
+    {
+        var builder = new PptxBuilder { TextStyles = "<p:bodyStyle><a:lvl1pPr><a:lnSpc><a:spcPct val=\"90000\"/></a:lnSpc><a:spcBef><a:spcPct val=\"20000\"/></a:spcBef><a:defRPr sz=\"2000\"/></a:lvl1pPr></p:bodyStyle>" }
+            .AddSlide(Sp(Xfrm(0, 0, 5080000, 2540000),
+                P("Inherited") + P("Own", "<a:pPr><a:lnSpc><a:spcPts val=\"3000\"/></a:lnSpc><a:spcAft><a:spcPts val=\"1200\"/></a:spcAft></a:pPr>"), "type=\"body\""));
+        var paragraphs = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(builder).Objects)).Paragraphs;
+        Assert.Equal((0.9, null, 4.0, 0.0), (paragraphs[0].LineSpacing, paragraphs[0].LinePitch, paragraphs[0].SpaceBefore, paragraphs[0].SpaceAfter));
+        Assert.Equal((30.0, 4.0, 12.0), (paragraphs[1].LinePitch!.Value, paragraphs[1].SpaceBefore, paragraphs[1].SpaceAfter));
     }
 
     [Fact]

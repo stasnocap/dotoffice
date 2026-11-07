@@ -99,8 +99,14 @@ public enum ShapeTextAnchor { Top, Middle, Bottom }
 /// <param name="Alignment">How the lines are aligned.</param>
 /// <param name="Runs">The text with its formatting.</param>
 /// <param name="FontSize">The size of an empty paragraph, or of the largest run.</param>
-/// <param name="Indent">Where the paragraph's lines start, in points from the left inset (DrawingML <c>marL</c> plus the first-line <c>indent</c>).</param>
-public sealed record ShapeParagraph(HorizontalAlignment Alignment, IReadOnlyList<CellTextRun> Runs, double FontSize, double Indent = 0);
+/// <param name="Indent">Where the paragraph's first line starts, in points from the left inset (DrawingML <c>marL</c> plus the first-line <c>indent</c>).</param>
+/// <param name="Margin">Where the following lines start (<c>marL</c>); null starts them at <paramref name="Indent"/>.</param>
+/// <param name="LineSpacing">The line pitch as a multiple of single spacing (<c>lnSpc/spcPct</c>).</param>
+/// <param name="LinePitch">An exact line pitch in points (<c>lnSpc/spcPts</c>), used instead of <paramref name="LineSpacing"/>.</param>
+/// <param name="SpaceBefore">Space above the paragraph in points (<c>spcBef</c>).</param>
+/// <param name="SpaceAfter">Space below the paragraph in points (<c>spcAft</c>).</param>
+public sealed record ShapeParagraph(HorizontalAlignment Alignment, IReadOnlyList<CellTextRun> Runs, double FontSize, double Indent = 0, double? Margin = null,
+    double LineSpacing = 1, double? LinePitch = null, double SpaceBefore = 0, double SpaceAfter = 0);
 
 public enum HatchKind { Horizontal, Vertical, UpDiagonal, DownDiagonal, Cross, DiagonalCross, Tint }
 

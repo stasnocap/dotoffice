@@ -570,8 +570,14 @@ internal static class DmlShapes
             };
             double emptySize = runs.Count > 0 ? runs.Max(r => r.Font.FontSize) : Font(Child(p, "endParaRPr")).FontSize;
             var pPr = Child(p, "pPr");
+            double margin = Math.Max(0, Number(pPr, "marL") / EmuPerPoint);
             double indent = Math.Max(0, (Number(pPr, "marL") + Number(pPr, "indent")) / EmuPerPoint);
-            result.Add(new ShapeParagraph(alignment, runs, emptySize, indent));
+            // Spacing in hundredths of a point (spcPts) or thousandths of a percent (spcPct): of single spacing for lines, of the font size around paragraphs.
+            double? Points(string name) => Child(Child(pPr, name), "spcPts") is { } pts ? Number(pts, "val") / 100 : null;
+            double? Percent(string name) => Child(Child(pPr, name), "spcPct") is { } pct ? Number(pct, "val") / 100_000 : null;
+            double Around(string name) => Math.Max(0, Points(name) ?? Percent(name) * emptySize ?? 0);
+            result.Add(new ShapeParagraph(alignment, runs, emptySize, indent, margin == indent ? null : margin,
+                Math.Max(0, Percent("lnSpc") ?? 1), Points("lnSpc") is { } pitch ? Math.Max(0, pitch) : null, Around("spcBef"), Around("spcAft")));
         }
         // A text body of empty paragraphs only carries no text.
         if (result.All(p => p.Runs.Count == 0 || p.Runs.All(r => r.Text.Length == 0))) result.Clear();

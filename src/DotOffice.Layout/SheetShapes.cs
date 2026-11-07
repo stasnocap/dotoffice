@@ -528,7 +528,7 @@ public sealed partial class SheetLayoutEngine
         double left = x + shape.TextInsets.Left, right = x + width - shape.TextInsets.Right;
         double top = y + shape.TextInsets.Top, bottom = y + height - shape.TextInsets.Bottom;
         double areaWidth = Math.Max(right - left, 1);
-        var blocks = new List<(TextBlock Block, HorizontalAlignment Alignment, double Indent)>();
+        var blocks = new List<(TextBlock Block, ShapeParagraph Paragraph)>();
         foreach (var paragraph in shape.Paragraphs)
         {
             var text = string.Concat(paragraph.Runs.Select(r => r.Text));
@@ -540,34 +540,54 @@ public sealed partial class SheetLayoutEngine
                 Kind = CellValueKind.Text,
                 Style = CellStyle.Default with { Wrap = true, HorizontalAlignment = shape.WrapText ? paragraph.Alignment : HorizontalAlignment.Left, Font = font },
             };
-            double indent = Math.Min(paragraph.Indent, areaWidth - 1);
-            blocks.Add((BuildBlock(cell, text, shape.WrapText ? areaWidth - indent : 1e6), paragraph.Alignment, indent));
+            // Wrapped lines start at the margin and the first line at the indent (before it for a hanging indent, where the bullet goes).
+            double margin = Math.Clamp(paragraph.Margin ?? paragraph.Indent, 0, areaWidth - 1);
+            double first = Math.Clamp(paragraph.Indent, 0, areaWidth - 1) - margin;
+            blocks.Add((BuildBlock(cell, text, shape.WrapText ? areaWidth : 1e6, margin, first), paragraph));
         }
-        double total = blocks.Sum(b => b.Block.Height);
+        if (_fontLineHeight)
+            foreach (var (block, _) in blocks)
+                for (int i = 0; i < block.Metrics.Count; i++)
+                    block.Metrics[i] = block.Metrics[i] with { Pitch = block.Metrics[i].Ascent + block.Metrics[i].Descent };
+        static double Spaced(ShapeParagraph paragraph, double pitch) => paragraph.LinePitch ?? pitch * paragraph.LineSpacing;
+        double total = 0;
+        for (int b = 0; b < blocks.Count; b++)
+        {
+            var (block, paragraph) = blocks[b];
+            total += block.Metrics.Sum(m => Spaced(paragraph, m.Pitch));
+            total += paragraph.SpaceBefore;
+            if (b < blocks.Count - 1) total += paragraph.SpaceAfter;
+        }
         double lineTop = shape.TextAnchor switch
         {
             ShapeTextAnchor.Middle => (top + bottom) / 2 - total / 2,
             ShapeTextAnchor.Bottom => bottom - total,
             _ => top,
         };
-        foreach (var (block, alignment, indent) in blocks)
+        for (int b = 0; b < blocks.Count; b++)
         {
+            var (block, paragraph) = blocks[b];
+            lineTop += paragraph.SpaceBefore;
             for (int i = 0; i < block.Lines.Count; i++)
             {
                 var (pitch, ascent, descent) = block.Metrics[i];
+                double spaced = Spaced(paragraph, pitch);
                 var line = block.Lines[i];
                 if (line.Atoms.Count > 0)
                 {
-                    double x0 = left + indent;
+                    double x0 = left;
                     if (!shape.WrapText)
                     {
-                        double w = LineWidth(line);
-                        x0 = alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + indent + right) / 2 - w / 2, _ => left + indent };
+                        // Line positions include the indent; the unwrapped line is aligned by its text alone.
+                        double w = LineWidth(line), start = line.Atoms[0].X;
+                        x0 = paragraph.Alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + start + right) / 2 - (w - start) / 2 - start, _ => left };
                     }
-                    EmitLine(line, x0, lineTop + (pitch - (ascent + descent)) / 2 + ascent, x - 1e6, x + 1e6, items);
+                    // Extra line spacing goes above the text, as PowerPoint does; tighter spacing pulls it up.
+                    EmitLine(line, x0, lineTop + spaced - pitch + (pitch - (ascent + descent)) / 2 + ascent, x - 1e6, x + 1e6, items);
                 }
-                lineTop += pitch;
+                lineTop += spaced;
             }
+            if (b < blocks.Count - 1) lineTop += paragraph.SpaceAfter;
         }
     }
 }

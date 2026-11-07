@@ -327,7 +327,7 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>Breaks a cell's text into lines; <paramref name="wrapWidth"/> is the text width for wrapping cells.</summary>
-    private TextBlock BuildBlock(Cell cell, string text, double wrapWidth)
+    private TextBlock BuildBlock(Cell cell, string text, double wrapWidth, double leftIndent = 0, double firstLineIndent = 0)
     {
         var font = cell.Style.Font;
         bool wrap = cell.Style.Wrap && cell.Kind == CellValueKind.Text;
@@ -342,7 +342,7 @@ public sealed partial class SheetLayoutEngine
         var firstRun = paragraphs.SelectMany(p => p).Select(r => r.Properties).FirstOrDefault() ?? font;
 
         var alignment = wrap ? AlignmentOf(cell) : ParagraphAlignment.Left;
-        var frame = new LineFrame(wrap ? Math.Max(wrapWidth, 1) : 1e7, 0, 0, 0, [], 36);
+        var frame = new LineFrame(wrap ? Math.Max(wrapWidth, 1) : 1e7, leftIndent, 0, firstLineIndent, [], 36);
         foreach (var runs in paragraphs)
         {
             var tallest = runs.Select(r => r.Properties).DefaultIfEmpty(firstRun).MaxBy(p => p.FontSize)!;

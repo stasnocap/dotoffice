@@ -530,6 +530,8 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         if (kind?.Name.LocalName != "buAutoNum")
             foreach (var deeper in numbering.Keys.Where(k => k >= level).ToList()) numbering.Remove(deeper);
         if (!hasText) return null;
+        // With a hanging indent the text after the bullet starts at the margin, as a tab to it; otherwise a space follows.
+        string gap = Number(pPr, "indent") < 0 ? "\t" : " ";
         switch (kind?.Name.LocalName)
         {
             case "buChar":
@@ -541,15 +543,15 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                     Note("bullets in symbol fonts are drawn as round bullets");
                     ch = "•";
                 }
-                return ch + " ";
+                return ch + gap;
             case "buAutoNum":
                 foreach (var deeper in numbering.Keys.Where(k => k > level).ToList()) numbering.Remove(deeper);
                 int start = kind.Attribute("startAt") is null ? 1 : (int)Number(kind, "startAt", 1);
                 int n = numbering[level] = numbering.TryGetValue(level, out var previous) ? previous + 1 : start;
-                return AutoNumber((string?)kind.Attribute("type") ?? "arabicPeriod", n) + " ";
+                return AutoNumber((string?)kind.Attribute("type") ?? "arabicPeriod", n) + gap;
             case "buBlip":
                 Note("picture bullets are drawn as round bullets");
-                return "• ";
+                return "•" + gap;
             default: return null;
         }
     }

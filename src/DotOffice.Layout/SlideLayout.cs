@@ -8,6 +8,27 @@ public sealed partial class SheetLayoutEngine
     public LayoutDocument Layout(Presentation presentation, CancellationToken cancellationToken = default)
     {
         var document = new LayoutDocument { Title = presentation.Title, Author = presentation.Author };
+        _fontLineHeight = true;
+        try
+        {
+            LayoutSlides(presentation, document, cancellationToken);
+        }
+        finally
+        {
+            _fontLineHeight = false;
+        }
+        if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(720, 540));
+        return document;
+    }
+
+    /// <summary>
+    /// Whether shape text is single-spaced by the font's own line height (ascent plus descent), as PowerPoint and LibreOffice space slide
+    /// text; spreadsheet shapes keep the row-height pitch they were tuned to.
+    /// </summary>
+    private bool _fontLineHeight;
+
+    private void LayoutSlides(Presentation presentation, LayoutDocument document, CancellationToken cancellationToken)
+    {
         foreach (var slide in presentation.Slides)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -31,7 +52,5 @@ public sealed partial class SheetLayoutEngine
             }
             document.Pages.Add(page);
         }
-        if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(720, 540));
-        return document;
     }
 }
