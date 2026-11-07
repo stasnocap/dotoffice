@@ -215,7 +215,30 @@ internal sealed record GdiPen(int Style, double Width, Color Color, bool Cosmeti
     public bool IsNull => (Style & 0xF) == 5;
 }
 
-internal sealed record GdiBrush(Color? Color);
+/// <summary>
+/// A GDI brush: solid (<see cref="Color"/>, null for a hollow brush), hatched (<see cref="Hatch"/> 0–5 in <see cref="Color"/> over the
+/// background color when the background mode is opaque) or a pattern bitmap (<see cref="Pattern"/>, tiled from the device origin).
+/// </summary>
+internal sealed record GdiBrush(Color? Color)
+{
+    public int? Hatch { get; init; }
+
+    public ImageData? Pattern { get; init; }
+
+    /// <summary>The pattern bitmap's size in device pixels.</summary>
+    public (int W, int H) PatternSize { get; init; }
+
+    /// <summary>A pattern brush from a DIB's header and bits (gray when the DIB cannot be read).</summary>
+    public static GdiBrush FromDib(ReadOnlySpan<byte> header, ReadOnlySpan<byte> bits)
+    {
+        var gray = new GdiBrush(new Color(0x80, 0x80, 0x80));
+        if (header.Length < 12 || GdiPlayer.Dib(header, bits) is not { } dib) return gray;
+        int w, h;
+        if (BinaryPrimitives.ReadInt32LittleEndian(header) == 12) { w = BinaryPrimitives.ReadInt16LittleEndian(header[4..]); h = BinaryPrimitives.ReadInt16LittleEndian(header[6..]); }
+        else { w = BinaryPrimitives.ReadInt32LittleEndian(header[4..]); h = Math.Abs(BinaryPrimitives.ReadInt32LittleEndian(header[8..])); }
+        return w <= 0 || h <= 0 ? gray : gray with { Pattern = dib, PatternSize = (w, h) };
+    }
+}
 
 internal sealed record GdiFont(int Height, int Escapement, int Weight, bool Italic, bool Underline, bool Strikeout, string Face);
 
@@ -483,6 +506,11 @@ internal sealed class GdiPlayer(FontSelector fonts)
             var (x, y) = m.Apply(p.X, p.Y);
             points.Add(new PathPoint(x, y, p.Kind));
         }
+        if (fill && (_state.Brush.Hatch is not null || _state.Brush.Pattern is not null))
+        {
+            FillPattern(points, _state.Brush, !_state.Winding);
+            fill = false;
+        }
         Color? fillColor = fill ? _state.Brush.Color : null;
         var pen = _state.Pen;
         Color? strokeColor = stroke && !pen.IsNull ? pen.Color : null;
@@ -619,7 +647,8 @@ internal sealed class GdiPlayer(FontSelector fonts)
     /// <summary>Fills rectangles (a region) with a brush, without outlines.</summary>
     public void FillRects(IEnumerable<(double L, double T, double R, double B)> rects, GdiBrush? brush = null)
     {
-        var color = (brush ?? _state.Brush).Color;
+        brush ??= _state.Brush;
+        var color = brush.Color;
         if (color is null) return;
         var m = Transform;
         foreach (var (l, t, r, b) in rects)
@@ -631,8 +660,90 @@ internal sealed class GdiPlayer(FontSelector fonts)
                 points.Add(new PathPoint(px, py, k));
             }
             points.Add(new PathPoint(0, 0, PathPointKind.Close));
-            Add(new PathItem(points, color, null));
+            if (brush.Hatch is not null || brush.Pattern is not null) FillPattern(points, brush, true);
+            else Add(new PathItem(points, color, null));
         }
+    }
+
+    /// <summary>
+    /// Fills an outline (box coordinates) with a hatched or pattern brush: in a clip group of the outline, the background (hatches, when
+    /// the background mode is opaque) and the hatch lines 8 device pixels apart, or the pattern bitmap tiled from the device origin.
+    /// </summary>
+    private void FillPattern(List<PathPoint> points, GdiBrush brush, bool evenOdd)
+    {
+        var corners = points.Where(p => p.Kind != PathPointKind.Close).ToList();
+        if (corners.Count < 3) return;
+        double left = corners.Min(p => p.X), top = corners.Min(p => p.Y), right = corners.Max(p => p.X), bottom = corners.Max(p => p.Y);
+        var saved = _state.Clip;
+        _state.Clip = [.. saved, ClipGroups.Flatten(points)];
+        var (ox, oy) = DeviceToBox.Apply(0, 0);
+        if (brush.Pattern is { } pattern)
+        {
+            double tw = brush.PatternSize.W * Math.Abs(DeviceToBox.A), th = brush.PatternSize.H * Math.Abs(DeviceToBox.D);
+            if (WmfFrame is not null) (tw, th) = (brush.PatternSize.W * PixelWidth, brush.PatternSize.H * PixelWidth);
+            long count = tw > 0 && th > 0 ? (long)(Math.Ceiling((right - left) / tw) + 1) * (long)(Math.Ceiling((bottom - top) / th) + 1) : long.MaxValue;
+            if (count > 4000) Add(new PathItem(points, brush.Color, null, 0.05, LineStyle.Solid, evenOdd)); // too fine to tile: plain gray
+            else
+                for (double y = oy + Math.Floor((top - oy) / th) * th; y < bottom; y += th)
+                    for (double x = ox + Math.Floor((left - ox) / tw) * tw; x < right; x += tw)
+                        Add(new ImageItem(x, y, tw, th, pattern));
+        }
+        else if (brush is { Hatch: { } hatch, Color: { } color })
+        {
+            if (_state.Opaque) Add(new PathItem(points, _state.BackColor, null, 0.05, LineStyle.Solid, evenOdd));
+            double step = 8 * PixelWidth, width = PixelWidth;
+            void Lines(double dx, double dy)
+            {
+                // Lines along (dx, dy) through the multiples of the step from the origin, across the bounds.
+                double nx = -dy, ny = dx, lo = double.MaxValue, hi = double.MinValue;
+                foreach (var (cx, cy) in new[] { (left, top), (right, top), (left, bottom), (right, bottom) })
+                {
+                    double d = (cx - ox) * nx + (cy - oy) * ny;
+                    lo = Math.Min(lo, d); hi = Math.Max(hi, d);
+                }
+                double spacing = step * (dx != 0 && dy != 0 ? Math.Sqrt(0.5) : 1), reach = (right - left) + (bottom - top);
+                if ((hi - lo) / spacing > 2000) return;
+                for (double d = Math.Floor(lo / spacing) * spacing; d <= hi; d += spacing)
+                {
+                    double px = ox + nx * d, py = oy + ny * d;
+                    // The point of the line nearest the bounds' center, then half the reach either way.
+                    double along = ((left + right) / 2 - px) * dx + ((top + bottom) / 2 - py) * dy;
+                    px += dx * along; py += dy * along;
+                    Add(new PathItem([new(px - dx * reach, py - dy * reach, PathPointKind.Move), new(px + dx * reach, py + dy * reach, PathPointKind.Line)],
+                        null, color, width));
+                }
+            }
+            double diagonal = Math.Sqrt(0.5);
+            if (hatch is 0 or 4) Lines(1, 0);
+            if (hatch is 1 or 4) Lines(0, 1);
+            if (hatch is 2 or 5) Lines(diagonal, diagonal);
+            if (hatch is 3 or 5) Lines(diagonal, -diagonal);
+        }
+        _state.Clip = saved;
+    }
+
+    /// <summary>A GradientFill rectangle between two corners (logical units), blending from the first's color across or down.</summary>
+    public void GradientRect((double X, double Y, Color Color) a, (double X, double Y, Color Color) b, bool vertical)
+    {
+        var m = Transform;
+        var (x1, y1) = m.Apply(a.X, a.Y);
+        var (x2, y2) = m.Apply(b.X, b.Y);
+        double left = Math.Min(x1, x2), top = Math.Min(y1, y2), width = Math.Abs(x2 - x1), height = Math.Abs(y2 - y1);
+        if (width <= 0 || height <= 0) return;
+        // The blend runs along the logical x (or y) axis from the first corner towards the second, as the transform turns it.
+        double dx = vertical ? m.C : m.A, dy = vertical ? m.D : m.B, sign = Math.Sign(vertical ? b.Y - a.Y : b.X - a.X);
+        double degree = Math.Atan2(dy * sign, dx * sign) * 180 / Math.PI;
+        Add(new GradientItem(left, top, width, height, degree, [new GradientStop(0, a.Color), new GradientStop(1, b.Color)]));
+    }
+
+    /// <summary>A GradientFill triangle, filled with the mean of its corners' colors.</summary>
+    public void GradientTriangle((double X, double Y, Color Color) a, (double X, double Y, Color Color) b, (double X, double Y, Color Color) c)
+    {
+        var m = Transform;
+        var color = new Color((byte)((a.Color.R + b.Color.R + c.Color.R) / 3), (byte)((a.Color.G + b.Color.G + c.Color.G) / 3), (byte)((a.Color.B + b.Color.B + c.Color.B) / 3));
+        var points = new[] { a, b, c }.Select((v, k) => { var (x, y) = m.Apply(v.X, v.Y); return new PathPoint(x, y, k == 0 ? PathPointKind.Move : PathPointKind.Line); }).ToList();
+        points.Add(new PathPoint(0, 0, PathPointKind.Close));
+        Add(new PathItem(points, color, null));
     }
 
     public void FillRegion(IEnumerable<(double L, double T, double R, double B)> rects, int brushHandle)
@@ -947,7 +1058,33 @@ internal static class EmfReader
             case 39:
             {
                 int style = I32(r, 12);
-                gdi.Create(I32(r, 8), new GdiBrush(style == 1 ? null : GdiPlayer.ColorRef(r[16..])));
+                var brush = new GdiBrush(style == 1 ? null : GdiPlayer.ColorRef(r[16..]));
+                gdi.Create(I32(r, 8), style == 2 && r.Length >= 24 && I32(r, 20) is >= 0 and <= 5 ? brush with { Hatch = I32(r, 20) } : brush);
+                break;
+            }
+            case 93 or 94 when r.Length >= 32:
+                // CreateMonoBrush, CreateDIBPatternBrushPt: the pattern's DIB header and bits.
+                gdi.Create(I32(r, 8), GdiBrush.FromDib(Slice(r, I32(r, 16), I32(r, 20)), Slice(r, I32(r, 24), I32(r, 28))));
+                break;
+            case 118 when r.Length >= 36:
+            {
+                // GradientFill: 16-byte vertices (x, y, then 16-bit red, green, blue), then rectangles or triangles of vertex indices.
+                int count = I32(r, 24), shapes = I32(r, 28), mode = I32(r, 32), at = 36 + 16 * count;
+                if (count < 0 || shapes < 0 || at > r.Length) break;
+                var vertices = new List<(double X, double Y, Color Color)>(count);
+                for (int k = 0; k < count; k++)
+                {
+                    int v = 36 + 16 * k;
+                    vertices.Add((I32(r, v), I32(r, v + 4), new Color(r[v + 9], r[v + 11], r[v + 13])));
+                }
+                int size = mode == 2 ? 12 : 8;
+                for (int k = 0; k < shapes && at + size * (k + 1) <= r.Length; k++)
+                {
+                    int a = I32(r, at + size * k), b = I32(r, at + size * k + 4), c = mode == 2 ? I32(r, at + size * k + 8) : 0;
+                    if ((uint)a >= count || (uint)b >= count || (uint)c >= count) continue;
+                    if (mode == 2) gdi.GradientTriangle(vertices[a], vertices[b], vertices[c]);
+                    else gdi.GradientRect(vertices[a], vertices[b], mode == 1);
+                }
                 break;
             }
             case 40: gdi.Delete(I32(r, 8)); break;
@@ -1169,7 +1306,10 @@ internal static class WmfReader
                     break;
                 }
                 case 0x02FC:
-                    Allocate(new GdiBrush(U16(p, 0) == 1 ? null : GdiPlayer.ColorRef(p[2..])));
+                {
+                    var brush = new GdiBrush(U16(p, 0) == 1 ? null : GdiPlayer.ColorRef(p[2..]));
+                    Allocate(U16(p, 0) == 2 && p.Length >= 8 && U16(p, 6) <= 5 ? brush with { Hatch = U16(p, 6) } : brush);
+                }
                     break;
                 case 0x02FB when p.Length >= 18:
                 {
@@ -1177,8 +1317,12 @@ internal static class WmfReader
                     Allocate(new GdiFont(I16(p, 0), I16(p, 4), I16(p, 8), p[10] != 0, p[11] != 0, p[12] != 0, face.Length > 0 ? face : "Arial"));
                     break;
                 }
+                case 0x0142 when p.Length >= 4 && U16(p, 0) != 3:
+                    // DIBCreatePatternBrush with a packed DIB after its style and color usage.
+                    Allocate(PatternBrush(p[4..]));
+                    break;
                 case 0x00F7 or 0x01F9 or 0x0142 or 0x06FF:
-                    // Palettes, pattern brushes and regions take an object slot; pattern brushes paint grey.
+                    // Palettes, other pattern brushes and regions take an object slot; those pattern brushes paint grey.
                     Allocate(function is 0x01F9 or 0x0142 ? new GdiBrush(new Color(0x80, 0x80, 0x80)) : null);
                     break;
                 case 0x0521:
@@ -1249,18 +1393,30 @@ internal static class WmfReader
     }
 
     /// <summary>Splits a packed DIB (header, color table, bits) for <see cref="GdiPlayer.Dib"/>.</summary>
+    private static GdiBrush PatternBrush(ReadOnlySpan<byte> d)
+    {
+        int bitsAt = DibBitsAt(d);
+        return bitsAt < 0 ? new GdiBrush(new Color(0x80, 0x80, 0x80)) : GdiBrush.FromDib(d[..bitsAt], d[bitsAt..]);
+    }
+
     private static ImageData? Dib(ReadOnlySpan<byte> d)
     {
-        if (d.Length < 12) return null;
+        int bitsAt = DibBitsAt(d);
+        return bitsAt < 0 ? null : GdiPlayer.Dib(d[..bitsAt], d[bitsAt..]);
+    }
+
+    /// <summary>Where the bits of a packed DIB start (after its header and color table), or -1.</summary>
+    private static int DibBitsAt(ReadOnlySpan<byte> d)
+    {
+        if (d.Length < 12) return -1;
         int headerSize = I32(d, 0);
-        if (headerSize < 12 || headerSize > d.Length) return null;
+        if (headerSize < 12 || headerSize > d.Length) return -1;
         int bpp = headerSize == 12 ? U16(d, 10) : U16(d, 14);
         int compression = headerSize >= 20 ? I32(d, 16) : 0, used = headerSize >= 36 ? I32(d, 32) : 0;
         int colors = used > 0 ? used : bpp <= 8 ? 1 << bpp : 0;
         int table = colors * (headerSize == 12 ? 3 : 4) + (compression == 3 && headerSize == 40 ? 12 : 0);
         int bitsAt = headerSize + table;
-        if (bitsAt > d.Length) return null;
-        return GdiPlayer.Dib(d[..bitsAt], d[bitsAt..]);
+        return bitsAt > d.Length ? -1 : bitsAt;
     }
 
     private static List<(double X, double Y)> Points(ReadOnlySpan<byte> p, int offset, int count)

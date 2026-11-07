@@ -312,4 +312,55 @@ public class MetafileLayoutTests
         Assert.Equal(Color.White, gradient.Stops[0].Color);
         Assert.Equal(new Color(255, 0, 0), gradient.Stops[^1].Color);
     }
+
+    [Fact]
+    public void A_hatched_emf_brush_draws_its_lines_over_the_background_color_inside_the_shape()
+    {
+        var items = Lay(Emf(
+            Record(25, 0x00FFFF),                // SetBkColor: yellow
+            Record(39, 1, 2, 0xFF0000, 1),       // CreateBrushIndirect: blue vertical hatch
+            Record(37, 1),
+            Record(37, unchecked((int)0x80000008)),
+            Record(43, 0, 0, 100, 100)));
+        var paths = items.OfType<PathItem>().ToList();
+        Assert.Equal(new Color(255, 255, 0), paths[0].Fill);
+        var lines = paths.Skip(1).ToList();
+        Assert.True(lines.Count >= 12); // a line every 8 device pixels across 100
+        Assert.All(lines, l => Assert.Equal(new Color(0, 0, 255), l.Stroke));
+        Assert.All(lines, l => Assert.Equal(l.Points[0].X, l.Points[1].X, 6));
+        Assert.Contains(items, i => i is PushItem { ClipOutline: not null });
+    }
+
+    [Fact]
+    public void A_transparent_background_leaves_out_the_hatch_background()
+    {
+        var items = Lay(Emf(Record(18, 1), Record(39, 1, 2, 0xFF0000, 0), Record(37, 1), Record(37, unchecked((int)0x80000008)), Record(43, 0, 0, 100, 100)));
+        Assert.All(items.OfType<PathItem>(), p => Assert.Null(p.Fill));
+    }
+
+    [Fact]
+    public void A_dib_pattern_brush_is_tiled_over_the_shape()
+    {
+        // A 2 × 2 24-bit DIB (rows padded to 8 bytes) right after the record's fixed part.
+        int[] bmi = [40, 2, 2, 1 | 24 << 16, 0, 16, 0, 0, 0, 0];
+        int[] bits = [0x00FF0000, 0x00FFFFFF, 0x0000FF00, 0];
+        var items = Lay(Emf(Record(94, [1, 0, 32, 40, 72, 16, .. bmi, .. bits]), Record(37, 1), Record(37, unchecked((int)0x80000008)), Record(43, 0, 0, 10, 10)));
+        var tiles = items.OfType<ImageItem>().ToList();
+        Assert.Equal(25, tiles.Count); // 5 × 5 tiles of 2 pixels cover 10
+        Assert.Single(tiles.Select(i => i.Image).Distinct());
+    }
+
+    [Fact]
+    public void An_emf_gradient_fill_rectangle_is_a_gradient_and_a_triangle_its_mean_color()
+    {
+        static int[] Vertex(int x, int y, int r, int g, int b) => [x, y, r << 8 | g << 24, b << 8];
+        var items = Lay(Emf(
+            Record(118, [0, 0, 0, 0, 2, 1, 1, .. Vertex(0, 0, 255, 0, 0), .. Vertex(100, 50, 0, 0, 255), 0, 1]),
+            Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 100, 255, 0, 0), .. Vertex(50, 60, 0, 255, 0), .. Vertex(100, 100, 0, 0, 255), 0, 1, 2])));
+        var gradient = Assert.Single(items.OfType<GradientItem>());
+        Assert.Equal(90, gradient.Degree, 3);
+        Assert.Equal(new Color(255, 0, 0), gradient.Stops[0].Color);
+        Assert.Equal(new Color(0, 0, 255), gradient.Stops[1].Color);
+        Assert.Equal(new Color(85, 85, 85), Assert.Single(items.OfType<PathItem>()).Fill);
+    }
 }
