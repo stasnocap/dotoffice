@@ -35,7 +35,7 @@ internal static class Metafiles
                 expanded.Add(new PopItem());
                 items.RemoveAt(i);
                 items.InsertRange(i, expanded);
-                i += expanded.Count - 1;
+                // The drawing is scanned in turn, so pictures nested in it (EMF+ metafile images) are drawn as well.
             }
         }
     }
@@ -94,13 +94,16 @@ internal static class Metafiles
         var player = new GdiPlayer(fonts);
         try
         {
-            bool played = image.Format == ImageFormat.Emf ? EmfReader.Play(image.Data, player) : WmfReader.Play(image.Data, player);
-            player.Finish();
+            // A dual EMF draws its GDI records; one that draws only through EMF+ records (or whose GDI records draw nothing) its EMF+ records.
+            bool played = image.Format == ImageFormat.Emf
+                ? EmfReader.Play(image.Data, player, EmfPlusPlayer.PlusOnly(image.Data) ? new EmfPlusPlayer(player, fonts) : null)
+                : WmfReader.Play(image.Data, player);
             if (!played)
             {
-                warnings.Warn("metafile.unsupported", $"Metafile '{image.Name}' holds only EMF+ drawing records, which are not supported; a placeholder was drawn.");
-                return null;
+                player = new GdiPlayer(fonts);
+                EmfReader.Play(image.Data, player, new EmfPlusPlayer(player, fonts));
             }
+            player.Finish();
         }
         catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException or InvalidDataException or OverflowException)
         {
@@ -108,6 +111,73 @@ internal static class Metafiles
             return null;
         }
         return new Drawing(player.Items, player.BoxHeight);
+    }
+}
+
+/// <summary>Drawing items with nested clip groups that follow the clip each item is drawn with.</summary>
+internal sealed class ClipGroups
+{
+    public List<LayoutItem> Items { get; } = [];
+
+    /// <summary>The clip groups currently open in <see cref="Items"/>, outermost first.</summary>
+    private readonly List<IReadOnlyList<(double X, double Y)>> _open = [];
+
+    /// <summary>Adds a drawing item, first opening or closing clip groups so the open ones are the outlines of <paramref name="clip"/>.</summary>
+    public void Add(LayoutItem item, IReadOnlyList<IReadOnlyList<(double X, double Y)>> clip)
+    {
+        int common = 0;
+        while (common < _open.Count && common < clip.Count && ReferenceEquals(_open[common], clip[common])) common++;
+        for (int k = _open.Count; k > common; k--) Items.Add(new PopItem());
+        _open.RemoveRange(common, _open.Count - common);
+        for (int k = common; k < clip.Count; k++)
+        {
+            Items.Add(new PushItem(null) { ClipOutline = clip[k] });
+            _open.Add(clip[k]);
+        }
+        Items.Add(item);
+    }
+
+    /// <summary>An outline for clipping from path points: curves flattened, each figure a ring (rings separated by NaN points).</summary>
+    public static List<(double X, double Y)> Flatten(IReadOnlyList<PathPoint> path)
+    {
+        var outline = new List<(double X, double Y)>();
+        (double X, double Y) last = (0, 0);
+        for (int k = 0; k < path.Count; k++)
+        {
+            var p = path[k];
+            switch (p.Kind)
+            {
+                case PathPointKind.Close: continue;
+                case PathPointKind.Move:
+                    if (outline.Count > 0) outline.Add((double.NaN, double.NaN));
+                    outline.Add(last = (p.X, p.Y));
+                    break;
+                case PathPointKind.Curve when k + 2 < path.Count:
+                {
+                    var (c1, c2, e) = (path[k], path[k + 1], path[k + 2]);
+                    for (int step = 1; step <= 16; step++)
+                    {
+                        double u = step / 16.0, v = 1 - u;
+                        outline.Add((v * v * v * last.X + 3 * v * v * u * c1.X + 3 * v * u * u * c2.X + u * u * u * e.X,
+                                     v * v * v * last.Y + 3 * v * v * u * c1.Y + 3 * v * u * u * c2.Y + u * u * u * e.Y));
+                    }
+                    last = (e.X, e.Y);
+                    k += 2;
+                    break;
+                }
+                default:
+                    outline.Add(last = (p.X, p.Y));
+                    break;
+            }
+        }
+        return outline;
+    }
+
+    /// <summary>Closes the clip groups still open.</summary>
+    public void Finish()
+    {
+        foreach (var _ in _open) Items.Add(new PopItem());
+        _open.Clear();
     }
 }
 
@@ -140,33 +210,15 @@ internal sealed record GdiFont(int Height, int Escapement, int Weight, bool Ital
 /// <summary>GDI's drawing state and primitives, shared by the EMF and WMF readers; output is in a box 1000 wide with the picture's proportions.</summary>
 internal sealed class GdiPlayer(FontSelector fonts)
 {
-    public List<LayoutItem> Items { get; } = [];
+    public List<LayoutItem> Items => Groups.Items;
 
-    /// <summary>The clip groups currently open in <see cref="Items"/>, outermost first.</summary>
-    private readonly List<IReadOnlyList<(double X, double Y)>> _openClips = [];
+    /// <summary>The output and its open clip groups; an EMF+ player drawing into the same picture shares them.</summary>
+    public ClipGroups Groups { get; } = new();
 
-    /// <summary>Adds a drawing item, first opening or closing clip groups so the open ones are the current clip's outlines.</summary>
-    private void Add(LayoutItem item)
-    {
-        var clip = _state.Clip;
-        int common = 0;
-        while (common < _openClips.Count && common < clip.Length && ReferenceEquals(_openClips[common], clip[common])) common++;
-        for (int k = _openClips.Count; k > common; k--) Items.Add(new PopItem());
-        _openClips.RemoveRange(common, _openClips.Count - common);
-        for (int k = common; k < clip.Length; k++)
-        {
-            Items.Add(new PushItem(null) { ClipOutline = clip[k] });
-            _openClips.Add(clip[k]);
-        }
-        Items.Add(item);
-    }
+    private void Add(LayoutItem item) => Groups.Add(item, _state.Clip);
 
     /// <summary>Closes the clip groups still open; call once the metafile has been played.</summary>
-    public void Finish()
-    {
-        foreach (var _ in _openClips) Items.Add(new PopItem());
-        _openClips.Clear();
-    }
+    public void Finish() => Groups.Finish();
 
     /// <summary>The height of the output box, which is <see cref="Metafiles.UnitBox"/> wide and has the picture's proportions.</summary>
     public double BoxHeight { get; set; } = Metafiles.UnitBox;
@@ -328,36 +380,12 @@ internal sealed class GdiPlayer(FontSelector fonts)
         _finishedPath = null;
         if (path is not { Count: >= 3 } || mode is not (1 or 5)) return;
         var m = Transform;
-        var outline = new List<(double X, double Y)>();
-        (double X, double Y) last = (0, 0);
-        for (int k = 0; k < path.Count; k++)
+        var outline = ClipGroups.Flatten(path.Select(p =>
         {
-            var p = path[k];
-            switch (p.Kind)
-            {
-                case PathPointKind.Close: continue;
-                case PathPointKind.Move:
-                    if (outline.Count > 0) outline.Add((double.NaN, double.NaN));
-                    outline.Add(last = m.Apply(p.X, p.Y));
-                    break;
-                case PathPointKind.Curve when k + 2 < path.Count:
-                {
-                    var (c1, c2, e) = (m.Apply(p.X, p.Y), m.Apply(path[k + 1].X, path[k + 1].Y), m.Apply(path[k + 2].X, path[k + 2].Y));
-                    for (int step = 1; step <= 16; step++)
-                    {
-                        double u = step / 16.0, v = 1 - u;
-                        outline.Add((v * v * v * last.X + 3 * v * v * u * c1.X + 3 * v * u * u * c2.X + u * u * u * e.X,
-                                     v * v * v * last.Y + 3 * v * v * u * c1.Y + 3 * v * u * u * c2.Y + u * u * u * e.Y));
-                    }
-                    last = e;
-                    k += 2;
-                    break;
-                }
-                default:
-                    outline.Add(last = m.Apply(p.X, p.Y));
-                    break;
-            }
-        }
+            if (p.Kind == PathPointKind.Close) return p;
+            var (x, y) = m.Apply(p.X, p.Y);
+            return p with { X = x, Y = y };
+        }).ToList());
         if (mode == 5) _state.Clip = [];
         IntersectClip(outline);
     }
@@ -778,8 +806,11 @@ internal sealed class GdiPlayer(FontSelector fonts)
 /// <summary>Plays the records of an Enhanced Metafile (EMF, [MS-EMF]).</summary>
 internal static class EmfReader
 {
-    /// <summary>False when the file draws only through EMF+ records.</summary>
-    public static bool Play(byte[] data, GdiPlayer gdi)
+    /// <summary>
+    /// Plays the GDI records, or with <paramref name="plus"/> the EMF+ records and the GDI records after their GetDC. False when GDI records
+    /// alone were played and only EMF+ records draw.
+    /// </summary>
+    public static bool Play(byte[] data, GdiPlayer gdi, EmfPlusPlayer? plus = null)
     {
         var d = data.AsSpan();
         if (d.Length < 88 || I32(d, 0) != 1) throw new InvalidDataException("Not an EMF file.");
@@ -815,12 +846,18 @@ internal static class EmfReader
             var r = d.Slice(pos, size);
             pos += size;
             if (type == 14) break;
-            if (type == 70 && r.Length >= 16 && r.Slice(12, 4).SequenceEqual("EMF+"u8)) { emfPlus = true; continue; }
+            if (type == 70 && r.Length >= 16 && r.Slice(12, 4).SequenceEqual("EMF+"u8))
+            {
+                emfPlus = true;
+                plus?.Play(r[16..]);
+                continue;
+            }
+            if (plus is { GdiActive: false }) continue;
             int before = gdi.Items.Count;
             Record(type, r, gdi, ref mask);
             drew |= gdi.Items.Count > before;
         }
-        return drew || !emfPlus;
+        return drew || !emfPlus || plus is not null;
     }
 
     private static int I32(ReadOnlySpan<byte> d, int o) => BinaryPrimitives.ReadInt32LittleEndian(d[o..]);

@@ -138,15 +138,124 @@ public class MetafileLayoutTests
         Assert.Contains(path.Points, p => Math.Abs(p.X - 200) < 0.01 && Math.Abs(p.Y - 300) < 0.01);
     }
 
-    [Fact]
-    public void An_emf_drawn_only_with_emf_plus_records_keeps_its_placeholder_and_warns()
+    /// <summary>An EMF+ record: type, flags and data.</summary>
+    private static byte[] Plus(int type, int flags, params byte[][] data)
     {
-        var comment = new byte[20];
-        Put(comment, 0, 70, 20, 8);
+        var body = data.SelectMany(b => b).ToArray();
+        var r = new byte[12 + body.Length];
+        BinaryPrimitives.WriteUInt16LittleEndian(r, (ushort)type);
+        BinaryPrimitives.WriteUInt16LittleEndian(r.AsSpan(2), (ushort)flags);
+        Put(r, 4, r.Length, body.Length);
+        body.CopyTo(r, 12);
+        return r;
+    }
+
+    private static byte[] I(params int[] values)
+    {
+        var d = new byte[values.Length * 4];
+        Put(d, 0, values);
+        return d;
+    }
+
+    private static byte[] F(params float[] values) => I([.. values.Select(BitConverter.SingleToInt32Bits)]);
+
+    /// <summary>An EMF comment holding an EMF+ header (254 dpi, so EMF+ pixels are the EMF's device pixels) and the records.</summary>
+    private static byte[] PlusComment(bool dual, params byte[][] records)
+    {
+        var plus = new List<byte[]> { Plus(0x4001, dual ? 1 : 0, I(unchecked((int)0xDBC01002), dual ? 1 : 0, 254, 254)) };
+        plus.AddRange(records);
+        plus.Add(Plus(0x4002, 0));
+        var body = plus.SelectMany(b => b).ToArray();
+        var comment = new byte[16 + body.Length];
+        Put(comment, 0, 70, comment.Length, body.Length + 4);
         Encoding.ASCII.GetBytes("EMF+").CopyTo(comment, 12);
-        var warnings = new ConversionWarningList();
-        var items = Lay(Emf(comment), warnings);
-        Assert.Contains(items, i => i is ImageItem);
-        Assert.Contains(warnings.Warnings, w => w.Code == "metafile.unsupported");
+        body.CopyTo(comment, 16);
+        return comment;
+    }
+
+    private const int Red = unchecked((int)0xFFFF0000);
+
+    [Fact]
+    public void An_emf_plus_rectangle_is_filled_with_its_color_and_fitted_to_the_picture()
+    {
+        var items = Lay(Emf(PlusComment(false, Plus(0x400A, 0x8000, I(Red, 1), F(0, 0, 500, 375)))));
+        var path = Assert.Single(items.OfType<PathItem>());
+        Assert.Equal(new Color(255, 0, 0), path.Fill);
+        var points = path.Points.Where(p => p.Kind != PathPointKind.Close).ToList();
+        Assert.Equal(200, points.Max(p => p.X), 3);
+        Assert.Equal(150, points.Max(p => p.Y), 3);
+        Assert.DoesNotContain(items, i => i is ImageItem);
+    }
+
+    [Fact]
+    public void An_emf_plus_pen_strokes_lines_in_page_units_and_a_translucent_brush_fills_in_a_faded_group()
+    {
+        var pen = Plus(0x4008, 0x0200 | 1, I(unchecked((int)0xDBC01002), 0, 0, 0), F(1), I(unchecked((int)0xDBC01002), 0, unchecked((int)0xFF0000FF)));
+        var items = Lay(Emf(PlusComment(false,
+            pen,
+            Plus(0x4030, 6, F(1)),                             // page unit: millimetres
+            Plus(0x400D, 1, I(2), F(0, 10, 50, 10)),           // DrawLines with pen 1
+            Plus(0x400E, 0x8000, I(unchecked((int)0x8000FF00)), F(0, 0, 10, 10))))); // FillEllipse, half-transparent green
+        var paths = items.OfType<PathItem>().ToList();
+        Assert.Equal(2, paths.Count);
+        Assert.Equal(new Color(0, 0, 255), paths[0].Stroke);
+        Assert.Equal(200, paths[0].Points.Max(p => p.X), 3);
+        Assert.Equal(40, paths[0].Points[0].Y, 3);
+        Assert.Equal(4, paths[0].LineWidth, 3);
+        var fade = Assert.IsType<PushItem>(items[items.IndexOf(paths[1]) - 1]);
+        Assert.Equal(128 / 255.0, fade.Opacity, 3);
+        Assert.Equal(40, paths[1].Points.Max(p => p.X), 1);
+    }
+
+    [Fact]
+    public void Emf_plus_strings_are_drawn_with_their_font_color_and_alignment()
+    {
+        var name = Encoding.Unicode.GetBytes("Noto Sans");
+        var font = Plus(0x4008, 0x0600 | 2, I(unchecked((int)0xDBC01002)), F(60), I(2, 0, 0, 9), name);
+        var format = Plus(0x4008, 0x0700 | 3, I(unchecked((int)0xDBC01002), 0, 0, 1, 0), new byte[40]);
+        var text = Encoding.Unicode.GetBytes("Hi");
+        var items = Lay(Emf(PlusComment(false, font, format,
+            Plus(0x401C, 0x8000 | 2, I(unchecked((int)0xFF00FF00), 3, 2), F(100, 200, 500, 100), text))));
+        var run = Assert.Single(items.OfType<TextItem>());
+        Assert.Equal("Hi", run.Text);
+        Assert.Equal(new Color(0, 255, 0), run.Color);
+        Assert.Equal(24, run.FontSize, 3);
+        double width = run.Font.MeasureText("Hi", 24);
+        Assert.Equal(40 + (200 - width) / 2, run.X, 3);
+        Assert.True(run.Baseline > 80 && run.Baseline < 110);
+    }
+
+    [Fact]
+    public void An_emf_plus_clip_rectangle_clips_what_is_drawn_after_it()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            Plus(0x4032, 0x0100, F(0, 0, 500, 375)),           // SetClipRect, intersect
+            Plus(0x400A, 0x8000, I(Red, 1), F(0, 0, 1000, 750)))));
+        var path = Assert.Single(items.OfType<PathItem>());
+        var clip = Assert.IsType<PushItem>(items[items.IndexOf(path) - 1]);
+        Assert.Equal(200, clip.ClipOutline!.Max(p => p.X), 3);
+        Assert.Equal(items.OfType<PushItem>().Count(), items.OfType<PopItem>().Count());
+    }
+
+    [Fact]
+    public void A_dual_emf_draws_its_gdi_records_and_not_its_emf_plus_ones()
+    {
+        var items = Lay(Emf(
+            PlusComment(true, Plus(0x400A, 0x8000, I(Red, 1), F(0, 0, 500, 375))),
+            Record(43, 0, 0, 500, 375)));
+        var path = Assert.Single(items.OfType<PathItem>());
+        Assert.Equal(Color.White, path.Fill);
+    }
+
+    [Fact]
+    public void Gdi_records_after_an_emf_plus_get_dc_are_drawn_too()
+    {
+        var items = Lay(Emf(
+            PlusComment(false, Plus(0x400A, 0x8000, I(Red, 1), F(0, 0, 500, 375)), Plus(0x4004, 0)),
+            Record(43, 0, 0, 100, 100)));
+        var paths = items.OfType<PathItem>().ToList();
+        Assert.Equal(2, paths.Count);
+        Assert.Equal(new Color(255, 0, 0), paths[0].Fill);
+        Assert.Equal(Color.White, paths[1].Fill);
     }
 }
