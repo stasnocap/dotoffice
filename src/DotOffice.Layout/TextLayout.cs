@@ -27,6 +27,9 @@ internal sealed class Atom
     public double Rise { get; init; }
 
     public double Width { get; set; }
+
+    /// <summary>The part of <see cref="Width"/> that is the auto-space after the atom.</summary>
+    public double TrailingSpace { get; set; }
     public ImageRun? Image { get; init; }
 
     /// <summary>The shape of an <see cref="AtomKind.Image"/> atom that holds a shape instead of a picture.</summary>
@@ -50,6 +53,8 @@ internal sealed class Atom
     public double Advance { get; set; }
 
     public FontMetrics Metrics => Font is null ? default : FontMetrics.Of(Font.Font, Size);
+
+    public Atom Clone() => (Atom)MemberwiseClone();
 
     public int SpaceCount => Kind == AtomKind.Space ? Text.Length : 0;
 
@@ -350,7 +355,8 @@ internal sealed class Itemizer(FontSelector fonts)
             bool lastEa = FontSelector.IsEastAsian(last), firstEa = FontSelector.IsEastAsian(first);
             if (lastEa == firstEa) continue;
             if (!Spaced(lastEa ? first : last, props)) continue;
-            a.Width += a.Size / 4;
+            a.TrailingSpace = a.Size / 4;
+            a.Width += a.TrailingSpace;
         }
     }
 
@@ -603,7 +609,7 @@ internal static class LineBuilder
                     return true;
                 }
                 atoms[k] = Copy(atom, text[..fit], atom.BreakBefore);
-                atoms.Insert(k + 1, Copy(atom, text[fit..], LineBreakOpportunity.Allowed));
+                atoms.Insert(k + 1, Copy(atom, text[fit..], LineBreakOpportunity.Allowed, keepTrailingSpace: true));
                 return true;
             }
             x += width;
@@ -621,13 +627,15 @@ internal static class LineBuilder
     {
         // The word is the run of text atoms from `at`; only spaces may follow it up to the end of the break unit.
         int stop = at;
-        while (stop < wordEnd && atoms[stop].Kind == AtomKind.Text && atoms[stop].Field is null
-            && !(atoms[stop].Glyphs is not null && atoms[stop].RightToLeft)) stop++;
+        // Bookmark markers inside the word have no text and do not break it.
+        while (stop < wordEnd && (atoms[stop].Kind == AtomKind.Marker || atoms[stop].Kind == AtomKind.Text && atoms[stop].Field is null
+            && !(atoms[stop].Glyphs is not null && atoms[stop].RightToLeft))) stop++;
+        while (stop > at && atoms[stop - 1].Kind == AtomKind.Marker) stop--;
         if (stop == at || !TrailingSpacesOnly(atoms, stop, wordEnd)) return false;
 
         var starts = new int[stop - at + 1];
-        for (int k = at; k < stop; k++) starts[k - at + 1] = starts[k - at] + atoms[k].Text.Length;
-        string text = string.Concat(atoms.Skip(at).Take(stop - at).Select(a => a.Text));
+        for (int k = at; k < stop; k++) starts[k - at + 1] = starts[k - at] + (atoms[k].Kind == AtomKind.Text ? atoms[k].Text.Length : 0);
+        string text = string.Concat(atoms.Skip(at).Take(stop - at).Where(a => a.Kind == AtomKind.Text).Select(a => a.Text));
         int first = 0, last = text.Length;
         while (first < last && !char.IsLetter(text[first])) first++;
         while (last > first && !char.IsLetter(text[last - 1])) last--;
@@ -653,12 +661,20 @@ internal static class LineBuilder
             {
                 // The point falls between two runs: the hyphen ends the earlier one.
                 atoms[firstIndex] = Copy(atom, atom.Text + "-", atom.BreakBefore);
-                atoms[firstIndex + 1] = Copy(original[a + 1], original[a + 1].Text, LineBreakOpportunity.Allowed);
+                var following = original[a + 1];
+                if (following.Kind == AtomKind.Marker)
+                {
+                    // A bookmark between the runs starts the next line; it stays glued to the text after it.
+                    var moved = following.Clone();
+                    moved.BreakBefore = LineBreakOpportunity.Allowed;
+                    atoms[firstIndex + 1] = moved;
+                }
+                else atoms[firstIndex + 1] = Copy(following, following.Text, LineBreakOpportunity.Allowed, keepTrailingSpace: true);
             }
             else
             {
                 atoms[firstIndex] = Copy(atom, atom.Text[..inside] + "-", atom.BreakBefore);
-                atoms.Insert(firstIndex + 1, Copy(atom, atom.Text[inside..], LineBreakOpportunity.Allowed));
+                atoms.Insert(firstIndex + 1, Copy(atom, atom.Text[inside..], LineBreakOpportunity.Allowed, keepTrailingSpace: true));
             }
             if (Position(atoms, from, firstIndex + 1, startX, frame) <= maxX + Epsilon) return true;
             Restore(atoms, at, original, stop - at + (inside == atom.Text.Length ? 0 : 1));
@@ -681,15 +697,16 @@ internal static class LineBuilder
     private static double Measure(Atom atom, string text) =>
         Itemizer.Measure(atom.Font!, text, atom.Size, atom.Props, atom.RightToLeft, shape: atom.Glyphs is not null);
 
-    private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore)
+    private static Atom Copy(Atom a, string text, LineBreakOpportunity breakBefore, bool keepTrailingSpace = false)
     {
+        double trailing = keepTrailingSpace ? a.TrailingSpace : 0;
         var (width, glyphs) = a.Glyphs is null
             ? (Itemizer.Measure(a.Font!, text, a.Size, a.Props, rtl: false, shape: false), null)
             : Itemizer.Shape(a.Font!, text, a.Size, a.Props, a.RightToLeft);
         return new Atom
         {
             Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link, Note = a.Note,
-            Level = a.Level, Glyphs = glyphs, Width = width, BreakBefore = breakBefore,
+            Level = a.Level, Glyphs = glyphs, Width = width + trailing, TrailingSpace = trailing, BreakBefore = breakBefore,
         };
     }
 

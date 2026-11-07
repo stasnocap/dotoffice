@@ -39,4 +39,18 @@ public class AutoSpaceTests
     {
         Assert.Equal(XAfter("ABC DEF", "<w:autoSpaceDE w:val=\"0\"/>"), XAfter("ABC DEF"), 3);
     }
+
+    [Fact]
+    public void The_space_survives_a_word_split_at_the_boundary()
+    {
+        // A line too narrow for the Latin word: it is split between characters, and the part that carries the East Asian boundary keeps its space.
+        string text = "日本語" + string.Concat(Enumerable.Repeat("ABC", 40)) + "日本語";
+        var body = $"<w:p><w:r>{Run}<w:t>{text}</w:t></w:r></w:p>" + Section();
+        var doc = DocxReader.Read(new DocxBuilder { Body = body }.BuildStream());
+        var page = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages[0];
+        var texts = Texts(page).OrderBy(t => t.Baseline).ThenBy(t => t.X).ToList();
+        var east = texts.Last(t => t.Text == "日");
+        var latinEnd = texts.Last(t => t.Text.Length > 1);
+        Assert.Equal(14 / 4.0, east.X - (latinEnd.X + latinEnd.Font.MeasureText(latinEnd.Text, latinEnd.FontSize)), 3);
+    }
 }

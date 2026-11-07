@@ -132,6 +132,21 @@ public class HyphenationTests
         Assert.Contains(head.Length, DotOffice.Layout.Hyphenation.Hyphenator.ForLanguage("en-US")!.Find(Word));
     }
 
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]  // the bookmark sits exactly on the hyphenation point
+    [InlineData(13)]
+    public void Word_with_a_bookmark_inside_is_hyphenated(int cut)
+    {
+        string Marked(int n) => $"<w:p><w:r>{Run}<w:t xml:space=\"preserve\">{string.Join(' ', Enumerable.Repeat("lorem", n))} {Word[..cut]}</w:t></w:r>"
+            + $"<w:bookmarkStart w:id=\"1\" w:name=\"mid\"/><w:bookmarkEnd w:id=\"1\"/><w:r>{Run}<w:t>{Word[cut..]}</w:t></w:r></w:p>";
+        int fill = Enumerable.Range(1, 14).First(n => Lines(Marked(n), false) is [_, Word, ..]);
+        var lines = Lines(Marked(fill), true);
+        Assert.EndsWith("-", lines[0]);
+        string head = lines[0].Split(' ')[^1].TrimEnd('-');
+        Assert.Equal(Word, head + lines[1]);
+    }
+
     [Fact]
     public void Word_with_digits_stays_whole()
     {
