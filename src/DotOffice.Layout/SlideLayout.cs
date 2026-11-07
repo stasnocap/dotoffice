@@ -18,6 +18,7 @@ public sealed partial class SheetLayoutEngine
             _fontLineHeight = false;
         }
         if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(720, 540));
+        Metafiles.Expand(document, _fonts, _warnings);
         return document;
     }
 

@@ -162,6 +162,7 @@ public sealed class LayoutEngine
             cancellationToken.ThrowIfCancellationRequested();
             result.Pages.Add(Render(page, fields, settings, lineNumbers));
         }
+        Metafiles.Expand(result, _fonts, _options.Warnings);
         return result;
     }
 

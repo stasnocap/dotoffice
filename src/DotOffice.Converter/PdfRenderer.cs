@@ -221,6 +221,38 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                           .ClosePath().Fill();
                     break;
                 }
+                case PathItem { Points.Count: >= 2 } path when path.Fill is not null || path.Stroke is not null:
+                {
+                    var points = path.Points;
+                    for (int k = 0; k < points.Count; k++)
+                    {
+                        var p = points[k];
+                        switch (p.Kind)
+                        {
+                            case PathPointKind.Move: canvas.MoveTo(p.X, h - p.Y); break;
+                            case PathPointKind.Line: canvas.LineTo(p.X, h - p.Y); break;
+                            case PathPointKind.Close: canvas.ClosePath(); break;
+                            case PathPointKind.Curve when k + 2 < points.Count:
+                                canvas.CurveTo(p.X, h - p.Y, points[k + 1].X, h - points[k + 1].Y, points[k + 2].X, h - points[k + 2].Y);
+                                k += 2;
+                                break;
+                        }
+                    }
+                    if (path.Fill is { } pathFill) Fill(pathFill);
+                    if (path.Stroke is { } pathStroke)
+                    {
+                        Stroke(pathStroke);
+                        canvas.SetLineWidth(path.LineWidth);
+                        if (path.Style != LineStyle.Solid)
+                            canvas.SetDash(path.Style == LineStyle.Dotted ? [path.LineWidth, path.LineWidth * 2] : [path.LineWidth * 4, path.LineWidth * 2]);
+                    }
+                    if (path.Fill is null) canvas.Stroke();
+                    else if (path.Stroke is null) { if (path.EvenOdd) canvas.FillEvenOdd(); else canvas.Fill(); }
+                    else if (path.EvenOdd) canvas.FillAndStrokeEvenOdd();
+                    else canvas.FillAndStroke();
+                    if (path.Stroke is not null && path.Style != LineStyle.Solid) canvas.SetDash();
+                    break;
+                }
                 case LineItem line:
                     Stroke(line.Color);
                     canvas.SetLineWidth(line.Width);

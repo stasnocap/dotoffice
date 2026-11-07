@@ -48,7 +48,7 @@ public class XlsxConverterTests
     }
 
     [Fact]
-    public async Task Rle_bitmaps_are_drawn_and_emf_pictures_keep_the_placeholder_warning()
+    public async Task Rle_bitmaps_and_emf_pictures_are_drawn()
     {
         // 2x1 RLE8 bitmap: a run of two pixels of palette entry 1, end of bitmap.
         byte[] rle = [.. "BM"u8, 66, 0, 0, 0, 0, 0, 0, 0, 62, 0, 0, 0, 40, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 0,
@@ -61,7 +61,7 @@ public class XlsxConverterTests
             .AddDrawing(1, TwoCellAnchor(0, 1, 2, 3, Pic("rId1")) + TwoCellAnchor(3, 1, 5, 3, Pic("rId2")), rle, emf);
         await Convert(xlsx, warnings);
         Assert.DoesNotContain(warnings.Warnings, w => w.Code == "pdf.image-invalid");
-        Assert.Single(warnings.Warnings, w => w.Code == "pdf.image-format");
+        Assert.DoesNotContain(warnings.Warnings, w => w.Code is "pdf.image-format" or "metafile.invalid");
     }
 
     [Fact]

@@ -93,6 +93,18 @@ public sealed record GradientItem(double X, double Y, double Width, double Heigh
         this with { X = X + dx, Y = Y + dy, Clip = Clip?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
+public enum PathPointKind { Move, Line, Curve, Close }
+
+/// <summary>A point of a <see cref="PathItem"/>: three <see cref="PathPointKind.Curve"/> points in a row make a cubic Bézier segment; a close point has no position.</summary>
+public readonly record struct PathPoint(double X, double Y, PathPointKind Kind);
+
+/// <summary>An outline of straight and Bézier segments, filled and/or stroked (used for drawings in metafiles).</summary>
+public sealed record PathItem(IReadOnlyList<PathPoint> Points, Color? Fill, Color? Stroke, double LineWidth = 1, LineStyle Style = LineStyle.Solid,
+    bool EvenOdd = false) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { Points = Points.Select(p => p with { X = p.X + dx, Y = p.Y + dy }).ToList() };
+}
+
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem
 {
     /// <summary>When set, the picture is painted only inside this polygon (a picture fill of a shape).</summary>

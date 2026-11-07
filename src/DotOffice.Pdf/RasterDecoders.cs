@@ -66,6 +66,9 @@ internal static class RasterDecoders
             gMask = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(58));
             bMask = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(62));
         }
+        // V3 and later headers carry an alpha mask after the color masks.
+        uint aMask = compression == 3 && bpp == 32 && headerSize >= 56 && d.Length >= 14 + 56 ? BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(66)) : 0;
+        var alpha = aMask != 0 ? new byte[width * height] : null;
 
         if (compression is 1 or 2)
             return DecodeBmpRle(d, dataOffset, width, height, topDown, compression == 2, palette, paletteCount);
@@ -95,6 +98,7 @@ internal static class RasterDecoders
                         uint v = bpp == 16 ? BinaryPrimitives.ReadUInt16LittleEndian(d.AsSpan((int)(src + x * 2L)))
                                            : BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan((int)(src + x * 4L)));
                         rgb[o] = Scale(v, rMask); rgb[o + 1] = Scale(v, gMask); rgb[o + 2] = Scale(v, bMask);
+                        if (alpha is not null) alpha[row * width + x] = Scale(v, aMask);
                         break;
                     }
                     default:
@@ -108,7 +112,7 @@ internal static class RasterDecoders
                 }
             }
         }
-        return new RasterImage(width, height, rgb, null);
+        return new RasterImage(width, height, rgb, alpha is not null && Array.Exists(alpha, a => a != 255) ? alpha : null);
     }
 
     /// <summary>RLE8/RLE4: encoded and absolute runs, end-of-line, end-of-bitmap and delta. Pixels never written stay transparent.</summary>

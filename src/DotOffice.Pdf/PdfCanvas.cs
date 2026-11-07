@@ -93,6 +93,9 @@ public sealed class PdfCanvas
     public PdfCanvas FillEvenOdd() => Op("f*");
     public PdfCanvas FillAndStroke() => Op("B");
 
+    /// <summary>Fills by the even-odd rule, then strokes.</summary>
+    public PdfCanvas FillAndStrokeEvenOdd() => Op("B*");
+
     /// <summary>Draws a single line of text with its baseline starting at (x, y).</summary>
     public PdfCanvas DrawText(PdfFont font, double fontSize, double x, double y, string text)
     {

@@ -29,12 +29,14 @@ public sealed partial class SheetLayoutEngine
 
     private readonly FontSelector _fonts;
     private readonly Itemizer _itemizer;
+    private readonly IConversionWarningSink? _warnings;
 
     /// <summary>Creates an engine that measures text with the fonts of <paramref name="options"/>.</summary>
     public SheetLayoutEngine(LayoutOptions options)
     {
         _fonts = new FontSelector(options.Fonts, options.Warnings);
         _itemizer = new Itemizer(_fonts);
+        _warnings = options.Warnings;
     }
 
     /// <summary>Lays out every visible sheet of the workbook; an empty workbook yields one blank page.</summary>
@@ -59,6 +61,7 @@ public sealed partial class SheetLayoutEngine
             if (records[i].IndexInSheet == 0 && setup.UseFirstPageNumber) number = setup.FirstPageNumber;
             EmitHeaderFooter(records[i], number++, records.Count, workbook);
         }
+        Metafiles.Expand(document, _fonts, _warnings);
         return document;
     }
 
