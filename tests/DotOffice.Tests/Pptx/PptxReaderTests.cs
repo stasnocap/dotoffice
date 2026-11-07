@@ -88,6 +88,16 @@ public class PptxReaderTests
         Assert.Equal(Color.White, Assert.Single(Assert.Single(Assert.IsType<SheetShape>(Assert.Single(slide.Objects)).Paragraphs).Runs).Font.Color);
     }
 
+    [Theory]
+    [InlineData("<a:schemeClr val=\"tx1\"><a:tint val=\"75000\"/></a:schemeClr>", "898989")]
+    [InlineData("<a:srgbClr val=\"FFFFFF\"><a:shade val=\"50000\"/></a:srgbClr>", "BCBCBC")]
+    public void Tint_and_shade_are_applied_in_linear_rgb(string color, string expected)
+    {
+        var run = P("Gray").Replace("<a:rPr lang=\"en-US\" />", $"<a:rPr><a:solidFill>{color}</a:solidFill></a:rPr>");
+        var font = Assert.Single(Assert.Single(Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(Sp(Xfrm(0, 0, 1270000, 635000), run))).Objects)).Paragraphs).Runs).Font;
+        Assert.Equal(Color.TryParseHex(expected), font.Color);
+    }
+
     [Fact]
     public void The_background_is_inherited_from_the_master()
     {

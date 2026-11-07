@@ -56,8 +56,8 @@ internal static class DrawingMl
                 case "lumOff": c = WithHsl(c, (h, sat, l) => (h, sat, l + value)); break;
                 case "satMod": c = WithHsl(c, (h, sat, l) => (h, sat * value, l)); break;
                 case "satOff": c = WithHsl(c, (h, sat, l) => (h, sat + value, l)); break;
-                case "tint": c = c.Blend(Color.White, 1 - value); break;
-                case "shade": c = c.Blend(Color.Black, 1 - value); break;
+                case "tint": c = Linear(c, l => l * value + (1 - value)); break;
+                case "shade": c = Linear(c, l => l * value); break;
             }
         }
         return c;
@@ -75,6 +75,22 @@ internal static class DrawingMl
     {
         var color = Child(holder, "solidFill")?.Elements().FirstOrDefault();
         return color is not null && Child(color, "alpha") is { } alpha ? Math.Clamp(Number(alpha, "val", 100_000) / 100_000.0, 0, 1) : 1;
+    }
+
+    /// <summary>
+    /// Changes each channel in linear RGB, the space DrawingML's <c>tint</c> and <c>shade</c> work in (as in PowerPoint and LibreOffice's
+    /// oox import): a 75 % tint of black is #898989, not the #404040 an sRGB blend gives.
+    /// </summary>
+    private static Color Linear(Color color, Func<double, double> change)
+    {
+        static double ToLinear(byte v) => v / 255.0 is var s && s <= 0.04045 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        static byte ToSrgb(double l)
+        {
+            l = Math.Clamp(l, 0, 1);
+            double s = l <= 0.0031308 ? l * 12.92 : 1.055 * Math.Pow(l, 1 / 2.4) - 0.055;
+            return (byte)Math.Round(s * 255);
+        }
+        return new Color(ToSrgb(change(ToLinear(color.R))), ToSrgb(change(ToLinear(color.G))), ToSrgb(change(ToLinear(color.B))));
     }
 
     private static Color? Preset(string? name) => name switch
