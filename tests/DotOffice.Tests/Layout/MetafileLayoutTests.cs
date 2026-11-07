@@ -258,4 +258,58 @@ public class MetafileLayoutTests
         Assert.Equal(new Color(255, 0, 0), paths[0].Fill);
         Assert.Equal(Color.White, paths[1].Fill);
     }
+
+    /// <summary>An EMF+ linear gradient brush object (clamped unless <paramref name="wrap"/> says otherwise) from start to end color over the rectangle.</summary>
+    private static byte[] LinearBrush(int id, float[] rect, int start, int end, int wrap = 4, int flags = 0, params byte[][] extra) =>
+        Plus(0x4008, 0x100 | id, [I(unchecked((int)0xDBC01002), 4, flags, wrap), F(rect), I(start, end, 0, 0), .. extra]);
+
+    [Fact]
+    public void An_emf_plus_linear_gradient_brush_fills_a_gradient_clipped_to_the_shape()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            LinearBrush(1, [0, 0, 500, 375], Red, unchecked((int)0xFF0000FF)),
+            Plus(0x400E, 0, I(1), F(0, 0, 500, 375)))));
+        var gradient = Assert.Single(items.OfType<GradientItem>());
+        Assert.Equal(0, gradient.Degree, 3);
+        Assert.Equal(200, gradient.Width, 3);
+        Assert.Equal([new GradientStop(0, new Color(255, 0, 0)), new GradientStop(1, new Color(0, 0, 255))], gradient.Stops);
+        var clip = items.OfType<PushItem>().Last(p => p.ClipOutline is not null);
+        Assert.True(clip.ClipOutline!.Count > 16); // the flattened ellipse
+        Assert.Empty(items.OfType<PathItem>());
+    }
+
+    [Fact]
+    public void A_tiled_emf_plus_linear_gradient_repeats_across_the_shape()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            LinearBrush(1, [0, 0, 250, 375], Red, unchecked((int)0xFF0000FF), wrap: 0),
+            Plus(0x400A, 0, I(1, 1), F(0, 0, 500, 375)))));
+        var stops = Assert.Single(items.OfType<GradientItem>()).Stops;
+        Assert.Equal([0, 0.5, 0.5, 1], stops.Select(s => Math.Round(s.Position, 6)));
+        Assert.Equal(new Color(255, 0, 0), stops[2].Color);
+    }
+
+    [Fact]
+    public void An_emf_plus_gradient_with_preset_colors_uses_them_as_stops()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            LinearBrush(1, [0, 0, 500, 375], 0, 0, 4, 4, I(3), F(0, 0.25f, 1), I(Red, unchecked((int)0xFFFFFFFF), unchecked((int)0xFF0000FF))),
+            Plus(0x400A, 0, I(1, 1), F(0, 0, 500, 375)))));
+        var stops = Assert.Single(items.OfType<GradientItem>()).Stops;
+        Assert.Equal([0, 0.25, 1], stops.Select(s => Math.Round(s.Position, 6)));
+        Assert.Equal(Color.White, stops[1].Color);
+    }
+
+    [Fact]
+    public void An_emf_plus_path_gradient_with_a_rectangular_boundary_runs_in_rectangles_from_its_center()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            Plus(0x4008, 0x100 | 1, I(unchecked((int)0xDBC01002), 3, 0, 0, unchecked((int)0xFFFFFFFF)), F(250, 125), I(1, Red, 4), F(0, 0, 500, 0, 500, 250, 0, 250)),
+            Plus(0x400A, 0, I(1, 1), F(0, 0, 500, 250)))));
+        var gradient = Assert.Single(items.OfType<GradientItem>());
+        Assert.True(gradient.Radial && gradient.Rectangular);
+        Assert.Equal(0.5, gradient.FocusX, 3);
+        Assert.Equal(Color.White, gradient.Stops[0].Color);
+        Assert.Equal(new Color(255, 0, 0), gradient.Stops[^1].Color);
+    }
 }

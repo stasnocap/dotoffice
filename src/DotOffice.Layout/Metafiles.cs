@@ -84,6 +84,18 @@ internal static class Metafiles
                     Clip = push.Clip is { } c ? (x + c.X * sx, y + c.Y * sy, c.Width * sx, c.Height * sy) : null,
                 };
             }
+            case GradientItem gradient:
+            {
+                // The blend direction is a normal to the lines of equal color, so it scales by the inverse of the box's stretch.
+                double radians = gradient.Degree * Math.PI / 180;
+                var (fx, fy) = P(gradient.X, gradient.Y);
+                return gradient with
+                {
+                    X = fx, Y = fy, Width = gradient.Width * sx, Height = gradient.Height * sy,
+                    Degree = gradient.Radial ? gradient.Degree : Math.Atan2(Math.Sin(radians) / sy, Math.Cos(radians) / sx) * 180 / Math.PI,
+                    Clip = gradient.Clip?.Select(q => P(q.X, q.Y)).ToList(),
+                };
+            }
             default:
                 return item;
         }

@@ -5,8 +5,28 @@ using DotOffice.Fonts;
 
 namespace DotOffice.Layout;
 
-/// <summary>A GDI+ brush: a solid color (hatches and gradients are drawn with the average of their colors), or a picture for texture brushes.</summary>
-internal sealed record PlusBrush(Color Color, double Alpha);
+/// <summary>
+/// A GDI+ brush: a solid color, or for gradients also <see cref="Gradient"/> (fills draw it; pens and hatches use the average color).
+/// </summary>
+internal sealed record PlusBrush(Color Color, double Alpha)
+{
+    public PlusGradient? Gradient { get; init; }
+}
+
+/// <summary>
+/// A gradient brush in brush space: linear ones run from the left to the right edge of <see cref="Rect"/>; path ones (<see cref="Radial"/>)
+/// blend from the stop at 0 at <see cref="Center"/> to the last stop at the bounds of their boundary. <see cref="Transform"/> maps brush space
+/// to world space.
+/// </summary>
+internal sealed record PlusGradient(bool Radial, (double X, double Y, double W, double H) Rect, (double X, double Y) Center, Affine Transform,
+    IReadOnlyList<GradientStop> Stops)
+{
+    /// <summary>The GDI+ wrap mode: 0 tile, 1 tile flipping every other copy (2 and 3 flip on the other axis), 4 clamp to the end colors.</summary>
+    public int Wrap { get; init; }
+
+    /// <summary>For path gradients: the boundary is an upright rectangle, so the colors run in concentric rectangles.</summary>
+    public bool Rectangular { get; init; }
+}
 
 internal sealed record PlusPen(double Width, int Unit, int LineStyle, PlusBrush Brush);
 
@@ -351,11 +371,104 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
         {
             case 0: return ReadColor(d, 8);
             case 1 when d.Length >= 20: return Mix(ReadColor(d, 12), ReadColor(d, 16)); // hatch: fore and back colors
-            case 3 when d.Length >= 20: return Mix(ReadColor(d, 16), ReadColor(d, 16)); // path gradient: the center color
-            case 4 when d.Length >= 40: return Mix(ReadColor(d, 32), ReadColor(d, 36)); // linear gradient: start and end colors
+            case 3 when d.Length >= 32: return ReadPathGradient(d) ?? Mix(ReadColor(d, 16), ReadColor(d, 16));
+            case 4 when d.Length >= 48: return ReadLinearGradient(d) ?? Mix(ReadColor(d, 32), ReadColor(d, 36));
             default: return new PlusBrush(new Color(0x80, 0x80, 0x80), 1);
         }
     }
+
+    private static PlusBrush? ReadLinearGradient(ReadOnlySpan<byte> d)
+    {
+        int flags = I32(d, 8), at = 48;
+        var rect = ((double)F32(d, 16), (double)F32(d, 20), (double)F32(d, 24), (double)F32(d, 28));
+        PlusBrush start = ReadColor(d, 32), end = ReadColor(d, 36);
+        var transform = Affine.Identity;
+        if ((flags & 0x02) != 0)
+        {
+            if (at + 24 > d.Length) return null;
+            transform = new Affine(F32(d, at), F32(d, at + 4), F32(d, at + 8), F32(d, at + 12), F32(d, at + 16), F32(d, at + 20));
+            at += 24;
+        }
+        var stops = GradientStops(d, at, flags, start, end, out double alpha);
+        if (stops is null || rect.Item3 == 0) return null;
+        return Average(stops, alpha) with { Gradient = new PlusGradient(false, rect, (0, 0), transform, stops) { Wrap = I32(d, 12) } };
+    }
+
+    private static PlusBrush? ReadPathGradient(ReadOnlySpan<byte> d)
+    {
+        int flags = I32(d, 8), count = I32(d, 28), at = 32 + 4 * count;
+        if (count < 1 || at + 4 > d.Length) return null;
+        PlusBrush center = ReadColor(d, 16), surround = ReadColor(d, 32);
+        var centerPoint = ((double)F32(d, 20), (double)F32(d, 24));
+        List<(double X, double Y)> boundary;
+        if ((flags & 0x01) != 0)
+        {
+            int size = I32(d, at);
+            if (size < 0 || at + 4 + size > d.Length) return null;
+            boundary = ReadPath(d, at + 4, out _) is { } path ? ClipGroups.Flatten(path).Where(p => !double.IsNaN(p.X)).ToList() : [];
+            at += 4 + size;
+        }
+        else
+        {
+            int points = I32(d, at);
+            if (points < 0 || at + 4 + 8 * points > d.Length) return null;
+            boundary = Points(d, at + 4, points, false, false);
+            at += 4 + 8 * points;
+        }
+        if (boundary.Count < 2) return null;
+        var transform = Affine.Identity;
+        if ((flags & 0x02) != 0)
+        {
+            if (at + 24 > d.Length) return null;
+            transform = new Affine(F32(d, at), F32(d, at + 4), F32(d, at + 8), F32(d, at + 12), F32(d, at + 16), F32(d, at + 20));
+            at += 24;
+        }
+        // The blend runs from the boundary (position 0) to the center (position 1); stops here run from the center out.
+        var stops = GradientStops(d, at, flags, surround, center, out double alpha);
+        if (stops is null) return null;
+        stops = stops.Select(s => new GradientStop(1 - s.Position, s.Color)).Reverse().ToList();
+        double left = boundary.Min(p => p.X), top = boundary.Min(p => p.Y);
+        var rect = (left, top, boundary.Max(p => p.X) - left, boundary.Max(p => p.Y) - top);
+        bool rectangular = boundary.Distinct().Count() == 4 && boundary.All(p => (p.X == left || p.X == left + rect.Item3) && (p.Y == top || p.Y == top + rect.Item4))
+            && transform.B == 0 && transform.C == 0;
+        return Average(stops, alpha) with { Gradient = new PlusGradient(true, rect, centerPoint, transform, stops) { Rectangular = rectangular } };
+    }
+
+    /// <summary>
+    /// A gradient's stops from its preset colors (flag 4) or blend factors (flag 8) after <paramref name="at"/>, else from
+    /// <paramref name="start"/> to <paramref name="end"/>; <paramref name="alpha"/> is their mean opacity.
+    /// </summary>
+    private static List<GradientStop>? GradientStops(ReadOnlySpan<byte> d, int at, int flags, PlusBrush start, PlusBrush end, out double alpha)
+    {
+        alpha = (start.Alpha + end.Alpha) / 2;
+        if ((flags & 0x0C) == 0) return [new(0, start.Color), new(1, end.Color)];
+        if (at + 4 > d.Length) return null;
+        int count = I32(d, at);
+        if (count < 1 || count > (d.Length - at - 4) / 8) return null;
+        var stops = new List<GradientStop>(count);
+        double sum = 0;
+        for (int k = 0; k < count; k++)
+        {
+            double position = Math.Clamp(F32(d, at + 4 + 4 * k), 0, 1);
+            if ((flags & 0x04) != 0)
+            {
+                var color = ReadColor(d, at + 4 + 4 * count + 4 * k);
+                stops.Add(new(position, color.Color));
+                sum += color.Alpha;
+            }
+            else
+            {
+                double factor = Math.Clamp(F32(d, at + 4 + 4 * count + 4 * k), 0, 1);
+                stops.Add(new(position, start.Color.Blend(end.Color, factor)));
+                sum += start.Alpha + (end.Alpha - start.Alpha) * factor;
+            }
+        }
+        alpha = sum / count;
+        return stops.OrderBy(s => s.Position).ToList();
+    }
+
+    private static PlusBrush Average(List<GradientStop> stops, double alpha) =>
+        new(new Color((byte)stops.Average(s => s.Color.R), (byte)stops.Average(s => s.Color.G), (byte)stops.Average(s => s.Color.B)), alpha);
 
     private static PlusBrush Mix(PlusBrush a, PlusBrush b) =>
         new(new Color((byte)((a.Color.R + b.Color.R) / 2), (byte)((a.Color.G + b.Color.G) / 2), (byte)((a.Color.B + b.Color.B) / 2)), (a.Alpha + b.Alpha) / 2);
@@ -611,7 +724,83 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
     {
         if (brush is null || path.Count < 3) return;
         var points = box ? path : ToBox(path, Transform);
+        if (brush.Gradient is { } gradient && GradientFill(points, gradient) is { } fill)
+        {
+            // The gradient is painted in the path's bounds, clipped to the path (nonzero fills are clipped even-odd, as the clip groups do).
+            var saved = _state.Clip;
+            _state.Clip = [.. saved, ClipGroups.Flatten(points)];
+            AddWithAlpha(fill, brush.Alpha);
+            _state.Clip = saved;
+            return;
+        }
         AddWithAlpha(new PathItem(points, brush.Color, null, 0.05, LineStyle.Solid, evenOdd), brush.Alpha);
+    }
+
+    /// <summary>A gradient item over the bounds of <paramref name="points"/> (output box coordinates) that paints the gradient brush.</summary>
+    private GradientItem? GradientFill(List<PathPoint> points, PlusGradient gradient)
+    {
+        var positions = points.Where(p => p.Kind != PathPointKind.Close).ToList();
+        if (positions.Count == 0) return null;
+        double left = positions.Min(p => p.X), top = positions.Min(p => p.Y);
+        double width = positions.Max(p => p.X) - left, height = positions.Max(p => p.Y) - top;
+        if (width <= 0 || height <= 0) return null;
+        var m = gradient.Transform.Then(Transform);
+        var (gx, gy, gw, gh) = gradient.Rect;
+        if (gradient.Radial)
+        {
+            // The blend reaches the stop at 1 at the bounds of the boundary; the focus is the center point.
+            var corners = new[] { m.Apply(gx, gy), m.Apply(gx + gw, gy), m.Apply(gx, gy + gh), m.Apply(gx + gw, gy + gh) };
+            double rl = corners.Min(c => c.X), rt = corners.Min(c => c.Y), rw = corners.Max(c => c.X) - rl, rh = corners.Max(c => c.Y) - rt;
+            if (rw <= 0 || rh <= 0) return null;
+            var (cx, cy) = m.Apply(gradient.Center.X, gradient.Center.Y);
+            return new GradientItem(rl, rt, rw, rh, 0, gradient.Stops)
+                { Radial = true, Rectangular = gradient.Rectangular && Math.Abs(Transform.B) < 1e-9 && Math.Abs(Transform.C) < 1e-9, FocusX = Math.Clamp((cx - rl) / rw, 0, 1), FocusY = Math.Clamp((cy - rt) / rh, 0, 1) };
+        }
+        // The blend position at a box point is the brush-space x of it, from the rectangle's left (0) to its right edge (1): the gradient
+        // runs along the first row of the inverse transform.
+        double det = m.A * m.D - m.B * m.C;
+        if (Math.Abs(det) < 1e-12) return null;
+        double ia = m.D / det, ic = -m.C / det, ie = (m.C * m.F - m.D * m.E) / det;
+        double rate = Math.Sqrt(ia * ia + ic * ic) / gw; // blend positions per unit of length along the gradient
+        if (rate == 0) return null;
+        double degree = Math.Atan2(ic * Math.Sign(gw), ia * Math.Sign(gw)) * 180 / Math.PI;
+        double rad = degree * Math.PI / 180, half = (Math.Abs(width * Math.Cos(rad)) + Math.Abs(height * Math.Sin(rad))) / 2;
+        double centerAt = (ia * (left + width / 2) + ic * (top + height / 2) + ie - gx) / gw;
+        rate = Math.Abs(rate);
+        // A blend position t sits at (t - centerAt) / rate from the box center; positions outside the rectangle keep the end colors.
+        double ToBoxStop(double t) => ((t - centerAt) / rate + half) / (2 * half);
+        // Tiling repeats the stops in every period of the rectangle that reaches the box; flipped tiling reverses every other copy.
+        var stops = new List<GradientStop>();
+        if (gradient.Wrap is >= 0 and < 4)
+        {
+            double from = centerAt - half * rate, to = centerAt + half * rate;
+            if (to - from > 200) return null; // far too many copies to list
+            for (int period = (int)Math.Floor(from + 1e-9); period < to - 1e-9; period++)
+            {
+                bool flip = gradient.Wrap != 0 && (period & 1) != 0 && gradient.Wrap != 2;
+                var copy = gradient.Stops.Select(s => new GradientStop(period + (flip ? 1 - s.Position : s.Position), s.Color));
+                stops.AddRange(flip ? copy.Reverse() : copy);
+            }
+        }
+        else stops.AddRange(gradient.Stops);
+        return new GradientItem(left, top, width, height, degree, ClampStops(stops.Select(s => s with { Position = ToBoxStop(s.Position) }).ToList()));
+    }
+
+    /// <summary>Stops cut to positions 0 to 1, with the colors they blend to at the cut ends.</summary>
+    private static List<GradientStop> ClampStops(List<GradientStop> stops)
+    {
+        Color At(double t)
+        {
+            if (t <= stops[0].Position) return stops[0].Color;
+            for (int k = 1; k < stops.Count; k++)
+                if (t <= stops[k].Position)
+                    return stops[k - 1].Color.Blend(stops[k].Color, (t - stops[k - 1].Position) / Math.Max(stops[k].Position - stops[k - 1].Position, 1e-12));
+            return stops[^1].Color;
+        }
+        var result = new List<GradientStop> { new(0, At(0)) };
+        result.AddRange(stops.Where(s => s.Position > 1e-9 && s.Position < 1 - 1e-9));
+        result.Add(new(1, At(1)));
+        return result;
     }
 
     private void Stroke(List<PathPoint> path, PlusPen pen)
