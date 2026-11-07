@@ -40,6 +40,10 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
     {
         public DmlTheme Theme { get; } = theme;
 
+        /// <summary>The part a relationship of this part points to inside the package; null when it is missing or external.</summary>
+        public string? Part(string relationshipId) =>
+            relationships.TryGetValue(relationshipId, out var rel) && !rel.IsExternal && context._package.Exists(rel.Target) ? rel.Target : null;
+
         public ImageData? Image(string relationshipId, out bool unreadable)
         {
             unreadable = false;
@@ -275,6 +279,11 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                         ReadTable(slide, table, scope, placement ?? Own(Child(element, "xfrm")), ref z);
                         break;
                     }
+                    if (uri.EndsWith("/chart", StringComparison.Ordinal) && Path(element, "graphic", "graphicData", "chart") is { } chart)
+                    {
+                        ReadChart(slide, chart, scope, placement ?? Own(Child(element, "xfrm")), ref z);
+                        break;
+                    }
                     Skip(uri.EndsWith("/chart", StringComparison.Ordinal) ? "charts"
                         : uri.EndsWith("/diagram", StringComparison.Ordinal) ? "SmartArt diagrams"
                         : "embedded objects");
@@ -282,6 +291,46 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 }
             case "contentPart": Skip("ink drawings"); break;
         }
+    }
+
+    /// <summary>
+    /// A chart part, read by the DrawingML chart reader shared with XLSX from its cached values; the embedded workbook is not opened, so a chart
+    /// without caches is drawn empty. Scheme colors follow the slide's color map.
+    /// </summary>
+    private void ReadChart(Slide slide, XElement chart, Scope scope, Placement place, ref int z)
+    {
+        if (RelationshipId(chart) is not { } rid || scope.Host.Part(rid) is not { } part)
+        {
+            options.Warnings.Warn("pptx.chart-missing", "A chart's part is missing from the file; it was skipped.");
+            return;
+        }
+        var doc = new XDocument(MapColors(Load(part), scope.ColorMap));
+        var template = new SheetChart
+        {
+            Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
+            GroupTurns = place.Turns, Rotation = place.Turns.Sum(t => t.Rotation), ZOrder = z++,
+        };
+        var notes = new List<string>();
+        var (unsupported, build) = DmlCharts.Prepare(doc, template, notes);
+        foreach (var note in notes) Note(note);
+        if (build is null)
+        {
+            Skip(unsupported is null or "empty" ? "empty charts" : $"{unsupported} charts");
+            return;
+        }
+        slide.Objects.Add(build(new CachedChartData(scope.Host.Theme)));
+    }
+
+    /// <summary>A chart's data as it reads in a presentation: only its cached values, no cells.</summary>
+    private sealed class CachedChartData(DmlTheme theme) : IChartData
+    {
+        public DmlTheme Theme { get; } = theme;
+
+        public bool Date1904 => false;
+
+        public bool FramedChartArea => false;
+
+        public IEnumerable<Cell?> Cells(string formula) => [];
     }
 
     private static Placement Own(XElement? xfrm) => new(

@@ -254,4 +254,36 @@ public class PptxReaderTests
         Assert.Equal((ShapeGeometry.Line, new Color(255, 0, 0), 2.0), (line.Geometry, line.LineColor!.Value, line.LineWidth));
         Assert.Equal(new FrameFraction(0, 0.2, 1, 0), line.Frame);
     }
+
+    private const string ColumnChart =
+        "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><c:chart><c:plotArea>" +
+        "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:ser><c:idx val=\"0\"/><c:order val=\"0\"/>" +
+        "<c:spPr><a:solidFill><a:schemeClr val=\"tx2\"/></a:solidFill></c:spPr>" +
+        "<c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f><c:strCache><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>East</c:v></c:pt><c:pt idx=\"1\"><c:v>West</c:v></c:pt></c:strCache></c:strRef></c:cat>" +
+        "<c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>3</c:v></c:pt><c:pt idx=\"1\"><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val>" +
+        "</c:ser><c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart><c:catAx><c:axId val=\"1\"/><c:crossAx val=\"2\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:crossAx val=\"1\"/></c:valAx>" +
+        "</c:plotArea></c:chart></c:chartSpace>";
+
+    [Fact]
+    public void A_chart_is_read_from_its_cached_values_without_a_chart_area_frame()
+    {
+        var (presentation, warnings) = Read(new PptxBuilder().AddChart(ColumnChart).AddSlide(ChartFrame()));
+        var chart = Assert.IsType<SheetChart>(Assert.Single(presentation.Slides[0].Objects));
+        Assert.Equal((ImageAnchorKind.Absolute, 10.0, 20.0, 200.0, 100.0), (chart.Anchor, chart.X, chart.Y, chart.Width, chart.Height));
+        Assert.Equal(ChartKind.Column, chart.Kind);
+        Assert.Equal(["East", "West"], chart.Categories);
+        var series = Assert.Single(chart.Series);
+        Assert.Equal([3.0, 5.0], series.Values);
+        Assert.Equal(new Color(0x1F, 0x49, 0x7D), series.Color); // tx2 maps to dk2 through the color map
+        Assert.Equal((null, null), (chart.Background, chart.Border));
+        Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void A_chart_whose_part_is_missing_is_skipped_with_a_warning()
+    {
+        var (presentation, warnings) = Read(new PptxBuilder().AddSlide(ChartFrame("rIdNone")));
+        Assert.Empty(presentation.Slides[0].Objects);
+        Assert.Equal("pptx.chart-missing", Assert.Single(warnings.Warnings).Code);
+    }
 }

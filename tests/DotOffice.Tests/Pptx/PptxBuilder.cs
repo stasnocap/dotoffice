@@ -59,6 +59,18 @@ internal sealed class PptxBuilder
     }
 
     /// <summary>Adds a picture that every slide can refer to as relationship <c>rIdImg</c>.</summary>
+    /// <summary>Adds <c>ppt/charts/chart1.xml</c>, which every slide refers to as <c>rIdC</c>.</summary>
+    public PptxBuilder AddChart(string chartSpace)
+    {
+        _media["ppt/charts/chart1.xml"] = Encoding.UTF8.GetBytes(chartSpace);
+        return this;
+    }
+
+    /// <summary>A chart frame referring to the chart part by <paramref name="relationshipId"/>.</summary>
+    public static string ChartFrame(string relationshipId = "rIdC") =>
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"7\" name=\"c\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(127000, 254000, 2540000, 1270000).Replace("a:xfrm", "p:xfrm") +
+        $"<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" r:id=\"{relationshipId}\"/></a:graphicData></a:graphic></p:graphicFrame>";
+
     public PptxBuilder AddImage(byte[] png)
     {
         _media["ppt/media/image1.png"] = png;
@@ -135,7 +147,7 @@ internal sealed class PptxBuilder
             {
                 var slide = _slides[i];
                 Write(zip, $"ppt/slides/slide{i + 1}.xml", $"<p:sld {Ns} {slide.Attributes}><p:cSld>{slide.Head}<p:spTree>{Tree(slide.Tree)}</p:spTree></p:cSld></p:sld>");
-                Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png")));
+                Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png"), ("rIdC", "chart", "../charts/chart1.xml")));
             }
             foreach (var (name, bytes) in _media)
             {

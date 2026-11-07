@@ -260,6 +260,8 @@ internal static class XlsxDrawings
 
         public bool Date1904 => context.Date1904;
 
+        public bool FramedChartArea => true;
+
         public IEnumerable<Cell?> Cells(string formula)
         {
             foreach (var area in CellReference.ParseAreas(formula))

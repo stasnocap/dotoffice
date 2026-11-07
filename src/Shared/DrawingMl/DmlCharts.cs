@@ -13,6 +13,12 @@ internal interface IChartData
 
     bool Date1904 { get; }
 
+    /// <summary>
+    /// Whether a chart area that does not say otherwise is white with a light gray outline, as Excel draws it; PowerPoint (and LibreOffice for
+    /// presentations) leave it transparent and unframed.
+    /// </summary>
+    bool FramedChartArea { get; }
+
     /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
     IEnumerable<Cell?> Cells(string formula);
 }
@@ -543,10 +549,10 @@ internal static class DmlCharts
             Legend = Part(Child(legendElement, "txPr")), DataLabels = Part(labelProperties),
         };
 
-        Color? background = Color.White, border = new Color(0xD9, 0xD9, 0xD9);
+        Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0xD9, 0xD9, 0xD9) : null;
         if (Child(space, "spPr") is { } chartProperties)
         {
-            background = SolidFill(chartProperties, theme, Color.White);
+            background = SolidFill(chartProperties, theme, background);
             var ln = Child(chartProperties, "ln");
             if (ln is not null && ln.Elements().Any(e => e.Name.LocalName is "noFill" or "solidFill")) border = SolidFill(ln, theme);
         }
