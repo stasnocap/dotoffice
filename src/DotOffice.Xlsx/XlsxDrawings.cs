@@ -262,6 +262,10 @@ internal static class XlsxDrawings
 
         public bool FramedChartArea => true;
 
+        public Color? TextColor => null;
+
+        public bool PresentationTitle => false;
+
         public IEnumerable<Cell?> Cells(string formula)
         {
             foreach (var area in CellReference.ParseAreas(formula))

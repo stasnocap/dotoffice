@@ -327,6 +327,17 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_chart_automatic_title_is_larger_and_bold_and_its_text_takes_the_theme_text_color()
+    {
+        var titled = ColumnChart.Replace("<c:chart><c:plotArea>", "<c:chart><c:title/><c:plotArea>")
+            .Replace("</c:chart>", "</c:chart><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz=\"1800\"/></a:pPr><a:endParaRPr lang=\"en-US\"/></a:p></c:txPr>");
+        var chart = Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(titled).AddSlide(ChartFrame())).Objects));
+        Assert.Equal((18.0, 21.6), (chart.FontSize, chart.TitleSize));
+        Assert.True(chart.TextStyles.Title!.Bold);
+        Assert.Equal(Color.Black, chart.TextColor);
+    }
+
+    [Fact]
     public void A_chart_whose_part_is_missing_is_skipped_with_a_warning()
     {
         var (presentation, warnings) = Read(new PptxBuilder().AddSlide(ChartFrame("rIdNone")));

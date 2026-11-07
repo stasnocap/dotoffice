@@ -51,7 +51,7 @@ public sealed partial class SheetLayoutEngine
             items.Add(new RectItem(x + w - 0.75, y, 0.75, h, border));
         }
 
-        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = chart.FontSize, Color = ChartText };
+        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = chart.FontSize, Color = chart.TextColor ?? ChartText };
         double left = x + ChartPad, top = y + ChartPad, right = x + w - ChartPad, bottom = y + h - ChartPad;
 
         // ---- title
@@ -611,7 +611,7 @@ public sealed partial class SheetLayoutEngine
         // ---- data labels last, on top of the series
         foreach (var (text, lx, ly, inside, fill, pointStyle, side) in labels)
         {
-            var labelFont = Styled(Styled(font with { Color = inside ? ContrastColor(fill) : ChartText }, styles.DataLabels), pointStyle);
+            var labelFont = Styled(Styled(font with { Color = inside ? LabelColor(chart, fill) : chart.TextColor ?? ChartText }, styles.DataLabels), pointStyle);
             if (side != LabelSide.Auto)
             {
                 switch (side)
@@ -728,6 +728,9 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
+    /// <summary>The color of a data label drawn over a fill: the chart's own text color when it has one, otherwise one that stands out.</summary>
+    private static Color LabelColor(SheetChart chart, Color fill) => chart.TextColor ?? ContrastColor(fill);
+
     private static Color ContrastColor(Color fill) =>
         0.299 * fill.R + 0.587 * fill.G + 0.114 * fill.B > 160 ? new Color(0x40, 0x40, 0x40) : Color.White;
 
@@ -776,7 +779,7 @@ public sealed partial class SheetLayoutEngine
             }
             double r = label.Inner > 0 ? (label.Inner + label.Radius) / 2
                 : placement switch { ChartLabelPlacement.Center => label.Radius * 0.5, ChartLabelPlacement.InsideEnd => label.Radius * 0.82, _ => label.Radius * 0.65 };
-            PlaceText(label.Text, StyleFor(ContrastColor(label.Fill)), cx + r * cos, cy + r * sin, Anchor.Middle, true, 0, items);
+            PlaceText(label.Text, StyleFor(LabelColor(chart, label.Fill)), cx + r * cos, cy + r * sin, Anchor.Middle, true, 0, items);
         }
     }
 

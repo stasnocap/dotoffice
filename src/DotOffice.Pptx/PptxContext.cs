@@ -318,13 +318,19 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
             Skip(unsupported is null or "empty" ? "empty charts" : $"{unsupported} charts");
             return;
         }
-        slide.Objects.Add(build(new CachedChartData(scope.Host.Theme)));
+        // Text without a color of its own takes the theme's text color through the color map, as other slide text does.
+        var textColor = Resolve(new XElement("fill", new XElement("schemeClr", new XAttribute("val", scope.ColorMap.GetValueOrDefault("tx1", "dk1")))), scope.Host.Theme);
+        slide.Objects.Add(build(new CachedChartData(scope.Host.Theme, textColor)));
     }
 
     /// <summary>A chart's data as it reads in a presentation: only its cached values, no cells.</summary>
-    private sealed class CachedChartData(DmlTheme theme) : IChartData
+    private sealed class CachedChartData(DmlTheme theme, Color? textColor) : IChartData
     {
         public DmlTheme Theme { get; } = theme;
+
+        public Color? TextColor { get; } = textColor;
+
+        public bool PresentationTitle => true;
 
         public bool Date1904 => false;
 

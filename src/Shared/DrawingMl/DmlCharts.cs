@@ -19,6 +19,18 @@ internal interface IChartData
     /// </summary>
     bool FramedChartArea { get; }
 
+    /// <summary>
+    /// The color of chart text that states none (the theme's text color in a presentation); null keeps Excel's dark gray, with data labels in
+    /// bars and slices picked for contrast.
+    /// </summary>
+    Color? TextColor { get; }
+
+    /// <summary>
+    /// Whether a title without its own size is 1.2 times the chart's text size and bold, as PowerPoint and LibreOffice draw presentation charts;
+    /// otherwise it is 14 points (Excel).
+    /// </summary>
+    bool PresentationTitle { get; }
+
     /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
     IEnumerable<Cell?> Cells(string formula);
 }
@@ -499,7 +511,7 @@ internal static class DmlCharts
         // ---- text and chrome
         var titleElement = Child(chart, "title");
         string? title = null;
-        double titleSize = 14;
+        double? titleSize = null;
         if (titleElement is not null)
         {
             var rich = Path(titleElement, "tx", "rich");
@@ -539,9 +551,11 @@ internal static class DmlCharts
         var baseWithoutSize = baseStyle is null ? null : baseStyle with { Size = null };
         ChartTextStyle? Part(XElement? holder) => MergeStyles(baseWithoutSize, TextStyleOf(holder, theme));
         var labelProperties = group.Descendants().Where(e => e.Name.LocalName == "dLbls").Select(d => Child(d, "txPr")).FirstOrDefault(x => x is not null);
+        var titleStyle = Part(Path(titleElement, "tx", "rich"));
+        if (context.PresentationTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
         var textStyles = new ChartTextStyles
         {
-            Title = Part(Path(titleElement, "tx", "rich")),
+            Title = titleStyle,
             ValueAxis = Part(Child(valueAxis, "txPr")), CategoryAxis = Part(Child(categoryAxis, "txPr")),
             ValueAxisTitle = Part(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = Part(Path(categoryAxis, "title", "tx", "rich")),
             SecondaryAxis = Part(Child(secondaryStyleAxis, "txPr")), SecondaryAxisTitle = Part(Path(secondaryStyleAxis, "title", "tx", "rich")),
@@ -563,7 +577,7 @@ internal static class DmlCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize, Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),
@@ -571,7 +585,7 @@ internal static class DmlCharts
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
-            Background = background, Border = border, FontSize = fontSize,
+            Background = background, Border = border, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null,
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,

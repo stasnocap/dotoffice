@@ -136,6 +136,12 @@ public sealed record SheetChart : SheetObject
 
     public double TitleSize { get; init; } = 14;
 
+    /// <summary>
+    /// The color of text that states none; null draws Excel's dark gray. When set, data labels inside bars and slices take it too, as
+    /// PowerPoint and LibreOffice draw presentation charts, instead of a color picked for contrast with the fill.
+    /// </summary>
+    public Color? TextColor { get; init; }
+
     public IReadOnlyList<string> Categories { get; init; } = [];
 
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];

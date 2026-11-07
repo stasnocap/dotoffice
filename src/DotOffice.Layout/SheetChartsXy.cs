@@ -162,7 +162,7 @@ public sealed partial class SheetLayoutEngine
         }
         items.AddRange(trendLabels);
         foreach (var (text, lx, ly, fill, pointStyle, side) in labels)
-            PlaceText(text, Styled(Styled(font with { Color = fill is { } f ? ContrastColor(f) : ChartText }, styles.DataLabels), pointStyle), lx, ly,
+            PlaceText(text, Styled(Styled(font with { Color = fill is { } f ? LabelColor(chart, f) : chart.TextColor ?? ChartText }, styles.DataLabels), pointStyle), lx, ly,
                 side switch { LabelSide.Left => Anchor.End, LabelSide.Right => Anchor.Start, _ => Anchor.Middle }, true, 0, items);
     }
 
