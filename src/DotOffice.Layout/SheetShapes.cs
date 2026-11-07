@@ -528,7 +528,7 @@ public sealed partial class SheetLayoutEngine
         double left = x + shape.TextInsets.Left, right = x + width - shape.TextInsets.Right;
         double top = y + shape.TextInsets.Top, bottom = y + height - shape.TextInsets.Bottom;
         double areaWidth = Math.Max(right - left, 1);
-        var blocks = new List<(TextBlock Block, HorizontalAlignment Alignment)>();
+        var blocks = new List<(TextBlock Block, HorizontalAlignment Alignment, double Indent)>();
         foreach (var paragraph in shape.Paragraphs)
         {
             var text = string.Concat(paragraph.Runs.Select(r => r.Text));
@@ -540,7 +540,8 @@ public sealed partial class SheetLayoutEngine
                 Kind = CellValueKind.Text,
                 Style = CellStyle.Default with { Wrap = true, HorizontalAlignment = shape.WrapText ? paragraph.Alignment : HorizontalAlignment.Left, Font = font },
             };
-            blocks.Add((BuildBlock(cell, text, shape.WrapText ? areaWidth : 1e6), paragraph.Alignment));
+            double indent = Math.Min(paragraph.Indent, areaWidth - 1);
+            blocks.Add((BuildBlock(cell, text, shape.WrapText ? areaWidth - indent : 1e6), paragraph.Alignment, indent));
         }
         double total = blocks.Sum(b => b.Block.Height);
         double lineTop = shape.TextAnchor switch
@@ -549,7 +550,7 @@ public sealed partial class SheetLayoutEngine
             ShapeTextAnchor.Bottom => bottom - total,
             _ => top,
         };
-        foreach (var (block, alignment) in blocks)
+        foreach (var (block, alignment, indent) in blocks)
         {
             for (int i = 0; i < block.Lines.Count; i++)
             {
@@ -557,11 +558,11 @@ public sealed partial class SheetLayoutEngine
                 var line = block.Lines[i];
                 if (line.Atoms.Count > 0)
                 {
-                    double x0 = left;
+                    double x0 = left + indent;
                     if (!shape.WrapText)
                     {
                         double w = LineWidth(line);
-                        x0 = alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + right) / 2 - w / 2, _ => left };
+                        x0 = alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + indent + right) / 2 - w / 2, _ => left + indent };
                     }
                     EmitLine(line, x0, lineTop + (pitch - (ascent + descent)) / 2 + ascent, x - 1e6, x + 1e6, items);
                 }

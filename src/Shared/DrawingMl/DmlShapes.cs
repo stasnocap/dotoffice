@@ -204,7 +204,7 @@ internal static class DmlShapes
     /// A gradient fill of a shape: the stops, and either the angle of a linear gradient or the focus of a path gradient (which is drawn
     /// radially). Null when the fill is not a gradient.
     /// </summary>
-    private static GradientFill? ReadGradientFill(XElement? first, DmlTheme theme, Color? placeholder)
+    internal static GradientFill? ReadGradientFill(XElement? first, DmlTheme theme, Color? placeholder)
     {
         if (first is null || first.Name.LocalName != "gradFill") return null;
         var stops = new List<GradientStop>();
@@ -569,7 +569,9 @@ internal static class DmlShapes
                 "ctr" => HorizontalAlignment.Center, "r" => HorizontalAlignment.Right, "just" or "dist" => HorizontalAlignment.Justify, _ => HorizontalAlignment.Left,
             };
             double emptySize = runs.Count > 0 ? runs.Max(r => r.Font.FontSize) : Font(Child(p, "endParaRPr")).FontSize;
-            result.Add(new ShapeParagraph(alignment, runs, emptySize));
+            var pPr = Child(p, "pPr");
+            double indent = Math.Max(0, (Number(pPr, "marL") + Number(pPr, "indent")) / EmuPerPoint);
+            result.Add(new ShapeParagraph(alignment, runs, emptySize, indent));
         }
         // A text body of empty paragraphs only carries no text.
         if (result.All(p => p.Runs.Count == 0 || p.Runs.All(r => r.Text.Length == 0))) result.Clear();

@@ -39,10 +39,13 @@ internal sealed class DmlTheme
         "<effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle>" +
         "<a:effectStyle><a:effectLst><a:outerShdw blurRad=\"57150\" dist=\"19050\" dir=\"5400000\" algn=\"ctr\" rotWithShape=\"0\"><a:srgbClr val=\"000000\"><a:alpha val=\"63000\"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle></effectStyleLst></fmtScheme>";
 
-    private List<XElement> _fillStyles = [], _effectStyles = [];
+    private List<XElement> _fillStyles = [], _effectStyles = [], _backgroundFillStyles = [];
 
     /// <summary>The fill of style reference <paramref name="index"/> (1-3), or null when the theme has none.</summary>
     public XElement? FillStyle(int index) => index >= 1 && index <= _fillStyles.Count ? _fillStyles[index - 1] : null;
+
+    /// <summary>The background fill of style reference <paramref name="index"/> (1-3, a <c>bgRef</c> idx minus 1000), or null when the theme has none.</summary>
+    public XElement? BackgroundFillStyle(int index) => index >= 1 && index <= _backgroundFillStyles.Count ? _backgroundFillStyles[index - 1] : null;
 
     /// <summary>The <c>effectLst</c> of effect style reference <paramref name="index"/> (1-3), or null when the theme has none.</summary>
     public XElement? EffectStyle(int index) => index >= 1 && index <= _effectStyles.Count ? _effectStyles[index - 1] : null;
@@ -50,6 +53,7 @@ internal sealed class DmlTheme
     private void ReadFormats(XElement? scheme)
     {
         _fillStyles = scheme?.Elements().FirstOrDefault(e => e.Name.LocalName == "fillStyleLst")?.Elements().ToList() ?? [];
+        _backgroundFillStyles = scheme?.Elements().FirstOrDefault(e => e.Name.LocalName == "bgFillStyleLst")?.Elements().ToList() ?? [];
         _effectStyles = scheme?.Elements().FirstOrDefault(e => e.Name.LocalName == "effectStyleLst")?.Elements()
             .Select(style => style.Elements().FirstOrDefault(e => e.Name.LocalName == "effectLst") ?? new XElement("effectLst")).ToList() ?? [];
     }

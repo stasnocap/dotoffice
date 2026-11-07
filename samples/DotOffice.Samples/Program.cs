@@ -5,13 +5,13 @@ using DotOffice.Pdf;
 using DotOffice.Samples;
 
 // Usage:
-//   DotOffice.Samples convert <input.docx|input.xlsx> <output.pdf> [--fonts <dir>] [--no-system-fonts]
+//   DotOffice.Samples convert <input.docx|input.xlsx|input.pptx> <output.pdf> [--fonts <dir>] [--no-system-fonts]
 //   DotOffice.Samples showcase <output.docx> [image.jpg]
 //   DotOffice.Samples showcase-xlsx <output.xlsx>
 //   DotOffice.Samples <font.ttf> [image.jpg] [output.pdf]      (low-level PDF writer demo)
 if (args.Length < 1)
 {
-    Console.Error.WriteLine("Usage: DotOffice.Samples convert <input.docx|input.xlsx> <output.pdf> [--fonts <dir>] [--no-system-fonts]");
+    Console.Error.WriteLine("Usage: DotOffice.Samples convert <input.docx|input.xlsx|input.pptx> <output.pdf> [--fonts <dir>] [--no-system-fonts]");
     Console.Error.WriteLine("       DotOffice.Samples showcase <output.docx> [image.jpg]");
     Console.Error.WriteLine("       DotOffice.Samples showcase-xlsx <output.xlsx>");
     Console.Error.WriteLine("       DotOffice.Samples <font.ttf> [image.jpg] [output.pdf]");

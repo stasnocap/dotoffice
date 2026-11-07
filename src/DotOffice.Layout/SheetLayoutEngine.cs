@@ -62,6 +62,27 @@ public sealed partial class SheetLayoutEngine
         return document;
     }
 
+    /// <summary>
+    /// Where an object lies once its group fraction (<see cref="SheetObject.Frame"/>) is taken out of the anchor's frame and the rotated groups
+    /// it belongs to have swung it about their centers.
+    /// </summary>
+    internal static (double X, double Y, double Width, double Height) PlaceInFrame(SheetObject image, double x, double y, double width, double height)
+    {
+        var f = image.Frame;
+        var rect = (X: x + f.X * width, Y: y + f.Y * height, Width: f.Width * width, Height: f.Height * height);
+        if (image.GroupTurns.Count == 0) return rect;
+        // The rotated groups swing the object about their centers (innermost first); its own turn, already counting theirs, is applied later.
+        double cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
+        for (int i = image.GroupTurns.Count - 1; i >= 0; i--)
+        {
+            var (gf, degrees) = (image.GroupTurns[i].Frame, image.GroupTurns[i].Rotation);
+            double gx = x + (gf.X + gf.Width / 2) * width, gy = y + (gf.Y + gf.Height / 2) * height;
+            double angle = degrees * Math.PI / 180, dx = cx - gx, dy = cy - gy;
+            (cx, cy) = (gx + dx * Math.Cos(angle) + dy * Math.Sin(angle), gy - dx * Math.Sin(angle) + dy * Math.Cos(angle));
+        }
+        return (cx - rect.Width / 2, cy - rect.Height / 2, rect.Width, rect.Height);
+    }
+
     /// <summary>A page of a sheet, kept until headers and footers can be drawn.</summary>
     private sealed record PageRecord(LayoutPage Page, Worksheet Sheet, int IndexInSheet, double Scale = 1);
 
@@ -714,19 +735,7 @@ public sealed partial class SheetLayoutEngine
                 ImageAnchorKind.OneCell => (ColumnStart(image.From.Column) + image.From.ColumnOffset, RowStart(image.From.Row) + image.From.RowOffset, image.Width, image.Height),
                 _ => (image.X, image.Y, image.Width, image.Height),
             };
-            var f = image.Frame;
-            var rect = (X: x + f.X * width, Y: y + f.Y * height, Width: f.Width * width, Height: f.Height * height);
-            if (image.GroupTurns.Count == 0) return rect;
-            // The rotated groups swing the object about their centers (innermost first); its own turn, already counting theirs, is applied later.
-            double cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
-            for (int i = image.GroupTurns.Count - 1; i >= 0; i--)
-            {
-                var (gf, degrees) = (image.GroupTurns[i].Frame, image.GroupTurns[i].Rotation);
-                double gx = x + (gf.X + gf.Width / 2) * width, gy = y + (gf.Y + gf.Height / 2) * height;
-                double angle = degrees * Math.PI / 180, dx = cx - gx, dy = cy - gy;
-                (cx, cy) = (gx + dx * Math.Cos(angle) + dy * Math.Sin(angle), gy - dx * Math.Sin(angle) + dy * Math.Cos(angle));
-            }
-            return (cx - rect.Width / 2, cy - rect.Height / 2, rect.Width, rect.Height);
+            return PlaceInFrame(image, x, y, width, height);
         }
 
         private (double X, double Y, double Width, double Height) TwoCellRect(SheetObject image)
@@ -807,7 +816,7 @@ public sealed partial class SheetLayoutEngine
             else if (obj is SheetImage image) EmitImage(image, x, y, width, height, visible, items);
         }
 
-        private static void EmitImage(SheetImage image, double x, double y, double width, double height,
+        internal static void EmitImage(SheetImage image, double x, double y, double width, double height,
             (double X, double Y, double Width, double Height) visible, List<LayoutItem> items)
         {
             int pushed = 1;
@@ -1189,7 +1198,7 @@ public sealed partial class SheetLayoutEngine
         /// Linear gradients become a shaded rectangle. Excel's path gradients are rectangular: the color depends on how far a point
         /// is from the focus relative to the farthest edge, measured per axis, so they are drawn as nested rectangles.
         /// </summary>
-        private static void EmitGradient(GradientFill gradient, double x, double y, double width, double height, List<LayoutItem> items)
+        internal static void EmitGradient(GradientFill gradient, double x, double y, double width, double height, List<LayoutItem> items)
         {
             if (width <= 0 || height <= 0) return;
             if (gradient.Kind == GradientKind.Linear)

@@ -2,6 +2,7 @@ using DotOffice.Core;
 using DotOffice.Docx;
 using DotOffice.Fonts;
 using DotOffice.Layout;
+using DotOffice.Pptx;
 using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
@@ -69,6 +70,16 @@ public static class DocumentConverter
             ct.ThrowIfCancellationRequested();
             layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(workbook, ct);
         }
+        else if (from == DocumentFormat.Pptx)
+        {
+            var presentation = PptxReader.Read(source, new PptxReaderOptions
+            {
+                Warnings = options.Warnings,
+                MaxTotalUncompressedSize = options.MaxUncompressedSize,
+            });
+            ct.ThrowIfCancellationRequested();
+            layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(presentation, ct);
+        }
         else
         {
             var document = DocxReader.Read(source, new DocxReaderOptions
@@ -97,7 +108,7 @@ public static class DocumentConverter
 
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx) || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 

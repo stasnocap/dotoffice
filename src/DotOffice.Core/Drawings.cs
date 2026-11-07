@@ -96,7 +96,11 @@ public sealed record ShapePath(IReadOnlyList<(double X, double Y)> Points, bool 
 public enum ShapeTextAnchor { Top, Middle, Bottom }
 
 /// <summary>A paragraph of the text inside a shape.</summary>
-public sealed record ShapeParagraph(HorizontalAlignment Alignment, IReadOnlyList<CellTextRun> Runs, double FontSize);
+/// <param name="Alignment">How the lines are aligned.</param>
+/// <param name="Runs">The text with its formatting.</param>
+/// <param name="FontSize">The size of an empty paragraph, or of the largest run.</param>
+/// <param name="Indent">Where the paragraph's lines start, in points from the left inset (DrawingML <c>marL</c> plus the first-line <c>indent</c>).</param>
+public sealed record ShapeParagraph(HorizontalAlignment Alignment, IReadOnlyList<CellTextRun> Runs, double FontSize, double Indent = 0);
 
 public enum HatchKind { Horizontal, Vertical, UpDiagonal, DownDiagonal, Cross, DiagonalCross, Tint }
 

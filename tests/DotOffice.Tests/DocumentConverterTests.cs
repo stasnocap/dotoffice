@@ -119,10 +119,25 @@ public class DocumentConverterTests
     }
 
     [Fact]
+    public async Task Converts_a_presentation_to_one_page_per_slide()
+    {
+        var pptx = new Pptx.PptxBuilder { Size = (12_192_000, 6_858_000), MasterBackground = "<p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"203040\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>" }
+            .AddSlide(Pptx.PptxBuilder.Sp(Pptx.PptxBuilder.Xfrm(635000, 635000, 5080000, 1270000), Pptx.PptxBuilder.P("Slide one")))
+            .AddSlide(Pptx.PptxBuilder.Sp(Pptx.PptxBuilder.Xfrm(635000, 635000, 5080000, 1270000), Pptx.PptxBuilder.P("Slide two")));
+        using var output = new MemoryStream();
+        await DocumentConverter.ConvertAsync(pptx.BuildStream(), output, DocumentFormat.Pptx, DocumentFormat.Pdf,
+            new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false, EmbedFonts = false });
+        var pdf = Encoding.Latin1.GetString(output.ToArray());
+        Assert.StartsWith("%PDF", pdf);
+        Assert.Equal(2, Regex.Matches(pdf, @"/Type\s*/Page\b").Count);
+        Assert.Matches(@"/MediaBox\s*\[\s*0 0 960 540\s*\]", pdf);
+    }
+
+    [Fact]
     public async Task Unsupported_conversion_throws()
     {
         await Assert.ThrowsAsync<NotSupportedException>(() =>
-            DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Pptx, DocumentFormat.Pdf));
+            DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Pptx, DocumentFormat.Docx));
         await Assert.ThrowsAsync<NotSupportedException>(() =>
             DocumentConverter.ConvertAsync(Stream.Null, Stream.Null, DocumentFormat.Docx, DocumentFormat.Docx));
         await Assert.ThrowsAsync<NotSupportedException>(() =>
