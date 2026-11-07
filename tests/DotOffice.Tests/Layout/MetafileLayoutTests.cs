@@ -63,6 +63,27 @@ public class MetafileLayoutTests
     }
 
     [Fact]
+    public void An_emf_clip_rectangle_clips_the_shapes_drawn_inside_it_until_the_dc_is_restored()
+    {
+        var items = Lay(Emf(
+            Record(33),                        // SaveDC
+            Record(30, 0, 0, 500, 375),        // IntersectClipRect: top-left quarter
+            Record(43, 0, 0, 1000, 750),       // Rectangle, clipped
+            Record(34, -1),                    // RestoreDC
+            Record(43, 0, 0, 100, 100)));      // Rectangle, not clipped
+        var paths = items.OfType<PathItem>().ToList();
+        Assert.Equal(2, paths.Count);
+        int first = items.IndexOf(paths[0]), second = items.IndexOf(paths[1]);
+        var clip = Assert.IsType<PushItem>(items[first - 1]);
+        Assert.NotNull(clip.ClipOutline);
+        Assert.Equal(200, clip.ClipOutline!.Max(p => p.X), 3);
+        Assert.Equal(150, clip.ClipOutline!.Max(p => p.Y), 3);
+        Assert.IsType<PopItem>(items[first + 1]);
+        Assert.Equal(first + 2, second);
+        Assert.Equal(items.OfType<PushItem>().Count(), items.OfType<PopItem>().Count());
+    }
+
+    [Fact]
     public void Anisotropic_mapping_and_a_world_transform_place_emf_shapes()
     {
         var items = Lay(Emf(

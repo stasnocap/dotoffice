@@ -80,6 +80,7 @@ internal static class Metafiles
                 return push with
                 {
                     CenterX = cx, CenterY = cy,
+                    ClipOutline = push.ClipOutline?.Select(q => double.IsNaN(q.X) ? q : P(q.X, q.Y)).ToList(),
                     Clip = push.Clip is { } c ? (x + c.X * sx, y + c.Y * sy, c.Width * sx, c.Height * sy) : null,
                 };
             }
@@ -94,6 +95,7 @@ internal static class Metafiles
         try
         {
             bool played = image.Format == ImageFormat.Emf ? EmfReader.Play(image.Data, player) : WmfReader.Play(image.Data, player);
+            player.Finish();
             if (!played)
             {
                 warnings.Warn("metafile.unsupported", $"Metafile '{image.Name}' holds only EMF+ drawing records, which are not supported; a placeholder was drawn.");
@@ -140,6 +142,32 @@ internal sealed class GdiPlayer(FontSelector fonts)
 {
     public List<LayoutItem> Items { get; } = [];
 
+    /// <summary>The clip groups currently open in <see cref="Items"/>, outermost first.</summary>
+    private readonly List<IReadOnlyList<(double X, double Y)>> _openClips = [];
+
+    /// <summary>Adds a drawing item, first opening or closing clip groups so the open ones are the current clip's outlines.</summary>
+    private void Add(LayoutItem item)
+    {
+        var clip = _state.Clip;
+        int common = 0;
+        while (common < _openClips.Count && common < clip.Length && ReferenceEquals(_openClips[common], clip[common])) common++;
+        for (int k = _openClips.Count; k > common; k--) Items.Add(new PopItem());
+        _openClips.RemoveRange(common, _openClips.Count - common);
+        for (int k = common; k < clip.Length; k++)
+        {
+            Items.Add(new PushItem(null) { ClipOutline = clip[k] });
+            _openClips.Add(clip[k]);
+        }
+        Items.Add(item);
+    }
+
+    /// <summary>Closes the clip groups still open; call once the metafile has been played.</summary>
+    public void Finish()
+    {
+        foreach (var _ in _openClips) Items.Add(new PopItem());
+        _openClips.Clear();
+    }
+
     /// <summary>The height of the output box, which is <see cref="Metafiles.UnitBox"/> wide and has the picture's proportions.</summary>
     public double BoxHeight { get; set; } = Metafiles.UnitBox;
 
@@ -153,6 +181,8 @@ internal sealed class GdiPlayer(FontSelector fonts)
         public int TextAlign, MapMode = 1;
         public (double X, double Y) WindowOrg, ViewportOrg, WindowExt = (1, 1), ViewportExt = (1, 1), Position;
         public Affine World = Affine.Identity;
+        /// <summary>The clip: the intersection of these outlines (box coordinates; rings split by NaN points are even-odd).</summary>
+        public IReadOnlyList<(double X, double Y)>[] Clip = [];
 
         public State Copy() => (State)MemberwiseClone();
     }
@@ -264,6 +294,74 @@ internal sealed class GdiPlayer(FontSelector fonts)
         for (int k = 0; k < pops && _saved.Count > 0; k++) _state = _saved.Pop();
     }
 
+    // ---- Clipping ----
+
+    /// <summary>IntersectClipRect: the clip is narrowed to a logical rectangle.</summary>
+    public void IntersectClip(double l, double t, double r, double b)
+    {
+        var m = Transform;
+        IntersectClip([m.Apply(l, t), m.Apply(r, t), m.Apply(r, b), m.Apply(l, b)]);
+    }
+
+    private void IntersectClip(IReadOnlyList<(double X, double Y)> outline) => _state.Clip = [.. _state.Clip, outline];
+
+    /// <summary>Combines a region of device rectangles with the clip (RGN_AND 1, RGN_COPY 5); no rectangles with RGN_COPY resets it.</summary>
+    public void SelectClipRegion(IReadOnlyList<(double L, double T, double R, double B)>? rects, int mode)
+    {
+        if (mode == 5 && rects is not { Count: > 0 }) { _state.Clip = []; return; }
+        if (rects is not { Count: > 0 } || mode is not (1 or 5)) return;
+        // A region's rectangles do not overlap, so they clip as the even-odd rings of one outline.
+        var outline = new List<(double X, double Y)>();
+        foreach (var (l, t, r, b) in rects)
+        {
+            if (outline.Count > 0) outline.Add((double.NaN, double.NaN));
+            outline.AddRange([DeviceToBox.Apply(l, t), DeviceToBox.Apply(r, t), DeviceToBox.Apply(r, b), DeviceToBox.Apply(l, b)]);
+        }
+        if (mode == 5) _state.Clip = [];
+        IntersectClip(outline);
+    }
+
+    /// <summary>SelectClipPath: the finished path (flattened) combines with the clip; only RGN_AND and RGN_COPY are played.</summary>
+    public void SelectClipPath(int mode)
+    {
+        var path = _finishedPath;
+        _finishedPath = null;
+        if (path is not { Count: >= 3 } || mode is not (1 or 5)) return;
+        var m = Transform;
+        var outline = new List<(double X, double Y)>();
+        (double X, double Y) last = (0, 0);
+        for (int k = 0; k < path.Count; k++)
+        {
+            var p = path[k];
+            switch (p.Kind)
+            {
+                case PathPointKind.Close: continue;
+                case PathPointKind.Move:
+                    if (outline.Count > 0) outline.Add((double.NaN, double.NaN));
+                    outline.Add(last = m.Apply(p.X, p.Y));
+                    break;
+                case PathPointKind.Curve when k + 2 < path.Count:
+                {
+                    var (c1, c2, e) = (m.Apply(p.X, p.Y), m.Apply(path[k + 1].X, path[k + 1].Y), m.Apply(path[k + 2].X, path[k + 2].Y));
+                    for (int step = 1; step <= 16; step++)
+                    {
+                        double u = step / 16.0, v = 1 - u;
+                        outline.Add((v * v * v * last.X + 3 * v * v * u * c1.X + 3 * v * u * u * c2.X + u * u * u * e.X,
+                                     v * v * v * last.Y + 3 * v * v * u * c1.Y + 3 * v * u * u * c2.Y + u * u * u * e.Y));
+                    }
+                    last = e;
+                    k += 2;
+                    break;
+                }
+                default:
+                    outline.Add(last = m.Apply(p.X, p.Y));
+                    break;
+            }
+        }
+        if (mode == 5) _state.Clip = [];
+        IntersectClip(outline);
+    }
+
     // ---- Objects ----
 
     public void Create(int handle, object gdiObject) => _objects[handle] = gdiObject;
@@ -352,7 +450,7 @@ internal sealed class GdiPlayer(FontSelector fonts)
         // Cosmetic pens are a device pixel wide whatever the mapping.
         double width = pen.Cosmetic || pen.Width <= 0 ? PixelWidth : pen.Width * m.Scale;
         var style = (pen.Style & 0xF) switch { 1 or 3 or 4 => LineStyle.Dashed, 2 => LineStyle.Dotted, _ => LineStyle.Solid };
-        Items.Add(new PathItem(points, fillColor, strokeColor, Math.Max(width, 0.05), style, !_state.Winding));
+        Add(new PathItem(points, fillColor, strokeColor, Math.Max(width, 0.05), style, !_state.Winding));
     }
 
     private static PathPoint Pt(double x, double y, PathPointKind kind = PathPointKind.Line) => new(x, y, kind);
@@ -493,7 +591,7 @@ internal sealed class GdiPlayer(FontSelector fonts)
                 points.Add(new PathPoint(px, py, k));
             }
             points.Add(new PathPoint(0, 0, PathPointKind.Close));
-            Items.Add(new PathItem(points, color, null));
+            Add(new PathItem(points, color, null));
         }
     }
 
@@ -517,9 +615,9 @@ internal sealed class GdiPlayer(FontSelector fonts)
         bool flipH = x2 < x1, flipV = y2 < y1;
         double left = Math.Min(x1, x2), top = Math.Min(y1, y2), width = Math.Abs(x2 - x1), height = Math.Abs(y2 - y1);
         if (width <= 0 || height <= 0) return;
-        if (flipH || flipV) Items.Add(new PushItem(null, 0, left + width / 2, top + height / 2, flipH, flipV));
-        Items.Add(new ImageItem(left, top, width, height, picture));
-        if (flipH || flipV) Items.Add(new PopItem());
+        if (flipH || flipV) Add(new PushItem(null, 0, left + width / 2, top + height / 2, flipH, flipV));
+        Add(new ImageItem(left, top, width, height, picture));
+        if (flipH || flipV) Add(new PopItem());
     }
 
     /// <summary>Draws a string at the logical reference point with the current font, text color and alignment.</summary>
@@ -556,25 +654,25 @@ internal sealed class GdiPlayer(FontSelector fonts)
         // Escapement turns the text counter-clockwise; a rotation in the transform turns it as well (text stays upright when the y axis flips).
         double rotation = font.Escapement / 10.0 - Math.Atan2(m.B, m.A) * 180 / Math.PI;
         bool rotated = Math.Abs(rotation % 360) > 0.01;
-        if (rotated) Items.Add(new PushItem(null, rotation, px, py));
+        if (rotated) Add(new PushItem(null, rotation, px, py));
         double left = px + shiftX, line = py + baseline;
-        if (dx is null) Items.Add(new TextItem(left, line, ttf, size, text, s.TextColor, resolved.SyntheticBold, resolved.SyntheticItalic));
+        if (dx is null) Add(new TextItem(left, line, ttf, size, text, s.TextColor, resolved.SyntheticBold, resolved.SyntheticItalic));
         else
             for (int k = 0; k < text.Length; k++)
                 if (!char.IsWhiteSpace(text[k]))
-                    Items.Add(new TextItem(left + offsets[k], line, ttf, size, text[k].ToString(), s.TextColor, resolved.SyntheticBold, resolved.SyntheticItalic));
+                    Add(new TextItem(left + offsets[k], line, ttf, size, text[k].ToString(), s.TextColor, resolved.SyntheticBold, resolved.SyntheticItalic));
         double thickness = Math.Max(size * ttf.UnderlineThickness / ttf.UnitsPerEm, size / 20);
         if (font.Underline)
         {
             double uy = line - size * ttf.UnderlinePosition / ttf.UnitsPerEm;
-            Items.Add(new LineItem(left, uy, left + advance, uy, thickness, s.TextColor));
+            Add(new LineItem(left, uy, left + advance, uy, thickness, s.TextColor));
         }
         if (font.Strikeout)
         {
             double sy = line - size * (ttf.StrikeoutPosition != 0 ? ttf.StrikeoutPosition : ttf.UnitsPerEm / 4) / ttf.UnitsPerEm;
-            Items.Add(new LineItem(left, sy, left + advance, sy, thickness, s.TextColor));
+            Add(new LineItem(left, sy, left + advance, sy, thickness, s.TextColor));
         }
-        if (rotated) Items.Add(new PopItem());
+        if (rotated) Add(new PopItem());
     }
 
     /// <summary>A BMP file from a device-independent bitmap (its header and bits), or the embedded PNG or JPEG.</summary>
@@ -819,6 +917,11 @@ internal static class EmfReader
             case 63: gdi.FillPath(true, true); break;
             case 64: gdi.FillPath(false, true); break;
             case 68: gdi.AbortPath(); break;
+            case 30: gdi.IntersectClip(I32(r, 8), I32(r, 12), I32(r, 16), I32(r, 20)); break;
+            case 67: gdi.SelectClipPath(I32(r, 8)); break;
+            case 75 when r.Length >= 16:
+                gdi.SelectClipRegion(I32(r, 8) == 0 ? null : Region(r[16..]), I32(r, 12));
+                break;
             case 71 when r.Length >= 32:
                 // FillRgn: the brush handle, then the region's rectangles.
                 if (Region(r[32..]) is { } fillRegion) gdi.FillRegion(fillRegion, I32(r, 28));
@@ -1000,6 +1103,7 @@ internal static class WmfReader
                         function switch { 0x0830 => 1, 0x081A => 2, _ => 0 });
                     break;
                 case 0x001E: gdi.Save(); break;
+                case 0x0416: gdi.IntersectClip(I16(p, 6), I16(p, 4), I16(p, 2), I16(p, 0)); break;
                 case 0x0127: gdi.Restore(I16(p, 0)); break;
                 case 0x012D: gdi.Select(U16(p, 0)); break;
                 case 0x01F0:
