@@ -41,4 +41,16 @@ public class MirrorMarginTests
         Assert.Equal(36, X(doc.Pages[1], "two"), 0.01);
         Assert.Equal(72 + 18, X(doc.Pages[2], "three"), 0.01);
     }
+
+    [Fact]
+    public void Mirrored_margins_swap_the_width_of_the_text_area_on_even_pages()
+    {
+        string right = $"<w:p><w:pPr><w:jc w:val=\"right\"/></w:pPr><w:r>{Run}<w:t>edge</w:t></w:r></w:p>";
+        string body = right + "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>" + right + Margins;
+        var doc = DocxReader.Read(new DocxBuilder { Body = body, Settings = "<w:mirrorMargins/>" }.BuildStream());
+        var pages = new LayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(Noto)) }).Layout(doc).Pages;
+        // odd: inside (left) 72 + 18, outside (right) 36; even: inside (right) 72 + 18, outside (left) 36.
+        Assert.Equal(612 - 36, Right(Texts(pages[0]).First(t => t.Text == "edge")), 0.01);
+        Assert.Equal(612 - 90, Right(Texts(pages[1]).First(t => t.Text == "edge")), 0.01);
+    }
 }
