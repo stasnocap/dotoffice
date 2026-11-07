@@ -11,7 +11,7 @@ namespace DotOffice.Pptx;
 /// Reads the slides of a presentation with what they inherit from their layout and master: placeholder position, fill, outline, body
 /// properties and text styles, the color map, the background, and the shapes of the layout and master that are not placeholders.
 /// </summary>
-internal sealed class PptxContext(OpcPackage package, PptxReaderOptions options)
+internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions options)
 {
     private const double EmuPerPoint = 12700;
 
@@ -81,6 +81,9 @@ internal sealed class PptxContext(OpcPackage package, PptxReaderOptions options)
         var size = Child(root, "sldSz");
         double width = Number(size, "cx", 9_144_000) / EmuPerPoint, height = Number(size, "cy", 6_858_000) / EmuPerPoint;
         _defaultTextStyle = Child(root, "defaultTextStyle");
+        if (_package.FindRelationship(part, "tableStyles") is { IsExternal: false } styles && _package.Exists(styles.Target))
+            foreach (var style in Load(styles.Target).Elements().Where(e => e.Name.LocalName == "tblStyle"))
+                if ((string?)style.Attribute("styleId") is { } styleId) _tableStyles[styleId] = style;
         var relationships = _package.GetRelationships(part);
         var presentation = new Presentation();
         foreach (var id in Child(root, "sldIdLst")?.Elements() ?? [])
@@ -265,9 +268,14 @@ internal sealed class PptxContext(OpcPackage package, PptxReaderOptions options)
             case "grpSp": ReadGroup(slide, element, scope, placement, ref z); break;
             case "graphicFrame":
                 {
+                    if ((string?)Path(element, "nvGraphicFramePr", "cNvPr")?.Attribute("hidden") is "1" or "true") return;
                     var uri = (string?)Path(element, "graphic", "graphicData")?.Attribute("uri") ?? "";
-                    Skip(uri.EndsWith("/table", StringComparison.Ordinal) ? "tables"
-                        : uri.EndsWith("/chart", StringComparison.Ordinal) ? "charts"
+                    if (uri.EndsWith("/table", StringComparison.Ordinal) && Path(element, "graphic", "graphicData", "tbl") is { } table)
+                    {
+                        ReadTable(slide, table, scope, placement ?? Own(Child(element, "xfrm")), ref z);
+                        break;
+                    }
+                    Skip(uri.EndsWith("/chart", StringComparison.Ordinal) ? "charts"
                         : uri.EndsWith("/diagram", StringComparison.Ordinal) ? "SmartArt diagrams"
                         : "embedded objects");
                     break;

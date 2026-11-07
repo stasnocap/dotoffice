@@ -164,14 +164,83 @@ public class PptxReaderTests
     }
 
     [Fact]
-    public void Tables_charts_and_diagrams_are_reported()
+    public void Charts_and_diagrams_are_reported()
     {
-        var frame = "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"6\" name=\"t\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(0, 0, 12700, 12700).Replace("a:xfrm", "p:xfrm") +
-                    "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/table\"><a:tbl/></a:graphicData></a:graphic></p:graphicFrame>";
+        var frame = "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"6\" name=\"c\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(0, 0, 12700, 12700).Replace("a:xfrm", "p:xfrm") +
+                    "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\"/></a:graphic></p:graphicFrame>";
         var (presentation, warnings) = Read(new PptxBuilder().AddSlide(frame + frame));
         Assert.Empty(presentation.Slides[0].Objects);
         var warning = Assert.Single(warnings.Warnings);
         Assert.Equal("pptx.unsupported", warning.Code);
-        Assert.Contains("2 tables", warning.Message);
+        Assert.Contains("2 SmartArt diagrams", warning.Message);
+    }
+
+    private const string DefaultStyle = "<a:tableStyleId>{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}</a:tableStyleId>";
+
+    private static string Row(long h, params string[] cells) => $"<a:tr h=\"{h}\">{string.Concat(cells)}</a:tr>";
+
+    private static string StyledTable(string tblPr, string rows) => Table([1270000, 2540000], tblPr, rows).Replace("<a:tblPr " + tblPr + "/>", $"<a:tblPr {tblPr}>{DefaultStyle}</a:tblPr>");
+
+    [Fact]
+    public void Table_cells_are_placed_by_the_grid_and_merged_cells_span_their_columns_and_rows()
+    {
+        var rows = Row(254000, Tc("A", "gridSpan=\"2\""), Tc("", "hMerge=\"1\"")) + Row(381000, Tc("B", "rowSpan=\"2\""), Tc("C")) + Row(254000, Tc("", "vMerge=\"1\""), Tc("D"));
+        var (presentation, warnings) = Read(new PptxBuilder().AddSlide(Table([1270000, 2540000], "", rows)));
+        var cells = presentation.Slides[0].Objects.OfType<SheetShape>().Where(s => s.Geometry != ShapeGeometry.Line).ToList();
+        Assert.Equal(["A", "B", "C", "D"], cells.Select(c => c.Paragraphs[0].Runs[0].Text));
+        var frames = cells.Select(c => c.Frame).ToList();
+        Assert.Equal(new FrameFraction(0, 0, 1, 0.2), frames[0]);
+        Assert.Equal(new FrameFraction(0, 0.2, 1 / 3.0, 0.5), frames[1]);
+        Assert.Equal(new FrameFraction(1 / 3.0, 0.5, 2 / 3.0, 0.2), frames[3]);
+        Assert.All(cells, c => Assert.Equal((0.0, 300.0, 100.0), (c.X, c.Width, c.Height)));
+        Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void Cell_margins_anchor_and_fill_come_from_the_cell_properties()
+    {
+        var rows = Row(254000, Tc("A", tcPrAttributes: "marL=\"0\" marT=\"12700\" anchor=\"ctr\"", tcPr: Red));
+        var cell = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(Table([1270000], "", rows))).Objects));
+        Assert.Equal(new Thickness(1, 7.2, 3.6, 0), cell.TextInsets);
+        Assert.Equal(ShapeTextAnchor.Middle, cell.TextAnchor);
+        Assert.Equal(new Color(255, 0, 0), cell.Fill!.Value);
+    }
+
+    [Fact]
+    public void The_default_table_style_fills_the_header_row_and_bands_the_rows()
+    {
+        var rows = Row(254000, Tc("H"), Tc("H")) + Row(254000, Tc("1"), Tc("1")) + Row(254000, Tc("2"), Tc("2", tcPr: Red));
+        var objects = ReadSlide(new PptxBuilder().AddSlide(StyledTable("firstRow=\"1\" bandRow=\"1\"", rows))).Objects.OfType<SheetShape>().ToList();
+        var cells = objects.Where(s => s.Geometry != ShapeGeometry.Line).ToList();
+        var header = cells[0];
+        Assert.Equal(new Color(0x4F, 0x81, 0xBD), header.Fill!.Value);
+        var font = header.Paragraphs[0].Runs[0].Font;
+        Assert.Equal((true, Color.White), (font.Bold, font.Color!.Value));
+        Assert.NotEqual(cells[2].Fill, cells[4].Fill); // band 1 is darker than band 2 (the whole table's tint)
+        Assert.Equal(Color.Black, cells[2].Paragraphs[0].Runs[0].Font.Color!.Value);
+        Assert.Equal(new Color(255, 0, 0), cells[5].Fill!.Value);
+
+        var lines = objects.Where(s => s.Geometry == ShapeGeometry.Line).ToList();
+        Assert.Equal(6 * 4, lines.Count);
+        Assert.All(lines, l => Assert.Equal(Color.White, l.LineColor!.Value));
+        Assert.Contains(lines, l => l.LineWidth == 3); // the thick rule under the header row
+        Assert.True(lines.Min(l => l.ZOrder) > cells.Max(c => c.ZOrder));
+    }
+
+    [Fact]
+    public void A_table_style_from_the_presentation_and_cell_borders_are_drawn()
+    {
+        var style = "<a:tblStyle styleId=\"{X}\" styleName=\"Mine\"><a:wholeTbl><a:tcTxStyle i=\"on\"><a:srgbClr val=\"00FF00\"/></a:tcTxStyle>" +
+                    "<a:tcStyle><a:fill><a:solidFill><a:srgbClr val=\"0000FF\"/></a:solidFill></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle>";
+        var rows = Row(254000, Tc("A", tcPr: "<a:lnB w=\"25400\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:lnB>"));
+        var table = Table([1270000], "", rows).Replace("<a:tblPr />", "<a:tblPr><a:tableStyleId>{X}</a:tableStyleId></a:tblPr>");
+        var objects = ReadSlide(new PptxBuilder { TableStyles = style }.AddSlide(table)).Objects.OfType<SheetShape>().ToList();
+        Assert.Equal(2, objects.Count);
+        Assert.Equal(new Color(0, 0, 255), objects[0].Fill!.Value);
+        var font = objects[0].Paragraphs[0].Runs[0].Font;
+        Assert.Equal((true, new Color(0, 255, 0)), (font.Italic, font.Color!.Value));
+        var line = objects[1];
+        Assert.Equal((ShapeGeometry.Line, new Color(255, 0, 0), 2.0), (line.Geometry, line.LineColor!.Value, line.LineWidth));
+        Assert.Equal(new FrameFraction(0, 0.2, 1, 0), line.Frame);
     }
 }

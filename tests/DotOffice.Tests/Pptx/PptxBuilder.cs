@@ -46,6 +46,9 @@ internal sealed class PptxBuilder
     public string DefaultTextStyle { get; set; } = "";
 
     /// <summary>The theme's major and minor Latin fonts.</summary>
+    /// <summary>The <c>a:tblStyle</c> elements of <c>ppt/tableStyles.xml</c>; empty writes no table styles part.</summary>
+    public string TableStyles { get; set; } = "";
+
     public (string Major, string Minor) Fonts { get; set; } = ("Major Face", "Minor Face");
 
     /// <summary>Adds a slide. <paramref name="tree"/> is the inner XML of its spTree after the group properties; <paramref name="head"/> goes before it in cSld.</summary>
@@ -69,6 +72,17 @@ internal sealed class PptxBuilder
     public static string Sp(string spPr, string? txBody = null, string? placeholder = null, string style = "") =>
         "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr>" + (placeholder is null ? "" : $"<p:ph {placeholder}/>") + "</p:nvPr></p:nvSpPr>" +
         $"<p:spPr>{spPr}</p:spPr>{style}" + (txBody is null ? "" : $"<p:txBody><a:bodyPr/><a:lstStyle/>{txBody}</p:txBody>") + "</p:sp>";
+
+    /// <summary>A table frame at the slide's corner with these grid columns, table properties and rows (<c>a:tr</c> elements).</summary>
+    public static string Table(long[] columns, string tblPr, string rows) =>
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"6\" name=\"t\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" +
+        Xfrm(0, 0, columns.Sum(), 1270000).Replace("a:xfrm", "p:xfrm") +
+        $"<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/table\"><a:tbl><a:tblPr {tblPr}/><a:tblGrid>" +
+        string.Concat(columns.Select(w => $"<a:gridCol w=\"{w}\"/>")) + $"</a:tblGrid>{rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>";
+
+    /// <summary>A table cell with one paragraph of text.</summary>
+    public static string Tc(string text, string attributes = "", string tcPrAttributes = "", string tcPr = "") =>
+        $"<a:tc {attributes}><a:txBody><a:bodyPr/><a:lstStyle/>{P(text)}</a:txBody><a:tcPr {tcPrAttributes}>{tcPr}</a:tcPr></a:tc>";
 
     public static string Xfrm(long x, long y, long cx, long cy) => $"<a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>";
 
@@ -95,6 +109,11 @@ internal sealed class PptxBuilder
             Write(zip, "ppt/presentation.xml",
                 $"<p:presentation {Ns}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdM\"/></p:sldMasterIdLst><p:sldIdLst>{ids}</p:sldIdLst>" +
                 $"<p:sldSz cx=\"{Size.Cx}\" cy=\"{Size.Cy}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/><p:defaultTextStyle>{DefaultTextStyle}</p:defaultTextStyle></p:presentation>");
+            if (TableStyles.Length > 0)
+            {
+                presentationRels.Add(("rIdTS", "tableStyles", "tableStyles.xml"));
+                Write(zip, "ppt/tableStyles.xml", $"<a:tblStyleLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" def=\"\">{TableStyles}</a:tblStyleLst>");
+            }
             Write(zip, "ppt/_rels/presentation.xml.rels", Rels([.. presentationRels]));
 
             Write(zip, "ppt/slideMasters/slideMaster1.xml",
