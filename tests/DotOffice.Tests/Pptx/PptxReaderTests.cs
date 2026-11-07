@@ -337,6 +337,42 @@ public class PptxReaderTests
         Assert.Equal(Color.Black, chart.TextColor);
     }
 
+    private static string DiagramShape(string xfrm, string? txXfrm = null) =>
+        "<dsp:sp xmlns:dsp=\"http://schemas.microsoft.com/office/drawing/2008/diagram\"><dsp:nvSpPr><dsp:cNvPr id=\"0\" name=\"\"/><dsp:cNvSpPr/></dsp:nvSpPr>" +
+        $"<dsp:spPr>{xfrm}<a:prstGeom prst=\"ellipse\"/>{Red}</dsp:spPr>" +
+        "<dsp:style><a:lnRef idx=\"2\"><a:schemeClr val=\"lt1\"/></a:lnRef><a:fillRef idx=\"1\"><a:schemeClr val=\"accent1\"/></a:fillRef>" +
+        "<a:effectRef idx=\"0\"><a:scrgbClr r=\"0\" g=\"0\" b=\"0\"/></a:effectRef><a:fontRef idx=\"minor\"><a:schemeClr val=\"lt1\"/></a:fontRef></dsp:style>" +
+        $"<dsp:txBody><a:bodyPr anchor=\"ctr\"/><a:lstStyle/>{P("Step")}</dsp:txBody>{txXfrm}</dsp:sp>";
+
+    [Fact]
+    public void SmartArt_is_drawn_from_its_saved_drawing_inside_the_frame()
+    {
+        var shapes = DiagramShape(Xfrm(0, 0, 1270000, 1270000)) + DiagramShape(Xfrm(1270000, 0, 1270000, 1270000), Xfrm(1270000, 635000, 1270000, 635000).Replace("a:xfrm", "dsp:txXfrm"));
+        var (presentation, warnings) = Read(new PptxBuilder().AddDiagram(shapes).AddSlide(DiagramFrame()));
+        var objects = presentation.Slides[0].Objects.OfType<SheetShape>().ToList();
+        Assert.Equal(3, objects.Count);
+        Assert.All(objects, o => Assert.Equal((10.0, 20.0, 200.0, 100.0), (o.X, o.Y, o.Width, o.Height)));
+        Assert.Equal(new FrameFraction(0, 0, 0.5, 1), objects[0].Frame);
+        Assert.Equal((ShapeGeometry.Ellipse, new Color(255, 0, 0)), (objects[0].Geometry, objects[0].Fill!.Value));
+        Assert.Equal("Step", objects[0].Paragraphs[0].Runs[0].Text);
+        Assert.Equal(Color.White, objects[0].Paragraphs[0].Runs[0].Font.Color!.Value);
+
+        // The second shape has its own text box: the shape without text, then the text over it, unfilled.
+        Assert.Equal((new FrameFraction(0.5, 0, 0.5, 1), 0), (objects[1].Frame, objects[1].Paragraphs.Count));
+        Assert.Equal(new FrameFraction(0.5, 0.5, 0.5, 0.5), objects[2].Frame);
+        Assert.Equal((ShapeGeometry.Rectangle, (Color?)null, (Color?)null), (objects[2].Geometry, objects[2].Fill, objects[2].LineColor));
+        Assert.Equal(Color.White, objects[2].Paragraphs[0].Runs[0].Font.Color!.Value);
+        Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void SmartArt_without_a_saved_drawing_is_skipped_with_a_warning()
+    {
+        var (presentation, warnings) = Read(new PptxBuilder().AddSlide(DiagramFrame()));
+        Assert.Empty(presentation.Slides[0].Objects);
+        Assert.Contains(warnings.Warnings, w => w.Message.Contains("SmartArt diagrams without a saved drawing"));
+    }
+
     [Fact]
     public void A_chart_whose_part_is_missing_is_skipped_with_a_warning()
     {

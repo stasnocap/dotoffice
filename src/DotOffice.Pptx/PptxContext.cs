@@ -284,6 +284,11 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                         ReadChart(slide, chart, scope, placement ?? Own(Child(element, "xfrm")), ref z);
                         break;
                     }
+                    if (uri.EndsWith("/diagram", StringComparison.Ordinal) && Path(element, "graphic", "graphicData", "relIds") is { } relIds)
+                    {
+                        ReadDiagram(slide, element, relIds, scope, placement, ref z);
+                        break;
+                    }
                     Skip(uri.EndsWith("/chart", StringComparison.Ordinal) ? "charts"
                         : uri.EndsWith("/diagram", StringComparison.Ordinal) ? "SmartArt diagrams"
                         : "embedded objects");
@@ -337,6 +342,68 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         public bool FramedChartArea => false;
 
         public IEnumerable<Cell?> Cells(string formula) => [];
+    }
+
+    /// <summary>
+    /// A SmartArt diagram, drawn from the drawing PowerPoint saves with it (<c>dsp:drawing</c>, which the diagram's data part names through
+    /// <c>dataModelExt relId</c>): its shapes are read as a group filling the graphic frame. A shape whose text box (<c>txXfrm</c>) differs from
+    /// its frame becomes the shape and an unfilled text box over it. A diagram without that drawing is not drawn.
+    /// </summary>
+    private void ReadDiagram(Slide slide, XElement frame, XElement relIds, Scope scope, Placement? placement, ref int z)
+    {
+        var dataId = relIds.Attributes().FirstOrDefault(a => a.Name.LocalName == "dm")?.Value;
+        var drawingId = dataId is not null && scope.Host.Part(dataId) is { } dataPart
+            ? (string?)Load(dataPart).Descendants().FirstOrDefault(e => e.Name.LocalName == "dataModelExt")?.Attribute("relId")
+            : null;
+        if (drawingId is null || scope.Host.Part(drawingId) is not { } drawingPart || Child(Load(drawingPart), "spTree") is not { } tree)
+        {
+            Skip("SmartArt diagrams without a saved drawing");
+            return;
+        }
+        XNamespace a = A, p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+        var xfrm = Child(frame, "xfrm");
+        var ext = Child(xfrm, "ext");
+        var group = new XElement(p + "grpSp",
+            new XElement(p + "grpSpPr",
+                new XElement(a + "xfrm", new XElement(Child(xfrm, "off") ?? new XElement(a + "off", new XAttribute("x", 0), new XAttribute("y", 0))) { Name = a + "off" },
+                    new XElement(a + "ext", new XAttribute("cx", Number(ext, "cx")), new XAttribute("cy", Number(ext, "cy"))),
+                    new XElement(a + "chOff", new XAttribute("x", 0), new XAttribute("y", 0)),
+                    new XElement(a + "chExt", new XAttribute("cx", Number(ext, "cx")), new XAttribute("cy", Number(ext, "cy"))))));
+        foreach (var child in Content(tree)) group.Add(SplitTextBox(child));
+        var host = new Host(this, _package.GetRelationships(drawingPart), scope.Host.Theme);
+        ReadGroup(slide, group, scope with { Host = host, IsSlide = false }, placement, ref z);
+    }
+
+    /// <summary>A diagram shape, or for one with its own text box (<c>txXfrm</c>) the shape without its text followed by that text box.</summary>
+    private static IEnumerable<XElement> SplitTextBox(XElement element)
+    {
+        if (element.Name.LocalName == "grpSp")
+        {
+            var group = new XElement(element);
+            foreach (var inner in group.Elements().Where(e => e.Name.LocalName is "sp" or "grpSp").ToList()) inner.ReplaceWith(SplitTextBox(inner));
+            return [group];
+        }
+        var textFrame = Child(element, "txXfrm");
+        var body = Child(element, "txBody");
+        var frame = Path(element, "spPr", "xfrm");
+        if (element.Name.LocalName != "sp" || textFrame is null || body is null || frame is null) return [element];
+        string Key(XElement x) => string.Join(",", Number(Child(x, "off"), "x"), Number(Child(x, "off"), "y"), Number(Child(x, "ext"), "cx"), Number(Child(x, "ext"), "cy"));
+        if (Key(textFrame) == Key(frame) && Number(textFrame, "rot") == Number(frame, "rot")) return [element];
+
+        var shape = new XElement(element);
+        Child(shape, "txBody")?.Remove();
+        Child(shape, "txXfrm")?.Remove();
+        XNamespace a = A;
+        var text = new XElement(element);
+        Child(text, "txXfrm")?.Remove();
+        var spPr = Child(text, "spPr")!;
+        spPr.RemoveNodes();
+        spPr.Add(new XElement(textFrame) { Name = a + "xfrm" }, new XElement(a + "prstGeom", new XAttribute("prst", "rect")), new XElement(a + "noFill"),
+            new XElement(a + "ln", new XElement(a + "noFill")));
+        // The style's fill, line and effects belong to the shape; its font color stays with the text.
+        if (Child(text, "style") is { } style)
+            foreach (var reference in style.Elements().Where(e => e.Name.LocalName is "lnRef" or "fillRef" or "effectRef")) reference.SetAttributeValue("idx", "0");
+        return [shape, text];
     }
 
     private static Placement Own(XElement? xfrm) => new(

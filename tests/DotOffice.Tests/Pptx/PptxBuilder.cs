@@ -71,6 +71,27 @@ internal sealed class PptxBuilder
         "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"7\" name=\"c\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(127000, 254000, 2540000, 1270000).Replace("a:xfrm", "p:xfrm") +
         $"<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" r:id=\"{relationshipId}\"/></a:graphicData></a:graphic></p:graphicFrame>";
 
+    /// <summary>
+    /// Adds a SmartArt diagram's data part (<c>rIdDM</c>, naming the drawing through <c>dataModelExt</c>) and its drawing part (<c>rIdDD</c>)
+    /// with <paramref name="shapes"/> (<c>dsp:sp</c> elements) as its shape tree.
+    /// </summary>
+    public PptxBuilder AddDiagram(string shapes)
+    {
+        _media["ppt/diagrams/data1.xml"] = Encoding.UTF8.GetBytes(
+            "<dgm:dataModel xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><dgm:ptLst/>" +
+            "<dgm:extLst><a:ext uri=\"http://schemas.microsoft.com/office/drawing/2008/diagram\"><dsp:dataModelExt xmlns:dsp=\"http://schemas.microsoft.com/office/drawing/2008/diagram\" relId=\"rIdDD\" minVer=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\"/></a:ext></dgm:extLst></dgm:dataModel>");
+        _media["ppt/diagrams/drawing1.xml"] = Encoding.UTF8.GetBytes(
+            "<dsp:drawing xmlns:dsp=\"http://schemas.microsoft.com/office/drawing/2008/diagram\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">" +
+            $"<dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id=\"0\" name=\"\"/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/>{shapes}</dsp:spTree></dsp:drawing>");
+        return this;
+    }
+
+    /// <summary>A SmartArt frame at (10, 20) points, 200 x 100 points, referring to the diagram parts of <see cref="AddDiagram"/>.</summary>
+    public static string DiagramFrame() =>
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"8\" name=\"d\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>" + Xfrm(127000, 254000, 2540000, 1270000).Replace("a:xfrm", "p:xfrm") +
+        "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\"><dgm:relIds xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" " +
+        "r:dm=\"rIdDM\" r:lo=\"rIdLo\" r:qs=\"rIdQs\" r:cs=\"rIdCs\"/></a:graphicData></a:graphic></p:graphicFrame>";
+
     public PptxBuilder AddImage(byte[] png)
     {
         _media["ppt/media/image1.png"] = png;
@@ -147,7 +168,8 @@ internal sealed class PptxBuilder
             {
                 var slide = _slides[i];
                 Write(zip, $"ppt/slides/slide{i + 1}.xml", $"<p:sld {Ns} {slide.Attributes}><p:cSld>{slide.Head}<p:spTree>{Tree(slide.Tree)}</p:spTree></p:cSld></p:sld>");
-                Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png"), ("rIdC", "chart", "../charts/chart1.xml")));
+                Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png"), ("rIdC", "chart", "../charts/chart1.xml"),
+                    ("rIdDM", "diagramData", "../diagrams/data1.xml"), ("rIdDD", "diagramDrawing", "../diagrams/drawing1.xml")));
             }
             foreach (var (name, bytes) in _media)
             {
