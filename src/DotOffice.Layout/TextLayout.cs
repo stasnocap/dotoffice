@@ -502,7 +502,7 @@ internal static class LineBuilder
     private const double Epsilon = 0.01;
 
     public static List<Line> Build(List<Atom> atoms, LineFrame frame, ParagraphAlignment alignment, bool justifyBeforeBreaks,
-        ILineSpace? space = null, HyphenationOptions? hyphenation = null)
+        ILineSpace? space = null, HyphenationOptions? hyphenation = null, bool markStaysWithBreak = false)
     {
         var lines = new List<Line>();
         int i = 0, hyphenRun = 0;
@@ -558,7 +558,7 @@ internal static class LineBuilder
         }
 
         // A trailing break leaves an empty line holding the paragraph mark.
-        if (lines.Count == 0 || lines[^1].Atoms[^1].IsBreak)
+        if (lines.Count == 0 || lines[^1].Atoms[^1].IsBreak && !markStaysWithBreak)
         {
             var (f, gap) = space?.Next(frame, lines.Count == 0) ?? (frame, 0);
             var line = new Line { Atoms = [], Gap = gap, IsLast = true };

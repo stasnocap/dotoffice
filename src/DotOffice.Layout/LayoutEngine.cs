@@ -225,8 +225,11 @@ public sealed class LayoutEngine
             bool keepWithNext = false;
             for (int i = 0; i < section.Blocks.Count; i++)
             {
+                bool afterPageBreak = i > 0 && !bodyContext.Settings.SplitPageBreakAndParagraphMark
+                    && section.Blocks[i - 1] is Paragraph pageBreak && ParagraphLayouter.IsPageBreakOnly(pageBreak);
                 if (section.Blocks[i] is Paragraph { Properties.Frame: { } frame })
                 {
+                    if (afterPageBreak) paginator.BreakPage();
                     // Consecutive paragraphs with equal frames share one frame.
                     var group = new List<Paragraph>();
                     int end = i;
@@ -244,6 +247,7 @@ public sealed class LayoutEngine
                 }
                 if (section.Blocks[i] is Table { Properties.Position: not null } floating)
                 {
+                    if (afterPageBreak) paginator.BreakPage();
                     var (fx, fw) = paginator.Column;
                     var box = FloatingTable.Build(floating, fw, paginator.BodyHeight, bodyContext);
                     if (box is not null)
@@ -773,6 +777,12 @@ public sealed class LayoutEngine
         public double BodyHeight => Current.ContentBottom - Current.ContentTop;
 
         /// <summary>Places a floating table; one anchored to the text moves to a new page when it would not fit below the cursor.</summary>
+        /// <summary>Starts a new page for a block that follows a page-break-only paragraph (which has no empty line to carry the break).</summary>
+        public void BreakPage()
+        {
+            if (Current.HasBody) NextPage(natural: false);
+        }
+
         public void PlaceTable(FloatingTable table)
         {
             if (table.Vertical.RelativeTo == FloatReference.Paragraph && Current.HasBody

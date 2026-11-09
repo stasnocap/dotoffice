@@ -144,6 +144,12 @@ internal static class BlockFlow
                 return [];
         }
         if (produced.Count == 0) return produced;
+        if (i > 0 && blocks[i - 1] is Paragraph before && !ctx.Settings.SplitPageBreakAndParagraphMark && ParagraphLayouter.IsPageBreakOnly(before))
+        {
+            // The page-break paragraph keeps its mark, so there is no empty line to carry the break to the next page.
+            produced[0].BreakBefore = true;
+            produced[0].KeepWithPrevious = false;
+        }
         if (keepWithNext) produced[0].KeepWithPrevious = true;
         keepWithNext = blocks[i] is Paragraph { Properties.KeepWithNext: true };
         return produced;
@@ -236,7 +242,8 @@ internal static class ParagraphLayouter
         var lines = LineBuilder.Build(atoms, frame, props.Alignment, ctx.Settings.JustifyLinesEndingWithBreak, space,
             hyphenation: ctx.Settings.AutoHyphenation && !props.SuppressAutoHyphens
                 ? new HyphenationOptions(ctx.Settings.HyphenationZone, ctx.Settings.ConsecutiveHyphenLimit, ctx.Settings.DoNotHyphenateCaps)
-                : null);
+                : null,
+            markStaysWithBreak: !ctx.Settings.SplitPageBreakAndParagraphMark && IsPageBreakOnly(p));
         double areaLeft = x0 + props.LeftIndent - (borders.Left.IsVisible ? borders.Left.Space + borders.Left.Width : 0);
         double areaRight = x0 + width - props.RightIndent + (borders.Right.IsVisible ? borders.Right.Space + borders.Right.Width : 0);
 
@@ -304,23 +311,43 @@ internal static class ParagraphLayouter
         return slices;
     }
 
+    /// <summary>A paragraph whose only content is one page break (bookmarks and empty runs aside).</summary>
+    internal static bool IsPageBreakOnly(Paragraph p)
+    {
+        int breaks = 0;
+        foreach (var inline in p.Inlines)
+        {
+            if (inline is Break { Kind: BreakKind.Page }) breaks++;
+            else if (inline is not BookmarkStart && inline is not TextRun { Text.Length: 0 }) return false;
+        }
+        return breaks == 1;
+    }
+
     private static bool SameBorderGroup(Paragraph a, Paragraph b) =>
         a.Properties.Borders.HasAny && a.Properties.Borders == b.Properties.Borders
         && a.Properties.LeftIndent == b.Properties.LeftIndent && a.Properties.RightIndent == b.Properties.RightIndent;
 
     /// <summary>
-    /// Applies OOXML line spacing. Extra space from multiple/at-least spacing goes above the text
-    /// (the baseline keeps its distance to the line bottom), as in Word.
+    /// Applies OOXML line spacing; the baseline is measured from the line's top. At-least spacing puts the extra above the text.
+    /// Automatic spacing above single keeps the baseline where single spacing puts it (the extra goes below; Word 2016, Arial 12/Calibri 11/
+    /// Times New Roman 12 at 1.15, 1.5 and 2). Exact and automatic spacing below single move the baseline by the ascent share of the
+    /// height change, ascent / (ascent + descent): fitted to Arial only (0.81), checked at exact 20 and 10 pt and at 0.8.
     /// </summary>
     internal static (double Height, double Baseline) LineHeight(LineSpacing spacing, double ascent, double descent)
     {
         double natural = ascent + descent;
-        return spacing.Rule switch
+        double Shifted(double height) => ascent + ascent / Math.Max(natural, 0.01) * (height - natural);
+        switch (spacing.Rule)
         {
-            LineSpacingRule.Exact => (spacing.Value, spacing.Value - descent * Math.Min(1, spacing.Value / Math.Max(natural, 0.01))),
-            LineSpacingRule.AtLeast => (Math.Max(spacing.Value, natural), Math.Max(spacing.Value, natural) - descent),
-            _ => (natural * spacing.Value, natural * spacing.Value - descent),
-        };
+            case LineSpacingRule.Exact:
+                return (spacing.Value, Shifted(spacing.Value));
+            case LineSpacingRule.AtLeast:
+                double h = Math.Max(spacing.Value, natural);
+                return (h, h - descent);
+            default:
+                double height = natural * spacing.Value;
+                return (height, spacing.Value >= 1 ? ascent : Shifted(height));
+        }
     }
 
     internal static void AddBorder(List<LayoutItem> items, Border border, double x1, double y1, double x2, double y2)
