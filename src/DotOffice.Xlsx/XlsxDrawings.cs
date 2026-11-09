@@ -266,6 +266,12 @@ internal static class XlsxDrawings
 
         public bool PresentationTitle => false;
 
+        public double AutomaticMarkerOutlineWidth => 0.75;
+
+        public bool DarkerMarkerOutline => true;
+
+        public double DefaultLineWidth => 2.25;
+
         public IEnumerable<Cell?> Cells(string formula)
         {
             foreach (var area in CellReference.ParseAreas(formula))

@@ -79,61 +79,78 @@ public class SheetChartLayoutTests
     {
         var page = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true }));
         Assert.Equal(2, page.Items.OfType<LineItem>().Count(l => l.Color == Red));
-        Assert.Equal(3, page.Items.OfType<EllipseItem>().Count(e => e.Fill == Red));
+        Assert.Equal(3, Filled(page, Red).Count); // the first series' automatic symbol (c:idx 0) is a diamond, filled in its automatic color
     }
 
     [Fact]
     public void A_marker_is_5_points_across_unless_the_series_gives_a_size()
     {
         var auto = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true }));
-        Assert.All(auto.Items.OfType<EllipseItem>().Where(e => e.Fill == Red), e => Assert.Equal(5, e.Width));
+        Assert.All(Filled(auto, Red), b => Assert.Equal(5, b.Width));
         var big = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = 9 }));
-        Assert.All(big.Items.OfType<EllipseItem>().Where(e => e.Fill == Red), e => Assert.Equal(9, e.Width));
+        Assert.All(Filled(big, Red), b => Assert.Equal(9, b.Width));
     }
+
+    private static (double X, double Y, double Width, double Height) Box(PathItem p)
+    {
+        var points = p.Points.Where(q => q.Kind != PathPointKind.Close).ToList();
+        return (points.Min(q => q.X), points.Min(q => q.Y), points.Max(q => q.X) - points.Min(q => q.X), points.Max(q => q.Y) - points.Min(q => q.Y));
+    }
+
+    private static List<(double X, double Y, double Width, double Height)> Filled(LayoutPage page, Color color) =>
+        page.Items.OfType<PathItem>().Where(p => p.Fill == color).Select(Box).ToList();
+
+    private static string Signature(LayoutItem item) => item switch
+    {
+        PathItem p => $"path {p.Fill} {p.Stroke} {p.LineWidth} " + string.Join(' ', p.Points.Select(q => $"{q.Kind}:{q.X:F3},{q.Y:F3}")),
+        LineItem l => $"line {l.X1:F3},{l.Y1:F3},{l.X2:F3},{l.Y2:F3} {l.Width} {l.Color}",
+        _ => item.ToString()!,
+    };
 
     private static LayoutPage Marked(ChartMarkerSymbol symbol, bool marker = true) =>
         Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = marker, MarkerSize = 9, MarkerSymbol = symbol }));
 
     [Fact]
-    public void A_square_marker_is_a_rectangle_of_the_marker_size_over_a_white_halo()
+    public void A_square_marker_is_a_path_of_the_marker_size_with_no_halo()
     {
         var page = Marked(ChartMarkerSymbol.Square);
-        Assert.Equal(3, page.Items.OfType<RectItem>().Count(r => r.Fill == Red && r.Width == 9 && r.Height == 9));
-        Assert.Equal(3, page.Items.OfType<RectItem>().Count(r => r.Fill == Color.White && Math.Abs(r.Width - 10.4) < 1e-9));
+        Assert.Equal(3, Filled(page, Red).Count(b => b.Width == 9 && b.Height == 9));
+        Assert.DoesNotContain(page.Items.OfType<RectItem>(), r => r.Fill == Color.White && r.Width < 20); // Office 2016 draws no white halo
         Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
     }
 
     [Fact]
     public void A_diamond_marker_is_a_four_point_polygon_as_wide_and_high_as_the_marker_size()
     {
-        var diamonds = Marked(ChartMarkerSymbol.Diamond).Items.OfType<PolygonItem>().Where(p => p.Fill == Red).ToList();
+        var diamonds = Marked(ChartMarkerSymbol.Diamond).Items.OfType<PathItem>().Where(p => p.Fill == Red).ToList();
         Assert.Equal(3, diamonds.Count);
         Assert.All(diamonds, d =>
         {
-            Assert.Equal(4, d.Points.Count);
-            Assert.Equal(9, d.Points.Max(p => p.X) - d.Points.Min(p => p.X), 6);
-            Assert.Equal(9, d.Points.Max(p => p.Y) - d.Points.Min(p => p.Y), 6);
+            Assert.Equal(4, d.Points.Count(p => p.Kind != PathPointKind.Close));
+            var box = Box(d);
+            Assert.Equal(9, box.Width, 6);
+            Assert.Equal(9, box.Height, 6);
         });
     }
 
     [Fact]
-    public void An_x_marker_is_two_crossing_strokes_in_the_series_color()
+    public void An_x_marker_is_two_crossing_thin_strokes_in_the_automatic_outline_color()
     {
         var page = Marked(ChartMarkerSymbol.X);
-        var strokes = page.Items.OfType<LineItem>().Where(l => l.Color == Red && l.Width == 1.5 && Math.Abs(l.X2 - l.X1) == 9 && Math.Abs(l.Y2 - l.Y1) == 9).ToList();
+        var strokes = page.Items.OfType<LineItem>().Where(l => l.Color == Red && l.Width == 0.75 && Math.Abs(l.X2 - l.X1) == 9 && Math.Abs(l.Y2 - l.Y1) == 9).ToList();
         Assert.Equal(6, strokes.Count);
         Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
     }
 
     [Fact]
-    public void A_none_symbol_draws_no_marker_and_automatic_ones_stay_circles()
+    public void A_none_symbol_draws_no_marker_and_an_automatic_symbol_is_a_diamond_for_c_idx_0()
     {
         var none = Marked(ChartMarkerSymbol.Auto, marker: false);
-        Assert.DoesNotContain(none.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        Assert.Empty(Filled(none, Red));
         var auto = Marked(ChartMarkerSymbol.Auto);
-        Assert.Equal(3, auto.Items.OfType<EllipseItem>().Count(e => e.Fill == Red && e.Width == 9));
-        Assert.Equal(3, auto.Items.OfType<EllipseItem>().Count(e => e.Fill == Color.White && Math.Abs(e.Width - 10.4) < 1e-9));
-        Assert.Equal(auto.Items.OfType<EllipseItem>().Select(e => e.Width), Marked(ChartMarkerSymbol.Circle).Items.OfType<EllipseItem>().Select(e => e.Width));
+        Assert.Equal(3, Filled(auto, Red).Count(b => b.Width == 9)); // no white halo either
+        Assert.Equal(Marked(ChartMarkerSymbol.Diamond).Items.OfType<PathItem>().Select(Signature), auto.Items.OfType<PathItem>().Select(Signature));
+        Assert.NotEqual(Marked(ChartMarkerSymbol.Circle).Items.OfType<PathItem>().Select(Signature), auto.Items.OfType<PathItem>().Select(Signature));
     }
 
     [Fact]
@@ -141,7 +158,7 @@ public class SheetChartLayoutTests
     {
         var chart = Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Square }) with { Legend = LegendPosition.Right };
         var page = Page(chart);
-        Assert.Equal(4, page.Items.OfType<RectItem>().Count(r => r.Fill == Red && r.Width == 5));
+        Assert.Equal(4, Filled(page, Red).Count(b => b.Width == 5 && b.Height == 5)); // three points and the legend entry
     }
 
     private static LayoutPage Styled(ChartMarkerStyle style, ChartMarkerSymbol symbol = ChartMarkerSymbol.Circle, ChartKind kind = ChartKind.Line) =>
@@ -155,23 +172,26 @@ public class SheetChartLayoutTests
         var plain = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle };
         var styled = plain with { MarkerStyle = new ChartMarkerStyle(Fill: Blue) };
         var page = Page(Chart(ChartKind.Line, plain, styled));
-        var circles = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
-        var paths = Paths(page).ToList();
-        Assert.Equal(circles.Count, paths.Count);
-        for (int i = 0; i < paths.Count; i++)
+        var circles = Filled(page, Red);
+        var others = Filled(page, Blue);
+        Assert.Equal(circles.Count, others.Count);
+        for (int i = 0; i < others.Count; i++)
         {
-            var points = paths[i].Points.Where(p => p.Kind != PathPointKind.Close).ToList();
-            Assert.Equal(circles[i].X + circles[i].Width / 2, (points.Min(p => p.X) + points.Max(p => p.X)) / 2, 1);
-            Assert.Equal(circles[i].Y + circles[i].Height / 2, (points.Min(p => p.Y) + points.Max(p => p.Y)) / 2, 1);
+            Assert.Equal(circles[i].X + circles[i].Width / 2, others[i].X + others[i].Width / 2, 1);
+            Assert.Equal(circles[i].Y + circles[i].Height / 2, others[i].Y + others[i].Height / 2, 1);
         }
     }
 
     [Fact]
-    public void A_marker_without_a_style_is_drawn_exactly_as_before_with_its_halo()
+    public void A_marker_without_a_style_is_filled_in_the_automatic_color_with_a_thin_automatic_outline_and_no_halo()
     {
-        var plain = Marked(ChartMarkerSymbol.Circle);
-        Assert.Empty(Paths(plain));
-        Assert.Equal(3, plain.Items.OfType<EllipseItem>().Count(e => e.Fill == Color.White && Math.Abs(e.Width - 10.4) < 1e-9));
+        var auto = new ChartAutoMarker(0, Blue, Color.Black, 0.5, 5);
+        var plain = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = 9, MarkerSymbol = ChartMarkerSymbol.Circle, Auto = auto }));
+        var paths = Paths(plain).ToList();
+        Assert.Equal(6, paths.Count);
+        Assert.Equal(3, paths.Count(p => p.Fill == Blue && p.Stroke is null)); // the series color (Red) is not used
+        Assert.Equal(3, paths.Count(p => p.Fill is null && p.Stroke == Color.Black && p.LineWidth == 0.5));
+        Assert.DoesNotContain(plain.Items.OfType<EllipseItem>(), e => e.Fill == Color.White);
     }
 
     [Fact]
@@ -197,11 +217,111 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
-    public void A_custom_fill_without_an_outline_has_no_stroke()
+    public void A_custom_fill_without_an_outline_gets_the_thin_automatic_outline()
     {
+        // Excel and PowerPoint 2016 (spec-fill): a marker with a fill and no stated outline is outlined in the automatic color.
         var paths = Paths(Styled(new ChartMarkerStyle(Fill: Blue))).ToList();
-        Assert.Equal(3, paths.Count);
-        Assert.All(paths, p => Assert.Equal(((Color?)Blue, (Color?)null), (p.Fill, p.Stroke)));
+        Assert.Equal(6, paths.Count);
+        Assert.Equal(3, paths.Count(p => p.Fill == Blue && p.Stroke is null));
+        Assert.Equal(3, paths.Count(p => p.Fill is null && p.Stroke == Red && p.LineWidth == 0.75));
+    }
+
+    [Fact]
+    public void A_no_fill_marker_without_an_outline_is_a_ring_in_the_automatic_outline()
+    {
+        var rings = Paths(Styled(new ChartMarkerStyle(NoFill: true))).ToList();
+        Assert.Equal(3, rings.Count);
+        Assert.All(rings, p => Assert.Equal((null, (Color?)Red, 0.75), (p.Fill, p.Stroke, p.LineWidth)));
+    }
+
+    [Fact]
+    public void A_filled_open_marker_has_a_box_of_the_marker_size_behind_its_strokes()
+    {
+        // spec-fill: x, plus and star with a fill are a filled box of the marker size, outlined in the fill, under strokes in the automatic outline.
+        foreach (var symbol in new[] { ChartMarkerSymbol.X, ChartMarkerSymbol.Plus, ChartMarkerSymbol.Star })
+        {
+            var items = Styled(new ChartMarkerStyle(Fill: Blue), symbol).Items;
+            var boxes = items.OfType<PathItem>().Where(p => p.Fill == Blue).ToList();
+            Assert.Equal(3, boxes.Count);
+            Assert.All(boxes, b => Assert.Equal((9.0, 9.0), (Box(b).Width, Box(b).Height)));
+            Assert.Equal(3, items.OfType<PathItem>().Count(p => p.Fill is null && p.Stroke == Blue && p.LineWidth == 0.75));
+            Assert.Equal(symbol == ChartMarkerSymbol.Star ? 9 : 6, items.OfType<LineItem>().Count(l => l.Color == Red && l.Width == 0.75));
+            Assert.True(items.IndexOf(boxes[0]) < items.IndexOf(items.OfType<LineItem>().First(l => l.Color == Red && l.Width == 0.75)));
+        }
+    }
+
+    [Fact]
+    public void A_no_fill_open_marker_is_strokes_only_and_an_unfilled_one_has_no_box()
+    {
+        Assert.Empty(Paths(Styled(new ChartMarkerStyle(NoFill: true), ChartMarkerSymbol.Plus)));
+        Assert.Equal(6, Styled(new ChartMarkerStyle(NoFill: true), ChartMarkerSymbol.Plus).Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width == 0.75));
+        Assert.Empty(Paths(Marked(ChartMarkerSymbol.Plus)));
+    }
+
+    private static LayoutPage Sized(ChartMarkerSymbol symbol, double size) =>
+        Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = size, MarkerSymbol = symbol }));
+
+    [Fact]
+    public void A_dash_is_a_bar_as_wide_as_the_marker_and_a_fifth_as_high_and_a_dot_is_its_right_half()
+    {
+        // Excel and PowerPoint 2016 (sizes chart, sizes 5-40): dash width = size, height about 0.2 size, both centered on the point; dot from the point outward.
+        foreach (double size in new[] { 5.0, 10, 20, 40 })
+        {
+            var dash = Filled(Sized(ChartMarkerSymbol.Dash, size), Red);
+            var dot = Filled(Sized(ChartMarkerSymbol.Dot, size), Red);
+            Assert.Equal(3, dash.Count);
+            Assert.Equal((size, size * 0.2), (dash[0].Width, dash[0].Height));
+            Assert.Equal((size / 2, size * 0.2), (dot[0].Width, dot[0].Height), (a, b) => Math.Abs(a.Item1 - b.Item1) < 1e-9 && Math.Abs(a.Item2 - b.Item2) < 1e-9);
+            Assert.Equal(dash[0].X + size / 2, dot[0].X, 6); // the dot starts at the point, where the dash has its middle
+            Assert.Equal(dash[0].Y, dot[0].Y, 6);
+        }
+    }
+
+    [Fact]
+    public void Automatic_symbols_follow_the_series_c_idx_modulo_9()
+    {
+        // Excel and PowerPoint 2016 (rotation charts, 14 series): diamond, square, triangle, x, star, circle, plus, dot, dash, then again.
+        var expected = new[] { ChartMarkerSymbol.Diamond, ChartMarkerSymbol.Square, ChartMarkerSymbol.Triangle, ChartMarkerSymbol.X, ChartMarkerSymbol.Star,
+            ChartMarkerSymbol.Circle, ChartMarkerSymbol.Plus, ChartMarkerSymbol.Dot, ChartMarkerSymbol.Dash };
+        for (int index = 0; index < 14; index++)
+        {
+            var auto = new ChartAutoMarker(index, Red, Red, 0.75, 5);
+            var drawn = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, Auto = auto })).Items.Where(i => i is PathItem or LineItem).ToList();
+            var named = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = expected[index % 9], Auto = auto })).Items.Where(i => i is PathItem or LineItem).ToList();
+            Assert.Equal(named.Select(Signature), drawn.Select(Signature));
+        }
+    }
+
+    [Fact]
+    public void An_automatic_marker_uses_the_c_idx_not_the_position_of_the_series()
+    {
+        // The first series in the list has c:idx 3 (an x: two strokes), the second c:idx 1 (a square).
+        var first = Series(Red, 5, 10, 20) with { Marker = true, Auto = new ChartAutoMarker(3, Red, Red, 0.75, 5) };
+        var second = Series(Blue, 5, 10, 20) with { Marker = true, Auto = new ChartAutoMarker(1, Blue, Blue, 0.75, 5) };
+        var page = Page(Chart(ChartKind.Line, first, second));
+        Assert.Equal(6, page.Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width == 0.75));
+        Assert.Equal(3, Filled(page, Blue).Count(b => b.Width == 5 && b.Height == 5));
+    }
+
+    [Fact]
+    public void A_point_marker_without_a_symbol_or_style_keeps_the_series_automatic_symbol_and_color()
+    {
+        var auto = new ChartAutoMarker(1, Blue, Blue, 0.75, 5);
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, Auto = auto }, (1, new ChartPointMarker(Size: 9)));
+        var boxes = Filled(Page(Chart(ChartKind.Line, series)), Blue);
+        Assert.Equal([5.0, 9.0, 5.0], boxes.Select(b => b.Width)); // squares for c:idx 1, the middle one larger
+    }
+
+    [Fact]
+    public void A_point_with_its_own_style_still_takes_its_automatic_parts_from_the_series_c_idx()
+    {
+        var auto = new ChartAutoMarker(2, Blue, Color.Black, 0.5, 5);
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, Auto = auto }, (0, new ChartPointMarker(Style: new ChartMarkerStyle(Line: Color.White))));
+        var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
+        Assert.Equal(6, paths.Count);
+        Assert.Equal(3, paths.Count(p => p.Fill == Blue)); // automatic fill, not the series color
+        Assert.Single(paths, p => p.Stroke == Color.White);
+        Assert.Equal(2, paths.Count(p => p.Stroke == Color.Black && p.LineWidth == 0.5));
     }
 
     [Fact]
@@ -304,7 +424,7 @@ public class SheetChartLayoutTests
         var series = new ChartSeries("S", new double?[] { 0, 20 }, Red, Marker: true, XValues: new double?[] { 0, 10 }, Line: false);
         var chart = Chart(ChartKind.Scatter, series) with { XTicks = [new(0, "0"), new(10, "10")], XMin = 0, XMax = 10 };
         var page = Page(chart);
-        var dots = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).OrderBy(e => e.X).ToList();
+        var dots = Filled(page, Red).OrderBy(e => e.X).ToList();
         Assert.Equal(2, dots.Count);
         Assert.True(dots[1].X > dots[0].X + 100);
         Assert.True(dots[1].Y < dots[0].Y - 50);
@@ -323,8 +443,8 @@ public class SheetChartLayoutTests
             ShowSecondaryAxis = true, SecondaryTicks = [new(0, "0"), new(100, "100")], SecondaryMin = 0, SecondaryMax = 100, SecondaryXMin = 0, SecondaryXMax = 20,
         };
         var page = Page(chart);
-        var a = page.Items.OfType<EllipseItem>().Single(e => e.Fill == Red);
-        var b = page.Items.OfType<EllipseItem>().Single(e => e.Fill == Blue);
+        var a = Filled(page, Red).Single();
+        var b = Filled(page, Blue).Single();
         Assert.True(a.X > b.X + 20);   // x = 5 of 20 sits left of x = 5 of 10
         Assert.True(b.Y > a.Y + 40);   // y = 10 of 100 sits below y = 10 of 20
         Assert.Contains("100", Text(page)); // the secondary scale is labelled on the right
@@ -398,7 +518,7 @@ public class SheetChartLayoutTests
         Assert.Equal(2, labels.Count);
         double plotMiddle = page.Items.OfType<RectItem>().Where(r => r.Fill == Red).Average(r => r.X);
         Assert.All(labels, t => Assert.True(t.X > plotMiddle));
-        var dots = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Blue).ToList();
+        var dots = Filled(page, Blue);
         Assert.Equal(3, dots.Count);
         var bars = page.Items.OfType<RectItem>().Where(r => r.Fill == Red).ToList();
         Assert.True(dots[1].Y < bars[0].Y); // 2 of 2 is the top, 10 of 20 only the middle
@@ -847,18 +967,18 @@ public class SheetChartLayoutTests
     private static ChartSeries Pointed(ChartSeries s, params (int Index, ChartPointMarker Marker)[] points) =>
         s with { PointMarkers = points.ToDictionary(p => p.Index, p => p.Marker) };
 
-    private static double CenterX(EllipseItem e) => e.X + e.Width / 2;
+    private static double CenterX((double X, double Y, double Width, double Height) b) => b.X + b.Width / 2;
 
     [Fact]
     public void A_point_marker_changes_only_its_own_point_even_after_a_null_value()
     {
-        var series = Pointed(Series(Red, null, 10, 20) with { Marker = true }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var series = Pointed(Series(Red, null, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
         var page = Page(Chart(ChartKind.Line, series));
-        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
-        var circle = Assert.Single(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
-        Assert.Equal(9, rect.Width);
-        Assert.Equal(5, circle.Width);
-        Assert.True(rect.X + 4.5 > CenterX(circle)); // idx 2 is the third category, to the right of idx 1
+        var boxes = Filled(page, Red);
+        Assert.Equal(2, boxes.Count);
+        var rect = boxes.Single(b => b.Width == 9);
+        var circle = boxes.Single(b => b.Width == 5);
+        Assert.True(rect.X + 4.5 > CenterX(circle)); // idx 2 is the third category, to the right of idx 1 // idx 2 is the third category, to the right of idx 1
     }
 
     [Fact]
@@ -866,10 +986,10 @@ public class SheetChartLayoutTests
     {
         var plain = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true }));
         var hidden = Page(Chart(ChartKind.Line, Pointed(Series(Red, 5, 10, 20) with { Marker = true }, (1, new ChartPointMarker(Visible: false)))));
-        Assert.Equal(3, plain.Items.OfType<EllipseItem>().Count(e => e.Fill == Red));
-        var left = hidden.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        Assert.Equal(3, Filled(plain, Red).Count);
+        var left = Filled(hidden, Red);
         Assert.Equal(2, left.Count);
-        var all = plain.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        var all = Filled(plain, Red);
         Assert.Equal([all[0], all[2]], left);
     }
 
@@ -878,8 +998,7 @@ public class SheetChartLayoutTests
     {
         var series = Pointed(Series(Red, 5, 10, 20) with { Marker = false }, (1, new ChartPointMarker(true, ChartMarkerSymbol.Square, 8)));
         var page = Page(Chart(ChartKind.Line, series));
-        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
-        Assert.Equal(8, Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red).Width);
+        Assert.Equal(8, Assert.Single(Filled(page, Red)).Width);
     }
 
     [Fact]
@@ -887,7 +1006,7 @@ public class SheetChartLayoutTests
     {
         var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Square, MarkerSize = 6, MarkerStyle = new ChartMarkerStyle(Fill: Blue) },
             (1, new ChartPointMarker(Size: 12)));
-        var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
+        var paths = Paths(Page(Chart(ChartKind.Line, series))).Where(p => p.Fill is not null).ToList();
         Assert.Equal(3, paths.Count);
         Assert.All(paths, p => Assert.Equal((Color?)Blue, p.Fill));
         var widths = paths.Select(p => p.Points.Where(q => q.Kind != PathPointKind.Close)).Select(pts => pts.Max(q => q.X) - pts.Min(q => q.X)).ToList();
@@ -902,7 +1021,7 @@ public class SheetChartLayoutTests
             (0, new ChartPointMarker(Style: new ChartMarkerStyle(Fill: Color.White))));
         var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
         Assert.Equal([(Color?)Color.White, Red, Red], paths.Where(p => p.Fill is not null).Select(p => p.Fill));
-        // only the two untouched points keep the series' blue 2 pt outline; the fill-only point has an automatic one (series color here, unchecked against Office)
+        // only the two untouched points keep the series' blue 2 pt outline; the fill-only point has the automatic one (Excel and PowerPoint 2016)
         var rings = paths.Where(p => p.Stroke is not null).ToList();
         Assert.Equal(3, rings.Count);
         Assert.Equal(2, rings.Count(p => p.Stroke == Blue && p.LineWidth == 2.0));
@@ -927,7 +1046,7 @@ public class SheetChartLayoutTests
         var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Blue, Line: Blue, LineWidth: 2) },
             (0, new ChartPointMarker(Style: new ChartMarkerStyle(Line: Color.White, LineWidth: 1))));
         var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
-        // the series' automatic color, not its explicit fill (appearance unchecked against Office); the fill is drawn before the outline
+        // the automatic color, not the series' explicit fill (Word 2016, one chart); the fill is drawn before the outline
         Assert.Equal((Color?)Red, paths[0].Fill);
         Assert.Equal((Color?)Color.White, paths[1].Stroke);
     }
@@ -935,20 +1054,22 @@ public class SheetChartLayoutTests
     [Fact]
     public void A_scatter_point_marker_follows_the_point_index_across_a_null_value()
     {
-        var series = Pointed(Series(Red, 5, null, 20) with { Marker = true, XValues = new double?[] { 1, 2, 3 } }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var series = Pointed(Series(Red, 5, null, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, XValues = new double?[] { 1, 2, 3 } }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
         var page = Page(Chart(ChartKind.Scatter, series) with { XMin = 0, XMax = 4 });
-        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
-        var circle = Assert.Single(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        var boxes = Filled(page, Red);
+        var rect = Assert.Single(boxes, b => b.Width == 9);
+        var circle = Assert.Single(boxes, b => b.Width == 5);
         Assert.True(rect.X + 4.5 > CenterX(circle));
     }
 
     [Fact]
     public void A_radar_point_marker_belongs_to_the_category_with_the_same_index()
     {
-        var series = Pointed(Series(Red, 20, 20, 20) with { Marker = true }, (1, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var series = Pointed(Series(Red, 20, 20, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle }, (1, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
         var page = Page(Chart(ChartKind.Radar, series));
-        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
-        var circles = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        var boxes = Filled(page, Red);
+        var rect = Assert.Single(boxes, b => b.Width == 9);
+        var circles = boxes.Where(b => b.Width == 5).ToList();
         Assert.Equal(2, circles.Count);
         // category 0 is at the top and 2 at the lower left, so category 1 (lower right) is right of both
         Assert.All(circles, c => Assert.True(rect.X + 4.5 > CenterX(c)));

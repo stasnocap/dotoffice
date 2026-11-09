@@ -404,12 +404,52 @@ public class PptxReaderTests
     }
 
     [Fact]
-    public void A_line_series_without_c_size_has_the_schema_default_marker_of_5_points()
+    public void A_line_series_without_c_size_or_line_width_has_the_automatic_marker_of_5_points_for_powerpoints_1_5_pt_line()
     {
         var series = LineSeries("");
         Assert.True(series.Marker);
         Assert.Null(series.MarkerSize);
         Assert.Equal(5, series.MarkerDiameter);
+        Assert.Equal((0.5, series.AutomaticMarker.Color), (series.AutomaticMarker.OutlineWidth, series.AutomaticMarker.Outline)); // PowerPoint 2016: 0.5 pt, the fill's own color
+    }
+
+    private static ChartSeries[] LineSeriesList(params string[] seriesProperties)
+    {
+        var sers = string.Concat(seriesProperties.Select((p, i) =>
+        {
+            var parts = p.Split('|');
+            return $"<c:ser><c:idx val=\"{parts[0]}\"/><c:order val=\"{i}\"/>{(parts.Length > 1 ? parts[1] : "")}<c:val><c:numLit><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>1</c:v></c:pt></c:numLit></c:val></c:ser>";
+        }));
+        var xml = "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><c:chart><c:plotArea><c:lineChart><c:grouping val=\"standard\"/>" + sers +
+            "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart><c:catAx><c:axId val=\"1\"/><c:crossAx val=\"2\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:crossAx val=\"1\"/></c:valAx></c:plotArea></c:chart></c:chartSpace>";
+        return Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(xml).AddSlide(ChartFrame())).Objects)).Series.ToArray();
+    }
+
+    [Theory]
+    [InlineData("<c:spPr><a:ln w=\"12700\"/></c:spPr>", 5.0)]
+    [InlineData("<c:spPr><a:ln w=\"28575\"/></c:spPr>", 7.0)]
+    [InlineData("", 5.0)]
+    public void The_automatic_marker_size_follows_the_line_width(string properties, double size) =>
+        Assert.Equal(size, LineSeriesList("0|" + properties)[0].MarkerDiameter);
+
+    [Fact]
+    public void The_automatic_marker_color_of_14_presentation_series_is_the_themes_accents_shaded_plain_and_tinted()
+    {
+        // PowerPoint 2016 (rotation chart, 14 series): c:idx 0 shaded, 6 the plain accent, 12 tinted, not the explicit line color. The test deck's theme has accent 1 4F81BD (Excel's 2007 palette gave 40699C, AABAD7 there).
+        var series = LineSeriesList(Enumerable.Range(0, 14).Select(i => i == 0 ? "0|<c:spPr><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"7F7F7F\"/></a:solidFill></a:ln></c:spPr>" : i.ToString()).ToArray());
+        Assert.Equal(new Color(0x7F, 0x7F, 0x7F), series[0].Color);
+        Assert.InRange(series[0].AutomaticMarker.Color.R, 0x3F, 0x41);
+        Assert.InRange(series[0].AutomaticMarker.Color.B, 0x9B, 0x9D);
+        Assert.Equal(series[0].AutomaticMarker.Color, series[0].AutomaticMarker.Outline); // PowerPoint outlines in the fill's color
+        Assert.Equal(new Color(0x4F, 0x81, 0xBD), series[6].AutomaticMarker.Color);
+        Assert.InRange(series[12].AutomaticMarker.Color.R, 0xA9, 0xAB);
+    }
+
+    [Fact]
+    public void A_presentation_series_takes_its_automatic_marker_from_c_idx_not_from_its_position()
+    {
+        var series = LineSeriesList("9", "1");
+        Assert.Equal([9, 1], series.Select(s => s.AutomaticMarker.Index));
     }
 
     [Fact]

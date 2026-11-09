@@ -85,11 +85,88 @@ public class XlsxChartTests
     }
 
     [Fact]
-    public void Marker_size_is_automatic_5_points_unless_c_size_is_given()
+    public void Marker_size_is_automatic_7_points_for_excels_2_25_pt_line_unless_c_size_is_given()
     {
+        // Excel 2016: 7 with its default 2.25 pt line (inferred from two line widths only, see the README); an explicit c:size wins.
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"circle\"/><c:size val=\"11\"/></c:marker>") + "</c:lineChart>";
         var chart = Read(Space(line)).Sheet.Charts.Single();
-        Assert.Equal([5.0, 11.0], chart.Series.Select(s => s.MarkerDiameter));
+        Assert.Equal([7.0, 11.0], chart.Series.Select(s => s.MarkerDiameter));
+    }
+
+    [Theory]
+    [InlineData(12700, 5.0)]
+    [InlineData(19050, 5.0)]
+    [InlineData(28575, 7.0)]
+    [InlineData(38100, 7.0)]
+    public void The_automatic_marker_size_follows_the_stated_line_width(int emu, double size)
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", $"<c:spPr><a:ln w=\"{emu}\"/></c:spPr>") + "</c:lineChart>";
+        Assert.Equal(size, Read(Space(line)).Sheet.Charts.Single().Series.Single().MarkerDiameter);
+    }
+
+    private static List<ChartSeries> SeriesWithIndexes(params int[] indexes)
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + string.Concat(indexes.Select((idx, i) => Ser(idx, null, null, "S!$B$2:$B$4").Replace($"<c:order val=\"{idx}\"/>", $"<c:order val=\"{i}\"/>"))) + "</c:lineChart>";
+        return Read(Space(line)).Sheet.Charts.Single().Series.ToList();
+    }
+
+    private static void Near(Color expected, Color actual) =>
+        Assert.True(Math.Abs(expected.R - actual.R) <= 2 && Math.Abs(expected.G - actual.G) <= 2 && Math.Abs(expected.B - actual.B) <= 2, $"{actual} is not near {expected}");
+
+    [Fact]
+    public void The_automatic_marker_color_of_14_series_is_shaded_plain_then_tinted_accents_of_the_theme()
+    {
+        // Excel and PowerPoint 2016, 14 series (rotation charts): c:idx 0-5 shade 35 %, 6-11 plain, 12-13 tint 35 % of accents 1-6, 1-2 (no theme part here: the Office 2013+ defaults).
+        var series = SeriesWithIndexes(Enumerable.Range(0, 14).ToArray());
+        Near(new Color(0x37, 0x5D, 0xA1), series[0].AutomaticMarker.Color);
+        Near(new Color(0xC4, 0x66, 0x27), series[1].AutomaticMarker.Color);
+        Near(new Color(0x88, 0x88, 0x88), series[2].AutomaticMarker.Color);
+        Assert.Equal(new Color(0x44, 0x72, 0xC4), series[6].AutomaticMarker.Color);
+        Assert.Equal(new Color(0xFF, 0xC0, 0x00), series[9].AutomaticMarker.Color);
+        Near(new Color(0xA7, 0xB5, 0xDB), series[12].AutomaticMarker.Color);
+        Near(new Color(0xF4, 0xB9, 0xA4), series[13].AutomaticMarker.Color);
+    }
+
+    [Fact]
+    public void The_automatic_marker_color_depends_on_the_number_of_cycles_of_six_series()
+    {
+        // Measured with 10 series (spec-plain charts): shade 24 % and tint 23 %; up to six series are plain accents (sizes chart, 4 series).
+        var ten = SeriesWithIndexes(Enumerable.Range(0, 10).ToArray());
+        Near(new Color(0x3B, 0x64, 0xAD), ten[0].AutomaticMarker.Color);
+        Near(new Color(0x8F, 0xA2, 0xD4), ten[6].AutomaticMarker.Color);
+        Near(new Color(0xFF, 0xD1, 0x84), ten[9].AutomaticMarker.Color);
+        Assert.Equal(new Color(0x44, 0x72, 0xC4), SeriesWithIndexes(0, 1, 2, 3)[0].AutomaticMarker.Color);
+        Assert.Equal(new Color(0xED, 0x7D, 0x31), SeriesWithIndexes(0, 1, 2, 3)[1].AutomaticMarker.Color);
+    }
+
+    [Fact]
+    public void The_automatic_marker_follows_c_idx_even_when_it_is_not_the_position()
+    {
+        var series = SeriesWithIndexes(7, 2);
+        Assert.Equal([7, 2], series.Select(s => s.AutomaticMarker.Index));
+        // idx 7 is accent 2 in the second cycle (tinted), idx 2 accent 3 in the first (shaded) with two cycles
+        var tinted = series[0].AutomaticMarker.Color;
+        Assert.True(tinted.R > 0xED && tinted.G > 0x7D && tinted.B > 0x31);
+        var shaded = series[1].AutomaticMarker.Color;
+        Assert.True(shaded.R < 0xA5 && shaded.G < 0xA5 && shaded.B < 0xA5);
+    }
+
+    [Fact]
+    public void An_automatic_marker_outline_is_a_little_darker_than_the_fill_and_0_75_pt_in_excel()
+    {
+        var auto = SeriesWithIndexes(0, 1, 2, 3)[0].AutomaticMarker;
+        Assert.Equal(0.75, auto.OutlineWidth);
+        Assert.NotEqual(auto.Color, auto.Outline);
+        Near(new Color(0x3A, 0x62, 0xAA), SeriesWithIndexes(Enumerable.Range(0, 10).ToArray())[0].AutomaticMarker.Outline); // 97.5 % of the HSL lightness of 3B64AD (Excel: 4572A7 became 416FA6)
+    }
+
+    [Fact]
+    public void The_automatic_marker_color_does_not_depend_on_the_line_color()
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:spPr><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"7F7F7F\"/></a:solidFill></a:ln></c:spPr>") + "</c:lineChart>";
+        var series = Read(Space(line)).Sheet.Charts.Single().Series.Single();
+        Assert.Equal(new Color(0x7F, 0x7F, 0x7F), series.Color);
+        Assert.Equal(new Color(0x44, 0x72, 0xC4), series.AutomaticMarker.Color);
     }
 
     [Theory]
@@ -99,7 +176,7 @@ public class XlsxChartTests
     public void An_invalid_marker_size_falls_back_to_the_automatic_size(string size)
     {
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", $"<c:marker><c:size val=\"{size}\"/></c:marker>") + "</c:lineChart>";
-        Assert.Equal(5.0, Read(Space(line)).Sheet.Charts.Single().Series.Single().MarkerDiameter);
+        Assert.Equal(7.0, Read(Space(line)).Sheet.Charts.Single().Series.Single().MarkerDiameter);
     }
 
     [Fact]

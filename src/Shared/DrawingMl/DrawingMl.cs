@@ -93,6 +93,15 @@ internal static class DrawingMl
         return new Color(ToSrgb(change(ToLinear(color.R))), ToSrgb(change(ToLinear(color.G))), ToSrgb(change(ToLinear(color.B))));
     }
 
+    /// <summary>The color with DrawingML's <c>shade</c> <paramref name="value"/> (0-1, the share of the light kept), in linear RGB.</summary>
+    public static Color Shade(Color color, double value) => Linear(color, l => l * value);
+
+    /// <summary>The color with DrawingML's <c>tint</c> <paramref name="value"/> (0-1, the share of the color kept, the rest white), in linear RGB.</summary>
+    public static Color Tint(Color color, double value) => Linear(color, l => l * value + (1 - value));
+
+    /// <summary>The color with DrawingML's <c>lumMod</c> <paramref name="value"/> (a factor on the HSL lightness).</summary>
+    public static Color LumMod(Color color, double value) => WithHsl(color, (h, sat, l) => (h, sat, l * value));
+
     private static Color? Preset(string? name) => name switch
     {
         "black" => Color.Black, "white" => Color.White, "red" => new Color(255, 0, 0), "green" => new Color(0, 128, 0), "blue" => new Color(0, 0, 255),

@@ -141,7 +141,7 @@ public sealed partial class SheetLayoutEngine
                 if (s.Marker || !s.Line || s.PointMarkers is not null)
                     for (int i = 0; i < points.Length; i++)
                         if (points[i] is { } q)
-                            DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker || !s.Line, true);
+                            DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker || !s.Line);
             }
         }
         if (chart.Kind == ChartKind.Bubble)
@@ -234,7 +234,7 @@ public sealed partial class SheetLayoutEngine
                     items.Add(new LineItem(polygon[k].X, polygon[k].Y, polygon[(k + 1) % n].X, polygon[(k + 1) % n].Y, 2.25, s.Color));
             if (s.Marker || s.PointMarkers is not null)
                 for (int k = 0; k < polygon.Count; k++)
-                    DrawMarkerAt(items, polygon[k].X, polygon[k].Y, s, k, s.Marker, true);
+                    DrawMarkerAt(items, polygon[k].X, polygon[k].Y, s, k, s.Marker);
         }
     }
 }

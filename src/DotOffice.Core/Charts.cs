@@ -39,14 +39,28 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
     double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null,
-    IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null)
+    IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null, ChartAutoMarker? Auto = null)
 {
     /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
     public const double DefaultMarkerSize = 5;
 
-    /// <summary>The marker's diameter in points: the series' explicit <c>c:size</c>, else the schema default of 5. How PowerPoint sizes a marker with no <c>c:size</c> is an estimate (the spec's default), not compared with PowerPoint.</summary>
-    public double MarkerDiameter => MarkerSize ?? DefaultMarkerSize;
+    /// <summary>What an automatic marker of this series looks like; a series built without it (not read from a file) is automatic in its own color.</summary>
+    public ChartAutoMarker AutomaticMarker => Auto ?? new ChartAutoMarker(0, Color, Color, 0.75, DefaultMarkerSize);
+
+    /// <summary>
+    /// The marker's diameter in points: the series' explicit <c>c:size</c>, else the automatic size, which follows the line's width
+    /// (see <see cref="ChartAutoMarker.Size"/>).
+    /// </summary>
+    public double MarkerDiameter => MarkerSize ?? AutomaticMarker.Size;
 }
+
+/// <summary>
+/// What Office draws for the parts of a line, scatter or radar marker that the file leaves automatic. <paramref name="Index"/> is the
+/// series' <c>c:idx</c> (not its position), which picks the automatic symbol (modulo 9) and the theme color; <paramref name="Color"/> is
+/// the automatic fill; <paramref name="Outline"/> and <paramref name="OutlineWidth"/> the automatic outline (and the strokes of plus, x and
+/// star); <paramref name="Size"/> the automatic size in points, inferred from the series line's width.
+/// </summary>
+public sealed record ChartAutoMarker(int Index, Color Color, Color Outline, double OutlineWidth, double Size);
 
 /// <summary>
 /// What <c>c:marker/c:spPr</c> says about a marker. <paramref name="Fill"/> null with <paramref name="NoFill"/> false means the fill is not

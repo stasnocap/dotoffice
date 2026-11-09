@@ -37,6 +37,15 @@ internal interface IChartData
     /// </summary>
     bool FitAxisToHeight => false;
 
+    /// <summary>The width in points of an automatic marker outline: 0.75 as Excel 2016 draws it, 0.5 as PowerPoint 2016 does.</summary>
+    double AutomaticMarkerOutlineWidth => 0.5;
+
+    /// <summary>Whether an automatic marker outline is a little darker than the fill (Excel 2016: 97.5 % of its HSL lightness); PowerPoint 2016 draws it in the fill's color.</summary>
+    bool DarkerMarkerOutline => false;
+
+    /// <summary>The width in points of a series line that states none: 2.25 in Excel, 1.5 in PowerPoint (Word 1.5 too, but Word charts are not read here).</summary>
+    double DefaultLineWidth => 1.5;
+
     /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
     IEnumerable<Cell?> Cells(string formula);
 }
@@ -159,6 +168,7 @@ internal static class DmlCharts
         bool filled = kind == ChartKind.Radar && radarStyle == "filled";
         var groupLabels = Child(group, "dLbls");
         var series = new List<ChartSeries>();
+        int cycles = Math.Max(1, (Math.Max(sers.Count, sers.Select(e => (int)Math.Clamp(Number(Child(e, "idx"), "val", -1), -1, 1_000_000) + 1).DefaultIfEmpty(0).Max()) + 5) / 6);
         for (int i = 0; i < sers.Count; i++)
         {
             var ser = sers[i];
@@ -181,6 +191,12 @@ internal static class DmlCharts
             Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
 
             var (ownVisible, ownSymbol, ownSize, ownStyle) = ReadMarker(Child(ser, "marker"));
+            // The automatic marker: symbol and theme color follow the series' c:idx (which is not always its position), the size the line's width.
+            double idxValue = Number(Child(ser, "idx"), "val", -1);
+            int seriesIndex = idxValue >= 0 && idxValue < 1_000_000 ? (int)idxValue : firstIndex + i;
+            double lineWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : context.DefaultLineWidth;
+            var autoColor = AutomaticMarkerColor(theme, seriesIndex, cycles);
+            var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, lineWidth >= 2.25 ? 7 : 5);
             bool marker = true;
             if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
                 marker = ownVisible
@@ -270,7 +286,7 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers, auto));
         }
         return series;
         }
@@ -703,6 +719,21 @@ internal static class DmlCharts
 
     private static XElement? Descendant(XElement? root, params string[] names) =>
         root?.Descendants().FirstOrDefault(e => names.Contains(e.Name.LocalName));
+
+    /// <summary>
+    /// The color Excel and PowerPoint 2016 give an automatic marker: the theme's accent for the series' <c>c:idx</c>, varied by cycle of six
+    /// when the chart has more than six series. Measured (Excel and PowerPoint 2016, line charts): with 3 cycles (14 series) the cycles are
+    /// shaded 35 %, plain and tinted 35 %; with 2 (10 series) shaded and tinted by 23-24 % (<c>shade</c>/<c>tint</c>, in linear RGB); with 1 plain
+    /// (4 series). Four or more cycles are NOT measured: the amount is extrapolated as 70 % x cycles / 6 (35 % at 3, 23.3 % at 2), spread evenly from shade to tint.
+    /// </summary>
+    internal static Color AutomaticMarkerColor(DmlTheme theme, int index, int cycles)
+    {
+        var accent = theme[4 + index % 6] ?? new Color(0x44, 0x72, 0xC4);
+        if (cycles < 2) return accent;
+        int cycle = index / 6 % cycles;
+        double amount = Math.Min(0.7, 0.7 * cycles / 6) * (2.0 * cycle / (cycles - 1) - 1);
+        return amount < -1e-9 ? Shade(accent, 1 + amount) : amount > 1e-9 ? Tint(accent, 1 - amount) : accent;
+    }
 
     /// <summary>The default color of the i-th series: the theme's accents, then darker and lighter variants of them.</summary>
     internal static Color PaletteColor(DmlTheme theme, int index)
