@@ -73,6 +73,7 @@ public sealed partial class SheetLayoutEngine
             double entryHeight = legendFont.FontSize * 1.25 + 3, swatch = legendFont.FontSize * 0.8;
             var widths = legendEntries.Select(e => MeasureChartText(e.Name, legendFont)).ToList();
             bool vertical = chart.Legend is LegendPosition.Right or LegendPosition.Left;
+            double stackedPitch = legendFont.FontSize * 1.81; // the rows of an automatic legend: 18.1 pt at the 10 pt measured in PowerPoint and Excel 2016; the scaling with the font is inferred
             if (chart.LegendBox is { } legendBox)
             {
                 // A manual legend sits where the layout puts it and runs along its position's direction. Unless it overlays the plot,
@@ -121,21 +122,38 @@ public sealed partial class SheetLayoutEngine
             {
                 double boxWidth = widths.Max() + swatch + 12;
                 double lx = chart.Legend == LegendPosition.Right ? right - boxWidth : left;
-                double ly = (top + bottom) / 2 - legendEntries.Count * entryHeight / 2;
-                for (int i = 0; i < legendEntries.Count; i++)
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * entryHeight, swatch, entryHeight, legendFont, items);
+                // A column that does not fit starts at the top and drops the last entries, as PowerPoint and Excel 2016 did with 36 series.
+                int shown = Math.Clamp((int)Math.Floor((bottom - top + 0.5) / stackedPitch), 1, legendEntries.Count);
+                double ly = shown < legendEntries.Count ? top : (top + bottom) / 2 - shown * stackedPitch / 2;
+                for (int i = 0; i < shown; i++)
+                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly + i * stackedPitch, swatch, stackedPitch, legendFont, items);
                 if (chart.Legend == LegendPosition.Right) right -= boxWidth + 6; else left += boxWidth + 6;
             }
             else
             {
-                double total = widths.Sum() + legendEntries.Count * (swatch + 14);
-                double lx = (left + right) / 2 - total / 2, ly = chart.Legend == LegendPosition.Top ? top : bottom - entryHeight;
-                for (int i = 0; i < legendEntries.Count; i++)
+                double total = widths.Sum() + legendEntries.Count * (swatch + 14), available = right - left;
+                int count = legendEntries.Count, columns = count, rows = 1;
+                double columnWidth = widths.Max() + swatch + 14;
+                if (total > available + 0.5 && count > 1)
                 {
-                    DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly, swatch, entryHeight, legendFont, items);
-                    lx += widths[i] + swatch + 14;
+                    // Entries that do not fit one row wrap into rows of equal-width columns. The row count is the fewest that fit, the
+                    // entries then split evenly over the rows (inferred from one Office sample, 14 entries in two rows of 7).
+                    int fit = Math.Max(1, (int)Math.Floor((available + 0.5) / columnWidth));
+                    rows = (count + fit - 1) / fit;
+                    columns = (count + rows - 1) / rows;
                 }
-                if (chart.Legend == LegendPosition.Top) top += entryHeight + 4; else bottom -= entryHeight + 4;
+                double rowHeight = rows > 1 ? stackedPitch : entryHeight, legendHeight = rows * rowHeight, ly0 = chart.Legend == LegendPosition.Top ? top : bottom - legendHeight;
+                for (int row = 0; row < rows; row++)
+                {
+                    int first = row * columns, last = Math.Min(count, first + columns);
+                    double lx = rows == 1 ? (left + right) / 2 - total / 2 : (left + right) / 2 - columns * columnWidth / 2;
+                    for (int i = first; i < last; i++)
+                    {
+                        DrawLegendEntry(chart, legendEntries[i].Name, legendEntries[i].Color, legendEntries[i].Series, legendEntries[i].Kind, lx, ly0 + row * rowHeight, swatch, rowHeight, legendFont, items);
+                        lx += rows == 1 ? widths[i] + swatch + 14 : columnWidth;
+                    }
+                }
+                if (chart.Legend == LegendPosition.Top) top += legendHeight + 4; else bottom -= legendHeight + 4;
             }
         }
         // A manual plot-area layout replaces the automatic one; an inner layout fixes the plot itself (below the axis labels).
@@ -263,7 +281,7 @@ public sealed partial class SheetLayoutEngine
             bool joined = series?.Line ?? true;
             if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, series?.StrokeWidth ?? 2.25, series?.StrokeColor ?? color));
             if (series is null || series.Marker || !joined && !series.MarkerNone)
-                DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
+                DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 6, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
         }
         else if (kind == ChartKind.Bubble)

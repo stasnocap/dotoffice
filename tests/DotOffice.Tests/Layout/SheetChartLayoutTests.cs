@@ -158,7 +158,17 @@ public class SheetChartLayoutTests
     {
         var chart = Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Square }) with { Legend = LegendPosition.Right };
         var page = Page(chart);
-        Assert.Equal(4, Filled(page, Red).Count(b => b.Width == 5 && b.Height == 5)); // three points and the legend entry
+        Assert.Equal(3, Filled(page, Red).Count(b => b.Width == 5 && b.Height == 5)); // the three points
+        Assert.Single(Filled(page, Red), b => b.Width == 6 && b.Height == 6); // the legend marker is 6 across whatever the plot's size
+    }
+
+    [Fact]
+    public void A_legend_marker_is_six_across_whatever_the_plot_marker_size()
+    {
+        var series = Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = 12, MarkerSymbol = ChartMarkerSymbol.Square };
+        var page = Page(Chart(ChartKind.Line, series) with { Legend = LegendPosition.Right });
+        Assert.Equal(3, Filled(page, Red).Count(b => b.Width == 12));
+        Assert.Single(Filled(page, Red), b => b.Width == 6 && b.Height == 6);
     }
 
     private static LayoutPage Styled(ChartMarkerStyle style, ChartMarkerSymbol symbol = ChartMarkerSymbol.Circle, ChartKind kind = ChartKind.Line) =>
@@ -890,6 +900,44 @@ public class SheetChartLayoutTests
         // A horizontal legend wraps along rows instead.
         var wide = Page(chart with { Legend = LegendPosition.Bottom, LegendBox = new ChartBox(0.1, 0.5, 0.35, 0.5, false) });
         Assert.True(Entry(wide, "Three").Baseline > Entry(wide, "One").Baseline);
+    }
+
+    [Fact]
+    public void A_right_legend_that_does_not_fit_starts_at_the_top_and_drops_the_last_entries()
+    {
+        var entries = Enumerable.Range(0, 60).Select(i => Series(Red, 5, 10, 20) with { Name = "idx" + i }).ToArray();
+        var texts = Page(Chart(ChartKind.Line, entries) with { Legend = LegendPosition.Right, Border = null, Background = null }).Items.OfType<TextItem>().ToList();
+        var shown = texts.Where(t => t.Text.StartsWith("idx")).ToList();
+        Assert.Equal("idx0", shown[0].Text);
+        Assert.InRange(shown.Count, 1, 59);
+        Assert.Equal(Enumerable.Range(0, shown.Count).Select(i => "idx" + i), shown.Select(t => t.Text));
+    }
+
+    [Fact]
+    public void An_automatic_bottom_legend_that_does_not_fit_one_row_wraps_into_rows_inside_the_chart()
+    {
+        var entries = Enumerable.Range(0, 14).Select(i => Series(Red, 5, 10, 20) with { Name = "idx" + i }).ToArray();
+        var chart = Chart(ChartKind.Line, entries) with { Legend = LegendPosition.Bottom, Border = null, Background = null, Width = 410 };
+        var page = Page(chart);
+        TextItem Entry(string name) => page.Items.OfType<TextItem>().Single(t => t.Text == name);
+        // Two rows of seven, every entry inside the chart's width.
+        Assert.Equal(Entry("idx0").Baseline, Entry("idx6").Baseline, 3);
+        Assert.Equal(Entry("idx7").Baseline, Entry("idx13").Baseline, 3);
+        Assert.True(Entry("idx7").Baseline > Entry("idx0").Baseline);
+        Assert.Equal(Entry("idx0").X, Entry("idx7").X, 3);
+        Assert.All(page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith("idx")), t => Assert.InRange(t.X, OriginX, OriginX + 410));
+        Assert.True(Entry("idx13").X + 25 <= OriginX + 410);
+        // The plot gave way by the second row: its category labels sit higher than with a one-row legend.
+        var one = Page(Chart(ChartKind.Line, entries[0], entries[1]) with { Legend = LegendPosition.Bottom, Border = null, Background = null });
+        Assert.True(one.Items.OfType<TextItem>().Single(t => t.Text == "a").Baseline - page.Items.OfType<TextItem>().Single(t => t.Text == "a").Baseline > 10);
+    }
+
+    [Fact]
+    public void A_legend_that_fits_one_row_stays_in_one_row()
+    {
+        var chart = Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Name = "One" }, Series(Blue, 5, 10, 20) with { Name = "Two" }) with { Legend = LegendPosition.Top };
+        var page = Page(chart);
+        Assert.Equal(page.Items.OfType<TextItem>().Single(t => t.Text == "One").Baseline, page.Items.OfType<TextItem>().Single(t => t.Text == "Two").Baseline, 3);
     }
 
     [Fact]
