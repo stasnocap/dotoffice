@@ -71,6 +71,13 @@ internal sealed class Atom
 
     public bool RightToLeft => (Level & 1) == 1;
 
+    /// <summary>
+    /// 0, or the number of the stretch of w:rtl runs the atom belongs to. Each stretch is a right-to-left isolate:
+    /// the line's visual order is computed with a paragraph-level separator at each of its ends, so a neighbouring
+    /// atom at an odd level is never reversed together with the stretch.
+    /// </summary>
+    public int Isolate { get; init; }
+
     /// <summary>Shaped glyphs in logical order, or null when the text maps to glyphs one to one.</summary>
     public ShapedGlyph[]? Glyphs { get; init; }
 }
@@ -152,11 +159,15 @@ internal sealed class Itemizer(FontSelector fonts)
         byte paragraphLevel = paragraph.Properties.RightToLeft ? (byte)1 : (byte)0;
         var levels = BidiLevels(segments, text, paragraphLevel);
         byte Level(int index) => levels is null ? (byte)0 : index < levels.Length ? levels[index] : paragraphLevel;
+        var isolates = IsolateIds(segments);
+        int isolate = 0;
 
         var atoms = new List<Atom>();
         int offset = 0;
-        foreach (var s in segments)
+        for (int si = 0; si < segments.Count; si++)
         {
+            var s = segments[si];
+            isolate = isolates[si];
             var before = offset < breaks.Length ? breaks[offset] : LineBreakOpportunity.None;
             switch (s.Kind)
             {
@@ -164,7 +175,7 @@ internal sealed class Itemizer(FontSelector fonts)
                     atoms.Add(new Atom
                     {
                         Kind = AtomKind.Tab, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before,
-                        Link = s.Inline?.Link, Level = Level(offset),
+                        Link = s.Inline?.Link, Level = Level(offset), Isolate = isolate,
                     });
                     break;
                 case AtomKind.Image:
@@ -173,7 +184,7 @@ internal sealed class Itemizer(FontSelector fonts)
                     atoms.Add(new Atom
                     {
                         Kind = AtomKind.Image, Props = s.Props, Image = image, Shape = shape, Width = image?.Width ?? shape!.Width,
-                        BreakBefore = before, Link = s.Inline!.Link, Level = Level(offset),
+                        BreakBefore = before, Link = s.Inline!.Link, Level = Level(offset), Isolate = isolate,
                     });
                     break;
                 case AtomKind.Marker:
@@ -181,7 +192,7 @@ internal sealed class Itemizer(FontSelector fonts)
                     atoms.Add(new Atom
                     {
                         Kind = AtomKind.Marker, Props = s.Props, BreakBefore = LineBreakOpportunity.None,
-                        Bookmark = (s.Inline as BookmarkStart)?.Name, Note = (s.Inline as NoteReference)?.Note, Level = Level(offset),
+                        Bookmark = (s.Inline as BookmarkStart)?.Name, Note = (s.Inline as NoteReference)?.Note, Level = Level(offset), Isolate = isolate,
                     });
                     break;
                 case AtomKind.LineBreak:
@@ -189,11 +200,11 @@ internal sealed class Itemizer(FontSelector fonts)
                     atoms.Add(new Atom
                     {
                         Kind = s.Kind, Props = s.Props, Font = fonts.ForCharacter(s.Props, ' '), Size = s.Props.FontSize, BreakBefore = before,
-                        IsColumnBreak = s.Inline is Break { Kind: BreakKind.Column }, Level = paragraphLevel,
+                        IsColumnBreak = s.Inline is Break { Kind: BreakKind.Column }, Level = paragraphLevel, Isolate = isolate,
                     });
                     break;
                 default:
-                    AddTextAtoms(atoms, s, offset, breaks, Level);
+                    AddTextAtoms(atoms, s, offset, breaks, Level, isolate);
                     break;
             }
             offset += s.Text.Length;
@@ -225,7 +236,7 @@ internal sealed class Itemizer(FontSelector fonts)
     /// <summary>
     /// Bidi embedding levels per UTF-16 index of the paragraph text, or null when everything is at level 0
     /// (a left-to-right paragraph without right-to-left text). Breaks count as whitespace, not paragraph
-    /// separators; each stretch of runs marked right-to-left (w:rtl) is a right-to-left embedding, as Word orders it.
+    /// separators; each stretch of runs marked right-to-left (w:rtl) is a right-to-left isolate, as Word orders it.
     /// </summary>
     private static byte[]? BidiLevels(List<Segment> segments, string text, byte paragraphLevel)
     {
@@ -236,8 +247,9 @@ internal sealed class Itemizer(FontSelector fonts)
                     or BidiClass.RLI or BidiClass.FSI) { any = true; break; }
         if (!any) return null;
 
-        // A run marked right-to-left (w:rtl) is an embedding of its own: its letters, digits and neutrals are
-        // ordered as in a right-to-left paragraph, while the paragraph keeps its own direction and alignment.
+        // A stretch of runs marked right-to-left (w:rtl) is an isolate of its own (RLI ... PDI): its letters, digits
+        // and neutrals are ordered as in a right-to-left paragraph, while the paragraph keeps its own direction and
+        // alignment, and the text around it is not reordered together with it (see Atom.Isolate).
         // Inside such a run whitespace is a plain neutral, so trailing spaces are not reset to the paragraph level (L1).
         var classes = new List<BidiClass>(text.Length + 8);
         var codePoints = new List<int>(text.Length + 8);
@@ -249,7 +261,7 @@ internal sealed class Itemizer(FontSelector fonts)
             bool rtl = s.Props.RightToLeft && s.Text.Length > 0;
             if (rtl != embedded && s.Text.Length > 0)
             {
-                classes.Add(rtl ? BidiClass.RLE : BidiClass.PDF);
+                classes.Add(rtl ? BidiClass.RLI : BidiClass.PDI);
                 codePoints.Add(0);
                 source.Add(-1);
                 embedded = rtl;
@@ -276,7 +288,25 @@ internal sealed class Itemizer(FontSelector fonts)
         return levels;
     }
 
-    private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level)
+    /// <summary>The number of the stretch of w:rtl runs each segment belongs to, or 0 outside such a stretch.</summary>
+    private static int[] IsolateIds(List<Segment> segments)
+    {
+        var ids = new int[segments.Count];
+        int current = 0, count = 0;
+        for (int i = 0; i < segments.Count; i++)
+        {
+            var s = segments[i];
+            if (s.Text.Length > 0)
+            {
+                if (!s.Props.RightToLeft) current = 0;
+                else if (current == 0) current = ++count;
+            }
+            ids[i] = current;
+        }
+        return ids;
+    }
+
+    private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level, int isolate)
     {
         var props = s.Props;
         var field = s.Inline as FieldRun;
@@ -336,6 +366,7 @@ internal sealed class Itemizer(FontSelector fonts)
                 Link = s.Inline?.Link,
                 Note = (s.Inline as NoteReference)?.Note,
                 Level = atomLevel,
+                Isolate = isolate,
                 Glyphs = glyphs,
                 Width = width,
                 BreakBefore = offset + start < breaks.Length ? breaks[offset + start] : LineBreakOpportunity.None,
@@ -731,7 +762,7 @@ internal static class LineBuilder
         return new Atom
         {
             Kind = a.Kind, Text = text, Props = a.Props, Font = a.Font, Size = a.Size, Rise = a.Rise, Field = a.Field, Link = a.Link, Note = a.Note,
-            Level = a.Level, Glyphs = glyphs, Width = width + trailing, TrailingSpace = trailing, BreakBefore = breakBefore,
+            Level = a.Level, Isolate = a.Isolate, Glyphs = glyphs, Width = width + trailing, TrailingSpace = trailing, BreakBefore = breakBefore,
         };
     }
 
@@ -808,9 +839,18 @@ internal static class LineBuilder
         if (visible == 0) return;
         double start = atoms[0].X, end = atoms[visible - 1].X + atoms[visible - 1].Advance;
         double x = frame.RightToLeft ? frame.Width - end : start;
-        var levels = new byte[visible];
-        for (int k = 0; k < visible; k++) levels[k] = atoms[k].Level;
-        var visual = BidiAlgorithm.VisualOrder(levels).Select(k => atoms[k]).ToList();
+        // The ends of a stretch of w:rtl runs are isolate controls at the paragraph's level, which keep the
+        // stretch apart from the atoms next to it; they have no atom of their own (index -1).
+        byte baseLevel = frame.RightToLeft ? (byte)1 : (byte)0;
+        var levels = new List<byte>(visible + 4);
+        var index = new List<int>(visible + 4);
+        for (int k = 0; k < visible; k++)
+        {
+            if (k > 0 && atoms[k].Isolate != atoms[k - 1].Isolate) { levels.Add(baseLevel); index.Add(-1); }
+            levels.Add(atoms[k].Level);
+            index.Add(k);
+        }
+        var visual = BidiAlgorithm.VisualOrder(levels.ToArray()).Where(k => index[k] >= 0).Select(k => atoms[index[k]]).ToList();
         for (int k = 0; k < visible; k++)
         {
             atoms[k] = visual[k];
