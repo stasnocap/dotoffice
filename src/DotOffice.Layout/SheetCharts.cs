@@ -261,7 +261,7 @@ public sealed partial class SheetLayoutEngine
         if (lineStyle)
         {
             bool joined = series?.Line ?? true;
-            if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, 2.25, color));
+            if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, series?.StrokeWidth ?? 2.25, series?.StrokeColor ?? color));
             if (series is null || series.Marker || !joined)
                 DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
@@ -608,7 +608,7 @@ public sealed partial class SheetLayoutEngine
                             });
                         }
                     }
-                    if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
+                    if (s.Line) DrawPolyline(points, s.Smooth, s.StrokeWidth, s.StrokeColor, items);
                     if (s.Marker || s.PointMarkers is not null)
                         for (int i = 0; i < points.Length; i++)
                             if (points[i] is { } q)

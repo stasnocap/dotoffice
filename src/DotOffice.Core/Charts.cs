@@ -31,7 +31,8 @@ public enum ChartMarkerSymbol { Auto, Circle, Dash, Diamond, Dot, Plus, Square, 
 /// </summary>
 /// <remarks>
 /// <paramref name="XValues"/> are the x coordinates of scatter and bubble points (null: 1, 2, 3…), <paramref name="Sizes"/> the bubble
-/// sizes, and <paramref name="Line"/> whether the points of a line, scatter or radar series are joined.
+/// sizes, and <paramref name="Line"/> whether the points of a line, scatter or radar series are joined. <paramref name="LineColor"/> is the
+/// color of a line chart's line when the series states none (the automatic marker outline), <paramref name="LineWidth"/> the stated or, for line charts, the default width of a line-like series' line (null: 2.25).
 /// </remarks>
 public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Color Color, bool Marker = false,
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
@@ -39,8 +40,15 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
     double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null,
-    IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null, ChartAutoMarker? Auto = null)
+    IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null, ChartAutoMarker? Auto = null,
+    Color? LineColor = null, double? LineWidth = null)
 {
+    /// <summary>The color the line of a line-like series is drawn in: <see cref="LineColor"/> where the reader chose one apart from <see cref="Color"/> (see its remarks), else <see cref="Color"/>.</summary>
+    public Color StrokeColor => LineColor ?? Color;
+
+    /// <summary>The width in points the line of a line-like series is drawn in: <see cref="LineWidth"/>, else 2.25.</summary>
+    public double StrokeWidth => LineWidth ?? 2.25;
+
     /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
     public const double DefaultMarkerSize = 5;
 

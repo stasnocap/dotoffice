@@ -588,4 +588,47 @@ public class XlsxChartTests
         var noPlace = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", "<c:dLbls><c:dLblPos val=\"bestFit\"/><c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/></c:dLbls>")))).Sheet.Charts.Single().Series[0];
         Assert.Equal([ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit, ChartLabelPlacement.BestFit], noPlace.LabelPlacements);
     }
+
+    private static List<ChartSeries> LineChartSeries(int count, string extra = "") =>
+        Read(Space("<c:lineChart><c:grouping val=\"standard\"/>" + string.Concat(Enumerable.Range(0, count).Select(i => Ser(i, null, null, "S!$B$2:$B$4", extra))) + "</c:lineChart>")).Sheet.Charts.Single().Series.ToList();
+
+    [Fact]
+    public void A_line_chart_line_without_a_color_is_the_automatic_marker_outline_of_14_series_and_2_25_pt_wide()
+    {
+        // Measured in an Excel 2016 PDF with 14 series: fill 4F81BD / line 4A7EBB, C0504D / BE4B48, 40699C / 3C679A (Excel 2007 theme).
+        var series = LineChartSeries(14);
+        Assert.All(series, s => Assert.Equal(s.AutomaticMarker.Outline, s.StrokeColor));
+        Assert.All(series, s => Assert.Equal(2.25, s.StrokeWidth));
+        Assert.NotEqual(series[6].Color, series[6].StrokeColor); // Color (labels, trendlines) is not shifted
+        Assert.Equal(series[0].Color, LineChartSeries(1)[0].Color);
+    }
+
+    [Fact]
+    public void A_stated_line_color_wins_over_the_automatic_outline_and_a_stated_width_over_the_default()
+    {
+        var series = LineChartSeries(1, "<c:spPr><a:ln w=\"38100\"><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></a:ln></c:spPr>").Single();
+        Assert.Equal((new Color(0x12, 0x34, 0x56), 3.0), (series.StrokeColor, series.StrokeWidth));
+        var filled = LineChartSeries(1, "<c:spPr><a:solidFill><a:srgbClr val=\"654321\"/></a:solidFill></c:spPr>").Single();
+        Assert.Equal(new Color(0x65, 0x43, 0x21), filled.StrokeColor);
+    }
+
+    [Fact]
+    public void A_markers_only_line_series_keeps_the_color_of_its_marker_fill()
+    {
+        var marker = "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val=\"circle\"/><c:spPr><a:solidFill><a:srgbClr val=\"00AA00\"/></a:solidFill></c:spPr></c:marker>";
+        var series = LineChartSeries(1, marker).Single();
+        Assert.False(series.Line);
+        Assert.Equal((new Color(0, 0xAA, 0), new Color(0, 0xAA, 0)), (series.Color, series.StrokeColor));
+    }
+
+    [Fact]
+    public void Scatter_and_radar_lines_keep_the_series_color_and_2_25_pt_unless_a_width_is_stated()
+    {
+        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + XySer("<c:spPr><a:ln w=\"38100\"/></c:spPr>", "S!$B$2:$B$4", "S!$B$2:$B$4") + "</c:scatterChart>";
+        var xy = Read(Space(scatter)).Sheet.Charts.Single().Series;
+        Assert.Equal((xy[0].Color, 2.25, xy[1].Color, 3.0), (xy[0].StrokeColor, xy[0].StrokeWidth, xy[1].StrokeColor, xy[1].StrokeWidth));
+        var radar = "<c:radarChart><c:radarStyle val=\"marker\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4", "<c:spPr><a:ln w=\"12700\"/></c:spPr>") + "</c:radarChart>";
+        var rd = Read(Space(radar)).Sheet.Charts.Single().Series;
+        Assert.Equal((rd[0].Color, 2.25, rd[1].Color, 1.0), (rd[0].StrokeColor, rd[0].StrokeWidth, rd[1].StrokeColor, rd[1].StrokeWidth));
+    }
 }

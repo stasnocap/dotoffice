@@ -194,7 +194,8 @@ internal static class DmlCharts
             // The automatic marker: symbol and theme color follow the series' c:idx (which is not always its position), the size the line's width.
             double idxValue = Number(Child(ser, "idx"), "val", -1);
             int seriesIndex = idxValue >= 0 && idxValue < 1_000_000 ? (int)idxValue : firstIndex + i;
-            double lineWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : context.DefaultLineWidth;
+            double? statedWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : null;
+            double lineWidth = statedWidth ?? context.DefaultLineWidth;
             var autoColor = AutomaticMarkerColor(theme, seriesIndex, cycles);
             var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, lineWidth >= 2.25 ? 7 : 5);
             bool marker = true;
@@ -286,7 +287,11 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers, auto));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers, auto,
+                // Line charts only (measured): a line with no color of its own takes the automatic outline and one with no width the application's default.
+                // Scatter and radar keep the series color and 2.25 pt unless a width is stated; Color itself is unchanged for labels, trendlines and the like.
+                kind == ChartKind.Line && line && SolidFill(lineProperties, theme) is null && SolidFill(spPr, theme) is null ? auto.Outline : null,
+                lineLike ? (kind == ChartKind.Line ? lineWidth : statedWidth) : null));
         }
         return series;
         }

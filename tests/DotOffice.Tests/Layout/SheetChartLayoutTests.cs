@@ -1074,4 +1074,29 @@ public class SheetChartLayoutTests
         // category 0 is at the top and 2 at the lower left, so category 1 (lower right) is right of both
         Assert.All(circles, c => Assert.True(rect.X + 4.5 > CenterX(c)));
     }
+
+    [Fact]
+    public void Line_scatter_and_radar_lines_are_drawn_in_the_stated_width_and_2_25_otherwise()
+    {
+        foreach (var kind in new[] { ChartKind.Line, ChartKind.Scatter, ChartKind.Radar })
+        {
+            ChartSeries Own(double? width) => Series(Red, 5, 10, 20) with { LineWidth = width, XValues = new double?[] { 1, 2, 3 } };
+            SheetChart Make(ChartSeries s) => Chart(kind, s) with { XMin = 0, XMax = 4 };
+            var plain = Page(Make(Own(null)));
+            Assert.Contains(plain.Items, i => i is LineItem l && l.Color == Red && l.Width == 2.25);
+            var wide = Page(Make(Own(4)));
+            Assert.Contains(wide.Items, i => i is LineItem l && l.Color == Red && l.Width == 4);
+            Assert.DoesNotContain(wide.Items, i => i is LineItem l && l.Color == Red && l.Width == 2.25);
+        }
+    }
+
+    [Fact]
+    public void A_line_and_its_legend_key_are_drawn_in_the_line_color_and_width()
+    {
+        var chart = Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { LineColor = Blue, LineWidth = 1.5 }) with { Legend = LegendPosition.Bottom };
+        var lines = Page(chart).Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        Assert.All(lines, l => Assert.Equal(1.5, l.Width));
+        Assert.Contains(lines, l => l.Y1 == l.Y2); // legend key
+        Assert.DoesNotContain(Page(chart).Items, i => i is LineItem l && l.Color == Red && l.Width >= 1.5);
+    }
 }

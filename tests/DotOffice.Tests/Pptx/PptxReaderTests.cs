@@ -583,4 +583,29 @@ public class PptxReaderTests
         Assert.Empty(presentation.Slides[0].Objects);
         Assert.Equal("pptx.chart-missing", Assert.Single(warnings.Warnings).Code);
     }
+
+    private static List<ChartSeries> ManyLineSeries(int count, string extra = "")
+    {
+        var one = LineChartXml.Substring(LineChartXml.IndexOf("<c:ser>"), LineChartXml.IndexOf("</c:ser>") + 8 - LineChartXml.IndexOf("<c:ser>"));
+        var many = string.Concat(Enumerable.Range(0, count).Select(i => one.Replace("<c:idx val=\"0\"/><c:order val=\"0\"/>MARKER", $"<c:idx val=\"{i}\"/><c:order val=\"{i}\"/>{extra}")));
+        var xml = LineChartXml.Replace(one, many);
+        return Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(xml).AddSlide(ChartFrame())).Objects)).Series.ToList();
+    }
+
+    [Fact]
+    public void A_line_chart_line_without_a_color_is_the_automatic_marker_fill_of_14_series_and_1_5_pt_wide_in_powerpoint()
+    {
+        // Measured in a PowerPoint 2016 PDF with 14 series: the line equals the marker fill.
+        var series = ManyLineSeries(14);
+        Assert.Equal(14, series.Count);
+        Assert.All(series, s => Assert.Equal((s.AutomaticMarker.Color, 1.5), (s.StrokeColor, s.StrokeWidth)));
+        Assert.NotEqual(series[0].Color, series[0].StrokeColor);
+    }
+
+    [Fact]
+    public void A_stated_line_color_and_width_win_in_powerpoint()
+    {
+        var series = ManyLineSeries(1, "<c:spPr><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></a:ln></c:spPr>").Single();
+        Assert.Equal((new Color(0x12, 0x34, 0x56), 2.25), (series.StrokeColor, series.StrokeWidth));
+    }
 }
