@@ -138,10 +138,10 @@ public sealed partial class SheetLayoutEngine
                 }
                 if (overlays.Count > 0) { items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight))); items.AddRange(overlays); items.Add(new PopItem()); }
                 if (s.Line) DrawPolyline(points, s.Smooth, s.StrokeWidth, s.StrokeColor, items);
-                if (s.Marker || !s.Line || s.PointMarkers is not null)
+                if (s.Marker || (!s.Line && !s.MarkerNone) || s.PointMarkers is not null)
                     for (int i = 0; i < points.Length; i++)
                         if (points[i] is { } q)
-                            DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker || !s.Line);
+                            DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker || (!s.Line && !s.MarkerNone));
             }
         }
         if (chart.Kind == ChartKind.Bubble)

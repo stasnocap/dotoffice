@@ -142,7 +142,7 @@ public sealed partial class SheetLayoutEngine
                     rows = (count + fit - 1) / fit;
                     columns = (count + rows - 1) / rows;
                 }
-                double rowHeight = rows > 1 ? stackedPitch : entryHeight, legendHeight = rows * rowHeight, ly0 = chart.Legend == LegendPosition.Top ? top : bottom - legendHeight;
+                double rowHeight = rows > 1 ? stackedPitch : entryHeight, legendHeight = rows * rowHeight, ly0 = chart.Legend == LegendPosition.Top ? top : bottom - legendHeight + (rows > 1 ? legendFont.FontSize * 0.4 : 0); // wrapped rows sit 4 pt lower at 10 pt, as measured; the scaling is inferred
                 for (int row = 0; row < rows; row++)
                 {
                     int first = row * columns, last = Math.Min(count, first + columns);

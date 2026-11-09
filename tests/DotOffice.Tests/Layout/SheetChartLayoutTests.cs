@@ -914,6 +914,15 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_scatter_series_with_no_line_and_symbol_none_draws_no_markers()
+    {
+        var none = Series(Red, 5, 10, 20) with { Line = false, MarkerNone = true, XValues = new double?[] { 1, 2, 3 } };
+        Assert.DoesNotContain(Page(Chart(ChartKind.Scatter, none) with { XMin = 0, XMax = 4, Legend = LegendPosition.None }).Items, i => i is PathItem or PolygonItem or EllipseItem);
+        var markers = none with { MarkerNone = false };
+        Assert.Contains(Page(Chart(ChartKind.Scatter, markers) with { XMin = 0, XMax = 4, Legend = LegendPosition.None }).Items, i => i is PathItem or PolygonItem or EllipseItem);
+    }
+
+    [Fact]
     public void An_automatic_bottom_legend_that_does_not_fit_one_row_wraps_into_rows_inside_the_chart()
     {
         var entries = Enumerable.Range(0, 14).Select(i => Series(Red, 5, 10, 20) with { Name = "idx" + i }).ToArray();
