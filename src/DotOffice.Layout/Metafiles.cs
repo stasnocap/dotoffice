@@ -738,12 +738,12 @@ internal sealed class GdiPlayer(FontSelector fonts)
         Add(new GradientItem(left, top, width, height, degree, [new GradientStop(0, a.Color), new GradientStop(1, b.Color)]));
     }
 
-    /// <summary>A GradientFill triangle: its color blends between the corners' colors (Gouraud shading).</summary>
-    public void GradientTriangle((double X, double Y, Color Color) a, (double X, double Y, Color Color) b, (double X, double Y, Color Color) c)
+    /// <summary>The triangles of one GradientFill record (corners in threes): each blends between its corners' colors (Gouraud shading), all as one item.</summary>
+    public void GradientTriangles(IReadOnlyList<(double X, double Y, Color Color)> corners)
     {
+        if (corners.Count < 3) return;
         var m = Transform;
-        var corners = new[] { a, b, c }.Select(v => { var (x, y) = m.Apply(v.X, v.Y); return (x, y, v.Color); }).ToList();
-        Add(new ShadedTriangleItem(corners));
+        Add(new ShadedTriangleItem(corners.Select(v => { var (x, y) = m.Apply(v.X, v.Y); return (x, y, v.Color); }).ToList()));
     }
 
     public void FillRegion(IEnumerable<(double L, double T, double R, double B)> rects, int brushHandle)
@@ -1080,13 +1080,15 @@ internal static class EmfReader
                     vertices.Add((I32(r, v), I32(r, v + 4), new Color(r[v + 9], r[v + 11], r[v + 13])));
                 }
                 int size = mode == 2 ? 12 : 8;
+                var triangles = new List<(double X, double Y, Color Color)>();
                 for (int k = 0; k < shapes && at + size * (k + 1) <= r.Length; k++)
                 {
                     int a = I32(r, at + size * k), b = I32(r, at + size * k + 4), c = mode == 2 ? I32(r, at + size * k + 8) : 0;
                     if ((uint)a >= count || (uint)b >= count || (uint)c >= count) continue;
-                    if (mode == 2) gdi.GradientTriangle(vertices[a], vertices[b], vertices[c]);
+                    if (mode == 2) { triangles.Add(vertices[a]); triangles.Add(vertices[b]); triangles.Add(vertices[c]); }
                     else gdi.GradientRect(vertices[a], vertices[b], mode == 1);
                 }
+                gdi.GradientTriangles(triangles);
                 break;
             }
             case 40: gdi.Delete(I32(r, 8)); break;

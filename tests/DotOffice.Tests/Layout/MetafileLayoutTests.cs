@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using DotOffice.Converter;
 using DotOffice.Core;
 using DotOffice.Fonts;
 using DotOffice.Layout;
@@ -436,14 +437,53 @@ public class MetafileLayoutTests
     }
 
     [Fact]
-    public void An_emf_gradient_fill_mesh_makes_one_shaded_triangle_per_index_triple()
+    public void An_emf_gradient_fill_mesh_makes_one_shading_of_all_its_index_triples()
     {
         var items = Lay(Emf(Record(118, [0, 0, 0, 0, 4, 2, 2,
             .. Vertex(0, 0, 255, 0, 0), .. Vertex(100, 0, 0, 255, 0), .. Vertex(0, 100, 0, 0, 255), .. Vertex(100, 100, 255, 255, 0),
             0, 1, 2, 1, 3, 2])));
-        var triangles = items.OfType<ShadedTriangleItem>().ToList();
-        Assert.Equal(2, triangles.Count);
-        Assert.Equal(new Color(255, 255, 0), triangles[1].Corners[1].Color);
+        var mesh = Assert.Single(items.OfType<ShadedTriangleItem>());
+        Assert.Equal(6, mesh.Corners.Count);
+        Assert.Equal(new Color(255, 255, 0), mesh.Corners[4].Color);
+    }
+
+    [Fact]
+    public void An_emf_gradient_fill_mesh_with_one_bad_index_keeps_the_good_triangle()
+    {
+        var items = Lay(Emf(Record(118, [0, 0, 0, 0, 4, 2, 2,
+            .. Vertex(0, 0, 255, 0, 0), .. Vertex(100, 0, 0, 255, 0), .. Vertex(0, 100, 0, 0, 255), .. Vertex(100, 100, 255, 255, 0),
+            0, 1, 4, 1, 3, 2])));
+        var mesh = Assert.Single(items.OfType<ShadedTriangleItem>());
+        Assert.Equal([new Color(0, 255, 0), new Color(255, 255, 0), new Color(0, 0, 255)], mesh.Corners.Select(c => c.Color));
+    }
+
+    [Fact]
+    public void Separate_emf_gradient_fill_records_stay_separate_shadings()
+    {
+        byte[] Triangle() => Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 0, 255, 0, 0), .. Vertex(50, 0, 0, 255, 0), .. Vertex(0, 50, 0, 0, 255), 0, 1, 2]);
+        Assert.Equal(2, Lay(Emf(Triangle(), Triangle())).OfType<ShadedTriangleItem>().Count());
+    }
+
+    [Fact]
+    public async Task An_emf_gradient_fill_mesh_of_many_triangles_is_one_pdf_shading()
+    {
+        const int cells = 200; // a strip of 400 triangles
+        var vertices = new List<int>();
+        var indices = new List<int>();
+        for (int k = 0; k <= cells; k++)
+        {
+            vertices.AddRange(Vertex(k * 4, 0, k % 256, 0, 255 - k % 256));
+            vertices.AddRange(Vertex(k * 4, 100, 0, k % 256, 0));
+        }
+        for (int k = 0; k < cells; k++) indices.AddRange([2 * k, 2 * k + 1, 2 * k + 2, 2 * k + 1, 2 * k + 3, 2 * k + 2]);
+        var emf = Emf(Record(118, [0, 0, 0, 0, vertices.Count / 4, cells * 2, 2, .. vertices, .. indices]));
+        var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/></p:blipFill>" +
+                  "<p:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2540000\" cy=\"1270000\"/></a:xfrm></p:spPr></p:pic>";
+        using var output = new MemoryStream();
+        await DocumentConverter.ConvertAsync(new Pptx.PptxBuilder().AddImage(emf).AddSlide(pic).BuildStream(), output, DocumentFormat.Pptx, DocumentFormat.Pdf,
+            new ConvertOptions { Fonts = new FontCollection().Add(LayoutTestHelpers.Noto), UseSystemFonts = false });
+        var text = Encoding.Latin1.GetString(output.ToArray());
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, "/ShadingType 4"));
     }
 
     [Fact]
