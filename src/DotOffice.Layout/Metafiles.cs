@@ -1321,9 +1321,16 @@ internal static class WmfReader
                     // DIBCreatePatternBrush with a packed DIB after its style and color usage.
                     Allocate(PatternBrush(p[4..]));
                     break;
-                case 0x00F7 or 0x01F9 or 0x0142 or 0x06FF:
-                    // Palettes, other pattern brushes and regions take an object slot; those pattern brushes paint grey.
-                    Allocate(function is 0x01F9 or 0x0142 ? new GdiBrush(new Color(0x80, 0x80, 0x80)) : null);
+                case 0x0142 when p.Length >= 4:
+                    // Style 3 (BS_PATTERN): a Bitmap16 object follows the style and color usage.
+                    Allocate(Bitmap16Brush(p[4..], false));
+                    break;
+                case 0x01F9:
+                    Allocate(Bitmap16Brush(p, true));
+                    break;
+                case 0x00F7 or 0x06FF:
+                    // Palettes and regions take an object slot.
+                    Allocate(null);
                     break;
                 case 0x0521:
                 {
@@ -1390,6 +1397,31 @@ internal static class WmfReader
             pos += (int)(words * 2);
         }
         return null;
+    }
+
+    /// <summary>
+    /// A pattern brush from a Bitmap16 (type, width, height, bytes per row, planes, bits per pixel, then top-down rows padded to 16 bits), turned
+    /// into a bottom-up DIB; META_CREATEPATTERNBRUSH puts 18 reserved bytes between the header and the bits. Gray when the format is not 1, 8, 24 or 32 bits.
+    /// </summary>
+    private static GdiBrush Bitmap16Brush(ReadOnlySpan<byte> d, bool reserved)
+    {
+        var gray = new GdiBrush(new Color(0x80, 0x80, 0x80));
+        if (d.Length < 10) return gray;
+        int w = I16(d, 2), h = I16(d, 4), rowBytes = I16(d, 6), planes = d[8], bpp = d[9];
+        int at = reserved && d.Length >= 28 + rowBytes * h ? 28 : 10;
+        if (w <= 0 || h <= 0 || planes != 1 || bpp is not (1 or 8 or 24 or 32) || rowBytes < (w * bpp + 7) / 8 || at + (long)rowBytes * h > d.Length) return gray;
+        int palette = bpp == 1 ? 2 : bpp == 8 ? 256 : 0, stride = (w * bpp + 31) / 32 * 4;
+        var header = new byte[40 + palette * 4];
+        BinaryPrimitives.WriteInt32LittleEndian(header, 40);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4), w);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8), h);
+        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(12), 1);
+        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(14), (short)bpp);
+        if (bpp == 1) { header[40 + 4] = header[40 + 5] = header[40 + 6] = 255; }
+        else if (bpp == 8) for (int k = 0; k < 256; k++) header[40 + k * 4] = header[41 + k * 4] = header[42 + k * 4] = (byte)k;
+        var bits = new byte[stride * h];
+        for (int y = 0; y < h; y++) d.Slice(at + y * rowBytes, (w * bpp + 7) / 8).CopyTo(bits.AsSpan((h - 1 - y) * stride));
+        return GdiBrush.FromDib(header, bits);
     }
 
     /// <summary>Splits a packed DIB (header, color table, bits) for <see cref="GdiPlayer.Dib"/>.</summary>

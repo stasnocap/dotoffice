@@ -351,6 +351,25 @@ public class MetafileLayoutTests
     }
 
     [Fact]
+    public void A_wmf_bitmap16_pattern_brush_is_tiled_instead_of_gray()
+    {
+        var d = new List<byte>();
+        void U16(int v) { d.Add((byte)v); d.Add((byte)(v >> 8)); }
+        void U32(int v) { U16(v & 0xFFFF); U16(v >> 16 & 0xFFFF); }
+        U32(unchecked((int)0x9AC6CDD7)); U16(0); U16(0); U16(0); U16(1000); U16(750); U16(1440); U32(0); U16(0);
+        U16(1); U16(9); U16(0x300); U32(0); U16(1); U32(0); U16(0);
+        // DIBCreatePatternBrush, style 3: a Bitmap16 of 8 × 8 pixels at 1 bit, rows of 2 bytes.
+        U32(3 + 2 + 5 + 8); U16(0x0142); U16(3); U16(0); U16(0); U16(8); U16(8); U16(2); d.Add(1); d.Add(1);
+        for (int y = 0; y < 8; y++) { d.Add((byte)(y % 2 == 0 ? 0xAA : 0x55)); d.Add(0); }
+        U32(4); U16(0x012D); U16(0);
+        U32(10); U16(0x0324); U16(3); U16(0); U16(0); U16(1000); U16(0); U16(500); U16(750);
+        U32(3); U16(0);
+        var items = Lay([.. d]);
+        Assert.NotEmpty(items.OfType<ImageItem>());
+        Assert.DoesNotContain(items.OfType<PathItem>(), i => i.Fill == new Color(0x80, 0x80, 0x80));
+    }
+
+    [Fact]
     public void An_emf_gradient_fill_rectangle_is_a_gradient_and_a_triangle_its_mean_color()
     {
         static int[] Vertex(int x, int y, int r, int g, int b) => [x, y, r << 8 | g << 24, b << 8];
