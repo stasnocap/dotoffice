@@ -38,7 +38,7 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
-    double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto)
+    double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null)
 {
     /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
     public const double DefaultMarkerSize = 5;
@@ -46,6 +46,14 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     /// <summary>The marker's diameter in points: the series' explicit <c>c:size</c>, else the schema default of 5. How PowerPoint sizes a marker with no <c>c:size</c> is an estimate (the spec's default), not compared with PowerPoint.</summary>
     public double MarkerDiameter => MarkerSize ?? DefaultMarkerSize;
 }
+
+/// <summary>
+/// What <c>c:marker/c:spPr</c> says about a marker. <paramref name="Fill"/> null with <paramref name="NoFill"/> false means the fill is not
+/// stated (the series color); likewise for the outline, whose absence draws none. <paramref name="FillAlpha"/> and <paramref name="LineAlpha"/>
+/// are the opacities (0-1) of the colors' <c>alpha</c> modifiers.
+/// </summary>
+public sealed record ChartMarkerStyle(Color? Fill = null, bool NoFill = false, double FillAlpha = 1,
+    Color? Line = null, bool NoLine = false, double? LineWidth = null, double LineAlpha = 1);
 
 /// <summary>
 /// Where a data label sits relative to its point or bar (<c>dLblPos</c>). <see cref="InsideEnd"/>, <see cref="InsideBase"/> and

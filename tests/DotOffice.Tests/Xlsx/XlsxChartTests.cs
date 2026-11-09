@@ -103,6 +103,16 @@ public class XlsxChartTests
     }
 
     [Fact]
+    public void A_white_marker_fill_does_not_color_a_line_without_its_own_color()
+    {
+        const string marker = "<c:marker><c:symbol val=\"circle\"/><c:spPr><a:solidFill xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:srgbClr val=\"FFFFFF\"/></a:solidFill></c:spPr></c:marker>";
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", marker) + "</c:lineChart>";
+        var series = Read(Space(line)).Sheet.Charts.Single().Series.Single();
+        Assert.NotEqual(Color.White, series.Color);
+        Assert.Equal(Color.White, series.MarkerStyle?.Fill);
+    }
+
+    [Fact]
     public void Reads_line_markers_pie_colors_labels_and_legend()
     {
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"none\"/></c:marker>") + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
@@ -194,6 +204,16 @@ public class XlsxChartTests
     private static string XySer(string extra, string x, string y, string size = "") =>
         $"<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/>{extra}<c:xVal><c:numRef><c:f>{x}</c:f></c:numRef></c:xVal><c:yVal><c:numRef><c:f>{y}</c:f></c:numRef></c:yVal>" +
         $"{(size.Length == 0 ? "" : $"<c:bubbleSize><c:numRef><c:f>{size}</c:f></c:numRef></c:bubbleSize>")}</c:ser>";
+
+    [Fact]
+    public void Reads_the_marker_fill_and_outline_of_a_line_series()
+    {
+        var marker = "<c:marker><c:symbol val=\"circle\"/><c:spPr><a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"00AA00\"/></a:solidFill></a:ln></c:spPr></c:marker>";
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", marker) + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
+        var series = Read(Space(line)).Sheet.Charts.Single().Series;
+        Assert.Equal(new ChartMarkerStyle(Color.White, false, 1, new Color(0, 0xAA, 0), false, 2.25, 1), series[0].MarkerStyle);
+        Assert.Null(series[1].MarkerStyle);
+    }
 
     [Fact]
     public void Reads_a_scatter_chart_with_its_own_x_scale_and_marker_only_series()

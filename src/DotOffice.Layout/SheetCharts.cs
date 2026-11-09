@@ -164,15 +164,17 @@ public sealed partial class SheetLayoutEngine
     private static Color ChartColor(int index) => new[] { new Color(0x44, 0x72, 0xC4), new Color(0xED, 0x7D, 0x31), new Color(0xA5, 0xA5, 0xA5), new Color(0xFF, 0xC0, 0x00), new Color(0x5B, 0x9B, 0xD5), new Color(0x70, 0xAD, 0x47) }[index % 6];
 
     private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartSeries s, bool halo) =>
-        DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo);
+        DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo, s.MarkerStyle);
 
     /// <summary>
     /// Draws one marker centered on (x, y), <paramref name="d"/> points across, over a white halo 1.4 points wider when asked. Automatic
     /// symbols are circles: ISO 29500 says only that the application selects them. Dash and dot sizes are estimates, and open shapes
-    /// (plus, x, star) are stroked 1.5 points wide.
+    /// (plus, x, star) are stroked 1.5 points wide. A <paramref name="style"/> (from <c>c:marker/c:spPr</c>) replaces that: the halo is
+    /// left out, as it would distort a styled outline, and the shape is filled and then outlined as the style says.
     /// </summary>
-    private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartMarkerSymbol symbol, double d, Color color, bool halo)
+    private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartMarkerSymbol symbol, double d, Color color, bool halo, ChartMarkerStyle? style = null)
     {
+        if (style is not null) { DrawStyledMarker(items, x, y, symbol, d, color, style); return; }
         for (int pass = halo ? 0 : 1; pass < 2; pass++)
         {
             double e = pass == 0 ? d + 1.4 : d, r = e / 2;
@@ -203,6 +205,57 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
+    private static void DrawStyledMarker(List<LayoutItem> items, double x, double y, ChartMarkerSymbol symbol, double d, Color series, ChartMarkerStyle style)
+    {
+        double r = d / 2;
+        Color? fill = style.NoFill ? null : style.Fill ?? series;
+        if (symbol is ChartMarkerSymbol.Plus or ChartMarkerSymbol.X or ChartMarkerSymbol.Star)
+        {
+            // Open shapes have no interior: they take the outline's color and width, else the fill's, else the series'.
+            if (style.NoLine) return;
+            var c = style.Line ?? fill ?? series;
+            double alpha = style.Line is not null ? style.LineAlpha : fill is not null && style.Fill is not null ? style.FillAlpha : 1, w = style.LineWidth ?? 1.5;
+            var strokes = new List<LayoutItem>();
+            if (symbol is ChartMarkerSymbol.Plus) { strokes.Add(new LineItem(x - r, y, x + r, y, w, c)); strokes.Add(new LineItem(x, y - r, x, y + r, w, c)); }
+            else
+            {
+                strokes.Add(new LineItem(x - r, y - r, x + r, y + r, w, c)); strokes.Add(new LineItem(x - r, y + r, x + r, y - r, w, c));
+                if (symbol is ChartMarkerSymbol.Star) strokes.Add(new LineItem(x, y - r, x, y + r, w, c));
+            }
+            foreach (var stroke in strokes) AddFaded(items, alpha, stroke);
+            return;
+        }
+        PathPoint[] outline = symbol switch
+        {
+            ChartMarkerSymbol.Square => Polygon((x - r, y - r), (x + r, y - r), (x + r, y + r), (x - r, y + r)),
+            ChartMarkerSymbol.Dash => Polygon((x - r, y - r / 3), (x + r, y - r / 3), (x + r, y + r / 3), (x - r, y + r / 3)),
+            ChartMarkerSymbol.Diamond => Polygon((x, y - r), (x + r, y), (x, y + r), (x - r, y)),
+            ChartMarkerSymbol.Triangle => Polygon((x, y - r), (x + r, y + r), (x - r, y + r)),
+            ChartMarkerSymbol.Dot => Circle(x, y, r / 2),
+            _ => Circle(x, y, r),
+        };
+        if (fill is { } f) AddFaded(items, style.Fill is null ? 1 : style.FillAlpha, new PathItem(outline, f, null));
+        if (!style.NoLine && style.Line is { } l) AddFaded(items, style.LineAlpha, new PathItem(outline, null, l, style.LineWidth ?? 0.75));
+    }
+
+    private static PathPoint[] Polygon(params (double X, double Y)[] corners) =>
+        corners.Select((p, i) => new PathPoint(p.X, p.Y, i == 0 ? PathPointKind.Move : PathPointKind.Line)).Append(new PathPoint(0, 0, PathPointKind.Close)).ToArray();
+
+    private static PathPoint[] Circle(double x, double y, double r)
+    {
+        const double k = 0.5522847498;
+        double c = r * k;
+        return
+        [
+            new(x + r, y, PathPointKind.Move),
+            new(x + r, y + c, PathPointKind.Curve), new(x + c, y + r, PathPointKind.Curve), new(x, y + r, PathPointKind.Curve),
+            new(x - c, y + r, PathPointKind.Curve), new(x - r, y + c, PathPointKind.Curve), new(x - r, y, PathPointKind.Curve),
+            new(x - r, y - c, PathPointKind.Curve), new(x - c, y - r, PathPointKind.Curve), new(x, y - r, PathPointKind.Curve),
+            new(x + c, y - r, PathPointKind.Curve), new(x + r, y - c, PathPointKind.Curve), new(x + r, y, PathPointKind.Curve),
+            new(0, 0, PathPointKind.Close),
+        ];
+    }
+
     private void DrawLegendEntry(SheetChart chart, string name, Color color, ChartSeries? series, ChartKind kind, double x, double y, double swatch, double height, RunProperties font, List<LayoutItem> items)
     {
         double cy = y + height / 2;
@@ -212,7 +265,7 @@ public sealed partial class SheetLayoutEngine
             bool joined = series?.Line ?? true;
             if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, 2.25, color));
             if (series is null || series.Marker || !joined)
-                DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, color, false);
+                DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, color, false, series?.MarkerStyle);
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
         }
         else if (kind == ChartKind.Bubble)

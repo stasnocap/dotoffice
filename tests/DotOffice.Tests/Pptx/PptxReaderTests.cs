@@ -393,6 +393,49 @@ public class PptxReaderTests
         Assert.Equal(ChartMarkerSymbol.Auto, LineSeries("").MarkerSymbol);
     }
 
+    private static ChartMarkerStyle? MarkerStyleOf(string spPr) =>
+        LineSeries($"<c:marker><c:symbol val=\"square\"/><c:spPr>{spPr}</c:spPr></c:marker>").MarkerStyle;
+
+    [Fact]
+    public void A_marker_without_sp_pr_or_with_nothing_stated_has_no_style()
+    {
+        Assert.Null(LineSeries("<c:marker><c:symbol val=\"square\"/></c:marker>").MarkerStyle);
+        Assert.Null(MarkerStyleOf(""));
+        Assert.Null(MarkerStyleOf("<a:ln w=\"19050\"/>"));
+    }
+
+    [Fact]
+    public void A_marker_solid_fill_and_scheme_color_are_resolved_like_a_series_color()
+    {
+        Assert.Equal(new Color(0x12, 0x34, 0x56), MarkerStyleOf("<a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill>")!.Fill);
+        var scheme = MarkerStyleOf("<a:solidFill><a:schemeClr val=\"tx2\"><a:alpha val=\"50000\"/></a:schemeClr></a:solidFill>")!;
+        Assert.Equal(new Color(0x1F, 0x49, 0x7D), scheme.Fill); // tx2 maps to dk2 through the color map
+        Assert.Equal(0.5, scheme.FillAlpha);
+    }
+
+    [Fact]
+    public void A_marker_no_fill_and_outline_color_width_and_no_line_are_read()
+    {
+        var hollow = MarkerStyleOf("<a:noFill/><a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln>")!;
+        Assert.True(hollow.NoFill);
+        Assert.Null(hollow.Fill);
+        Assert.Equal(new Color(255, 0, 0), hollow.Line);
+        Assert.Equal(2.0, hollow.LineWidth);
+        Assert.False(hollow.NoLine);
+        var none = MarkerStyleOf("<a:noFill/><a:ln><a:noFill/></a:ln>")!;
+        Assert.True(none.NoFill && none.NoLine);
+    }
+
+    [Theory]
+    [InlineData("<a:solidFill><a:srgbClr val=\"zzz\"/></a:solidFill><a:ln w=\"abc\"/>")]
+    [InlineData("<a:solidFill/><a:ln w=\"-5\"><a:solidFill/></a:ln>")]
+    [InlineData("<a:ln w=\"99999999999999\"><a:solidFill><a:schemeClr val=\"nope\"/></a:solidFill></a:ln>")]
+    public void A_malformed_marker_style_does_not_throw_and_states_nothing_it_cannot_read(string spPr)
+    {
+        var style = MarkerStyleOf(spPr);
+        Assert.Null(style?.LineWidth);
+    }
+
     [Fact]
     public void A_chart_automatic_title_is_larger_and_bold_and_its_text_takes_the_theme_text_color()
     {

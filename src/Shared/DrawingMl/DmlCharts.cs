@@ -176,8 +176,9 @@ internal static class DmlCharts
             var spPr = Child(ser, "spPr");
             bool lineLike = kind is ChartKind.Line or ChartKind.Scatter || (kind == ChartKind.Radar && !filled);
             var lineProperties = Child(spPr, "ln");
-            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? SolidFill(Child(Child(ser, "marker"), "spPr"), theme) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
             bool line = !(lineLike && lineProperties is not null && Child(lineProperties, "noFill") is not null);
+            // A series with no line of its own color takes the automatic one; only a markers-only series is named by its marker's fill.
+            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
 
             bool marker = true;
             if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
@@ -266,7 +267,7 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ReadMarkerStyle(Child(Child(ser, "marker"), "spPr"))));
         }
         return series;
         }
@@ -277,6 +278,21 @@ internal static class DmlCharts
             "outEnd" => ChartLabelPlacement.OutsideEnd, "t" => ChartLabelPlacement.Above, "b" => ChartLabelPlacement.Below,
             "l" => ChartLabelPlacement.Left, "r" => ChartLabelPlacement.Right, "bestFit" => ChartLabelPlacement.BestFit, _ => null,
         };
+
+        // c:marker/c:spPr: a fill (solid or none) and an outline (a:ln: color, width in EMU, or none). A part that is absent, or a color that
+        // cannot be resolved, is left unstated; a series with nothing stated has no style at all.
+        ChartMarkerStyle? ReadMarkerStyle(XElement? spPr)
+        {
+            if (spPr is null) return null;
+            bool Declined(XElement? holder) => holder?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill" or "grpFill")?.Name.LocalName == "noFill";
+            var ln = Child(spPr, "ln");
+            bool noFill = Declined(spPr), noLine = Declined(ln);
+            var fill = noFill ? null : SolidFill(spPr, theme);
+            var stroke = noLine ? null : SolidFill(ln, theme);
+            double? width = ln?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 && emu < 2e9 ? emu / 12700 : null;
+            if (fill is null && stroke is null && !noFill && !noLine) return null;
+            return new ChartMarkerStyle(fill, noFill, fill is null ? 1 : Opacity(spPr), stroke, noLine, width, stroke is null ? 1 : Opacity(ln));
+        }
 
         ChartTrendline? ReadTrendline(XElement ser, Color seriesColor)
         {

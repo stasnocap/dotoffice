@@ -144,6 +144,88 @@ public class SheetChartLayoutTests
         Assert.Equal(4, page.Items.OfType<RectItem>().Count(r => r.Fill == Red && r.Width == 5));
     }
 
+    private static LayoutPage Styled(ChartMarkerStyle style, ChartMarkerSymbol symbol = ChartMarkerSymbol.Circle, ChartKind kind = ChartKind.Line) =>
+        Page(Chart(kind, Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = 9, MarkerSymbol = symbol, MarkerStyle = style }));
+
+    private static IEnumerable<PathItem> Paths(LayoutPage page) => page.Items.OfType<PathItem>();
+
+    [Fact]
+    public void A_marker_without_a_style_is_drawn_exactly_as_before_with_its_halo()
+    {
+        var plain = Marked(ChartMarkerSymbol.Circle);
+        Assert.Empty(Paths(plain));
+        Assert.Equal(3, plain.Items.OfType<EllipseItem>().Count(e => e.Fill == Color.White && Math.Abs(e.Width - 10.4) < 1e-9));
+    }
+
+    [Fact]
+    public void A_hollow_marker_is_an_outline_of_the_stated_width_with_no_fill_and_no_halo()
+    {
+        var page = Styled(new ChartMarkerStyle(NoFill: true, Line: Blue, LineWidth: 2));
+        var rings = Paths(page).ToList();
+        Assert.Equal(3, rings.Count);
+        Assert.All(rings, p => Assert.Equal((null, (Color?)Blue, 2.0), (p.Fill, p.Stroke, p.LineWidth)));
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Color.White && Math.Abs(e.Width - 10.4) < 1e-9);
+    }
+
+    [Fact]
+    public void A_white_filled_marker_with_an_outline_draws_the_fill_then_the_outline()
+    {
+        var items = Styled(new ChartMarkerStyle(Fill: Color.White, Line: Red), ChartMarkerSymbol.Square).Items;
+        var paths = items.OfType<PathItem>().ToList();
+        Assert.Equal(6, paths.Count);
+        Assert.Equal((Color?)Color.White, paths[0].Fill);
+        Assert.Equal((Color?)Red, paths[1].Stroke);
+        Assert.Equal(0.75, paths[1].LineWidth);
+        Assert.True(items.IndexOf(paths[0]) < items.IndexOf(paths[1]));
+    }
+
+    [Fact]
+    public void A_custom_fill_without_an_outline_has_no_stroke()
+    {
+        var paths = Paths(Styled(new ChartMarkerStyle(Fill: Blue))).ToList();
+        Assert.Equal(3, paths.Count);
+        Assert.All(paths, p => Assert.Equal(((Color?)Blue, (Color?)null), (p.Fill, p.Stroke)));
+    }
+
+    [Fact]
+    public void A_marker_with_no_fill_and_no_line_draws_nothing()
+    {
+        var page = Styled(new ChartMarkerStyle(NoFill: true, NoLine: true));
+        Assert.Empty(Paths(page));
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        Assert.DoesNotContain(Styled(new ChartMarkerStyle(NoFill: true, NoLine: true), ChartMarkerSymbol.X).Items.OfType<LineItem>(), l => l.Width == 1.5);
+    }
+
+    [Fact]
+    public void An_open_marker_takes_the_outline_color_and_width_and_ignores_a_fill_of_its_own_when_there_is_an_outline()
+    {
+        var strokes = Styled(new ChartMarkerStyle(Fill: Blue, Line: Color.White, LineWidth: 3), ChartMarkerSymbol.X).Items.OfType<LineItem>().Where(l => l.Color == Color.White && l.Width == 3);
+        Assert.Equal(6, strokes.Count());
+    }
+
+    [Fact]
+    public void A_marker_alpha_wraps_the_shape_in_an_opacity_group()
+    {
+        var page = Styled(new ChartMarkerStyle(Fill: Blue, FillAlpha: 0.5));
+        Assert.Equal(3, page.Items.OfType<PushItem>().Count(p => p.Opacity == 0.5));
+    }
+
+    [Fact]
+    public void A_legend_entry_uses_the_marker_style()
+    {
+        var series = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(NoFill: true, Line: Blue, LineWidth: 2) };
+        var page = Page(Chart(ChartKind.Line, series) with { Legend = LegendPosition.Right });
+        Assert.Equal(4, Paths(page).Count(p => p.Fill is null && p.Stroke == Blue && p.LineWidth == 2));
+    }
+
+    [Fact]
+    public void A_scatter_marker_style_is_drawn_too()
+    {
+        var series = Series(Red, 5, 10, 20) with { Marker = true, XValues = new double?[] { 1, 2, 3 }, MarkerStyle = new ChartMarkerStyle(NoFill: true, Line: Blue) };
+        var chart = Chart(ChartKind.Scatter, series) with { XMin = 0, XMax = 4 };
+        Assert.Equal(3, Paths(Page(chart)).Count(p => p.Stroke == Blue));
+    }
+
     [Fact]
     public void A_pie_has_one_slice_per_value_and_a_legend_lists_the_categories()
     {
