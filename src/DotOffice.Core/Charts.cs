@@ -59,7 +59,7 @@ public sealed record ChartMarkerStyle(Color? Fill = null, bool NoFill = false, d
 /// <summary>
 /// What a data point's own <c>c:dPt/c:marker</c> states, keyed by point index in <see cref="ChartSeries.PointMarkers"/>. Every aspect is
 /// null when the point does not state it and then comes from the series: <paramref name="Visible"/> is false for <c>symbol="none"</c>
-/// and true for any other symbol; <paramref name="Style"/> is merged with the series' per fill and per outline.
+/// and true for any other symbol; <paramref name="Style"/> replaces the series' as a whole (a fill-only point has an automatic outline).
 /// </summary>
 public sealed record ChartPointMarker(bool? Visible = null, ChartMarkerSymbol? Symbol = null, double? Size = null, ChartMarkerStyle? Style = null);
 

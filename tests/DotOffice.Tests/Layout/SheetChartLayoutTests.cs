@@ -895,16 +895,29 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
-    public void A_point_fill_keeps_the_series_outline_and_the_other_points_keep_both()
+    public void A_point_style_replaces_the_series_style_as_a_whole()
     {
+        // Observed in Word 2016 (one sample): a fill-only point does not keep the series outline.
         var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Red, Line: Blue, LineWidth: 2) },
             (0, new ChartPointMarker(Style: new ChartMarkerStyle(Fill: Color.White))));
         var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
-        var fills = paths.Where(p => p.Fill is not null).ToList();
-        Assert.Equal([(Color?)Color.White, Red, Red], fills.Select(p => p.Fill));
+        Assert.Equal([(Color?)Color.White, Red, Red], paths.Where(p => p.Fill is not null).Select(p => p.Fill));
+        // only the two untouched points keep the series' blue 2 pt outline; the fill-only point has an automatic one (series color here, unchecked against Office)
         var rings = paths.Where(p => p.Stroke is not null).ToList();
         Assert.Equal(3, rings.Count);
-        Assert.All(rings, p => Assert.Equal(((Color?)Blue, 2.0), (p.Stroke, p.LineWidth)));
+        Assert.Equal(2, rings.Count(p => p.Stroke == Blue && p.LineWidth == 2.0));
+        Assert.Equal(1, rings.Count(p => p.Stroke == Red));
+    }
+
+    [Fact]
+    public void A_point_outline_alone_does_not_keep_the_series_fill()
+    {
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Blue, Line: Blue, LineWidth: 2) },
+            (0, new ChartPointMarker(Style: new ChartMarkerStyle(Line: Color.White, LineWidth: 1))));
+        var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
+        // the series' automatic color, not its explicit fill (appearance unchecked against Office); the fill is drawn before the outline
+        Assert.Equal((Color?)Red, paths[0].Fill);
+        Assert.Equal((Color?)Color.White, paths[1].Stroke);
     }
 
     [Fact]

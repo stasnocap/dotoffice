@@ -165,7 +165,7 @@ public sealed partial class SheetLayoutEngine
 
     /// <summary>
     /// Draws the marker of point <paramref name="index"/> (the <c>c:idx</c> of its <c>c:dPt</c>, i.e. the position in the series' values,
-    /// null values included). A point states its own visibility, symbol, size and style; what it does not state comes from the series, and
+    /// null values included). A point states its own visibility, symbol, size and style; what it does not state comes from the series (a style replaces the series' as a whole, not per property: what it leaves out is automatic, not the series'), and
     /// <paramref name="seriesShows"/> says whether the series draws markers at all. A series without per-point markers draws as always.
     /// </summary>
     private static void DrawMarkerAt(List<LayoutItem> items, double x, double y, ChartSeries s, int index, bool seriesShows, bool halo)
@@ -173,19 +173,15 @@ public sealed partial class SheetLayoutEngine
         var own = s.PointMarkers is { } map && map.TryGetValue(index, out var found) ? found : null;
         if (!(own?.Visible ?? seriesShows)) return;
         if (own is null) { DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo, s.MarkerStyle); return; }
-        DrawMarker(items, x, y, own.Symbol ?? s.MarkerSymbol, own.Size ?? s.MarkerDiameter, s.Color, halo, MergeStyle(s.MarkerStyle, own.Style));
+        DrawMarker(items, x, y, own.Symbol ?? s.MarkerSymbol, own.Size ?? s.MarkerDiameter, s.Color, halo, PointStyle(own.Style, s));
     }
 
-    /// <summary>A point's style over the series': the fill (color, none, opacity) and the outline (color, none, width, opacity) are each the point's when it states them, else the series'.</summary>
-    private static ChartMarkerStyle? MergeStyle(ChartMarkerStyle? series, ChartMarkerStyle? point)
-    {
-        if (point is null) return series;
-        if (series is null) return point;
-        bool fill = point.Fill is not null || point.NoFill, line = point.Line is not null || point.NoLine || point.LineWidth is not null;
-        var f = fill ? point : series;
-        var l = line ? point : series;
-        return new ChartMarkerStyle(f.Fill, f.NoFill, f.FillAlpha, l.Line, l.NoLine, l.LineWidth, l.LineAlpha);
-    }
+    /// <summary>
+    /// A point's own style, which replaces the series' as a whole (Word 2016): what it leaves out is automatic. An automatic fill is the series
+    /// color already (see <see cref="DrawStyledMarker"/>) and an automatic outline is taken as that color too; how Office draws either is not yet checked.
+    /// </summary>
+    private static ChartMarkerStyle? PointStyle(ChartMarkerStyle? point, ChartSeries s) =>
+        point is null ? s.MarkerStyle : point.Line is null && !point.NoLine ? point with { Line = s.Color, LineAlpha = 1 } : point;
 
     /// <summary>
     /// Draws one marker centered on (x, y), <paramref name="d"/> points across, over a white halo 1.4 points wider when asked. Automatic
