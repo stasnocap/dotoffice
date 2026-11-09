@@ -168,7 +168,7 @@ internal static class DmlCharts
         bool filled = kind == ChartKind.Radar && radarStyle == "filled";
         var groupLabels = Child(group, "dLbls");
         var series = new List<ChartSeries>();
-        int cycles = Math.Max(1, (Math.Max(sers.Count, sers.Select(e => (int)Math.Clamp(Number(Child(e, "idx"), "val", -1), -1, 1_000_000) + 1).DefaultIfEmpty(0).Max()) + 5) / 6);
+        int cycles = 1 + Math.Max(sers.Count, sers.Select(e => (int)Math.Clamp(Number(Child(e, "idx"), "val", -1), -1, 1_000_000) + 1).DefaultIfEmpty(0).Max()) / 6;
         for (int i = 0; i < sers.Count; i++)
         {
             var ser = sers[i];
@@ -197,11 +197,11 @@ internal static class DmlCharts
             double? statedWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : null;
             double lineWidth = statedWidth ?? context.DefaultLineWidth;
             var autoColor = AutomaticMarkerColor(theme, seriesIndex, cycles);
-            var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, lineWidth >= 2.25 ? 7 : 5);
+            var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, AutomaticMarkerSize(lineWidth));
             bool marker = true;
             if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
                 marker = ownVisible
-                    ?? (kind == ChartKind.Radar ? radarStyle == "marker"
+                    ?? (kind == ChartKind.Radar ? radarStyle is "marker" or "standard"
                     : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false"));
             var markerSymbol = ownSymbol ?? ChartMarkerSymbol.Auto; // none draws nothing (Marker is false); picture and unknown values are Auto
             var markerSize = ownSize;
@@ -288,13 +288,17 @@ internal static class DmlCharts
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
                 ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers, auto,
-                // Line charts only (measured): a line with no color of its own takes the automatic outline and one with no width the application's default.
-                // Scatter and radar keep the series color and 2.25 pt unless a width is stated; Color itself is unchanged for labels, trendlines and the like.
-                kind == ChartKind.Line && line && SolidFill(lineProperties, theme) is null && SolidFill(spPr, theme) is null ? auto.Outline : null,
-                lineLike ? (kind == ChartKind.Line ? lineWidth : statedWidth) : null));
+                // Measured on line, scatter and non-filled radar series: a line with no color of its own takes the automatic outline and one with no width
+                // the application's default. Color itself is unchanged for labels, trendlines and the like. A filled radar has no line.
+                lineLike && line && SolidFill(lineProperties, theme) is null && SolidFill(spPr, theme) is null ? auto.Outline : null,
+                lineLike ? lineWidth : null, ownVisible == false));
         }
         return series;
         }
+
+        // Automatic marker size = 2 * floor(line width in points) + 3. This is a fit to fourteen measured widths from 0.25 to 6 pt;
+        // wider lines are untested. The epsilon keeps e.g. 25400 EMU / 12700 from landing below 2.
+        static double AutomaticMarkerSize(double lineWidth) => 2 * Math.Floor(lineWidth + 1e-9) + 3;
 
         static ChartLabelPlacement? LabelPlacement(string? value) => value switch
         {
@@ -657,7 +661,7 @@ internal static class DmlCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),
@@ -726,17 +730,16 @@ internal static class DmlCharts
         root?.Descendants().FirstOrDefault(e => names.Contains(e.Name.LocalName));
 
     /// <summary>
-    /// The color Excel and PowerPoint 2016 give an automatic marker: the theme's accent for the series' <c>c:idx</c>, varied by cycle of six
-    /// when the chart has more than six series. Measured (Excel and PowerPoint 2016, line charts): with 3 cycles (14 series) the cycles are
-    /// shaded 35 %, plain and tinted 35 %; with 2 (10 series) shaded and tinted by 23-24 % (<c>shade</c>/<c>tint</c>, in linear RGB); with 1 plain
-    /// (4 series). Four or more cycles are NOT measured: the amount is extrapolated as 70 % x cycles / 6 (35 % at 3, 23.3 % at 2), spread evenly from shade to tint.
+    /// The color Excel and PowerPoint 2016 give an automatic marker: the theme's accent for the series' <c>c:idx</c>, varied
+    /// by level: a chart of n series has floor(n / 6) + 1 levels c, and level k is shaded or tinted (in linear RGB) by 0.7 (2k - (c - 1)) / (c + 1).
+    /// A fit, not a documented rule: within 2 per channel of all 223 series of 13 Word and PowerPoint 2016 charts of 5 to 36 series. More series and gaps in c:idx are untested.
     /// </summary>
     internal static Color AutomaticMarkerColor(DmlTheme theme, int index, int cycles)
     {
         var accent = theme[4 + index % 6] ?? new Color(0x44, 0x72, 0xC4);
         if (cycles < 2) return accent;
         int cycle = index / 6 % cycles;
-        double amount = Math.Min(0.7, 0.7 * cycles / 6) * (2.0 * cycle / (cycles - 1) - 1);
+        double amount = 0.7 * (2 * cycle - (cycles - 1)) / (cycles + 1);
         return amount < -1e-9 ? Shade(accent, 1 + amount) : amount > 1e-9 ? Tint(accent, 1 - amount) : accent;
     }
 

@@ -97,7 +97,12 @@ public class XlsxChartTests
     [InlineData(12700, 5.0)]
     [InlineData(19050, 5.0)]
     [InlineData(28575, 7.0)]
-    [InlineData(38100, 7.0)]
+    [InlineData(38100, 9.0)]
+    [InlineData(9525, 3.0)]
+    [InlineData(22225, 5.0)]
+    [InlineData(25400, 7.0)]
+    [InlineData(57150, 11.0)]
+    // 2 * floor(width in pt) + 3: a fit to these eight measured widths (0.75, 1, 1.5, 1.75, 2, 2.25, 3, 4.5); other widths are untested.
     public void The_automatic_marker_size_follows_the_stated_line_width(int emu, double size)
     {
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", $"<c:spPr><a:ln w=\"{emu}\"/></c:spPr>") + "</c:lineChart>";
@@ -112,6 +117,19 @@ public class XlsxChartTests
 
     private static void Near(Color expected, Color actual) =>
         Assert.True(Math.Abs(expected.R - actual.R) <= 2 && Math.Abs(expected.G - actual.G) <= 2 && Math.Abs(expected.B - actual.B) <= 2, $"{actual} is not near {expected}");
+
+    [Theory] // PowerPoint 2016, default accents, line charts of n series
+    [InlineData(5, 0, 0x44, 0x72, 0xC4)]
+    [InlineData(6, 0, 0x3B, 0x64, 0xAD)]
+    [InlineData(11, 6, 0x8F, 0xA2, 0xD4)]
+    [InlineData(12, 0, 0x37, 0x5D, 0xA1)]
+    [InlineData(18, 0, 0x33, 0x58, 0x99)]
+    [InlineData(18, 6, 0x3F, 0x6A, 0xB7)]
+    [InlineData(36, 0, 0x2E, 0x4F, 0x8B)]
+    [InlineData(36, 18, 0x44, 0x72, 0xC4)]
+    [InlineData(36, 30, 0xA7, 0xB5, 0xDB)]
+    public void The_automatic_marker_color_follows_the_number_of_series(int count, int index, int r, int g, int b) =>
+        Near(new Color((byte)r, (byte)g, (byte)b), SeriesWithIndexes(Enumerable.Range(0, count).ToArray())[index].AutomaticMarker.Color);
 
     [Fact]
     public void The_automatic_marker_color_of_14_series_is_shaded_plain_then_tinted_accents_of_the_theme()
@@ -621,14 +639,60 @@ public class XlsxChartTests
         Assert.Equal((new Color(0, 0xAA, 0), new Color(0, 0xAA, 0)), (series.Color, series.StrokeColor));
     }
 
+    private static string ScatterOf(params string[] extras) => "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + string.Concat(extras.Select(e => XySer(e, "S!$B$2:$B$4", "S!$B$2:$B$4"))) + "</c:scatterChart>";
+
     [Fact]
-    public void Scatter_and_radar_lines_keep_the_series_color_and_2_25_pt_unless_a_width_is_stated()
+    public void Scatter_and_non_filled_radar_lines_follow_the_line_chart_rule_and_stated_values_win()
     {
-        var scatter = "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/>" + XySer("", "S!$B$2:$B$4", "S!$B$2:$B$4") + XySer("<c:spPr><a:ln w=\"38100\"/></c:spPr>", "S!$B$2:$B$4", "S!$B$2:$B$4") + "</c:scatterChart>";
-        var xy = Read(Space(scatter)).Sheet.Charts.Single().Series;
-        Assert.Equal((xy[0].Color, 2.25, xy[1].Color, 3.0), (xy[0].StrokeColor, xy[0].StrokeWidth, xy[1].StrokeColor, xy[1].StrokeWidth));
-        var radar = "<c:radarChart><c:radarStyle val=\"marker\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4", "<c:spPr><a:ln w=\"12700\"/></c:spPr>") + "</c:radarChart>";
-        var rd = Read(Space(radar)).Sheet.Charts.Single().Series;
-        Assert.Equal((rd[0].Color, 2.25, rd[1].Color, 1.0), (rd[0].StrokeColor, rd[0].StrokeWidth, rd[1].StrokeColor, rd[1].StrokeWidth));
+        var xy = Read(Space(ScatterOf("", "<c:spPr><a:ln w=\"38100\"><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></a:ln></c:spPr>", "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>"))).Sheet.Charts.Single().Series;
+        Assert.Equal((xy[0].AutomaticMarker.Outline, 2.25), (xy[0].StrokeColor, xy[0].StrokeWidth));
+        Assert.Equal((new Color(0x12, 0x34, 0x56), 3.0, 9.0), (xy[1].StrokeColor, xy[1].StrokeWidth, xy[1].MarkerDiameter));
+        Assert.False(xy[2].Line);
+        foreach (var style in new[] { "marker", "standard" })
+        {
+            var radar = "<c:radarChart><c:radarStyle val=\"" + style + "\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4", "<c:spPr><a:ln w=\"12700\"/></c:spPr>") + "</c:radarChart>";
+            var rd = Read(Space(radar)).Sheet.Charts.Single().Series;
+            Assert.Equal((rd[0].AutomaticMarker.Outline, 2.25, rd[1].AutomaticMarker.Outline, 1.0), (rd[0].StrokeColor, rd[0].StrokeWidth, rd[1].StrokeColor, rd[1].StrokeWidth));
+        }
+        var filled = Read(Space("<c:radarChart><c:radarStyle val=\"filled\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + "</c:radarChart>")).Sheet.Charts.Single().Series.Single();
+        Assert.Equal((null, null), (filled.LineColor, filled.LineWidth));
+    }
+
+    [Fact]
+    public void The_automatic_marker_size_counts_a_stated_width_even_with_no_line_and_survives_floating_point()
+    {
+        var one = (string w) => Read(Space(ScatterOf($"<c:spPr><a:ln w=\"{w}\"><a:noFill/></a:ln></c:spPr>"))).Sheet.Charts.Single().Series.Single().MarkerDiameter;
+        Assert.Equal(7.0, one("28575"));
+        Assert.Equal(5.0, one("19050"));
+        Assert.Equal(7.0, one("25400"));
+    }
+
+    [Fact]
+    public void A_standard_radar_without_a_marker_draws_automatic_markers_and_a_stated_marker_wins_but_a_filled_radar_has_none()
+    {
+        ChartSeries Radar(string style, string extra = "") => Read(Space("<c:radarChart><c:radarStyle val=\"" + style + "\"/>" + Ser(0, null, null, "S!$B$2:$B$4", extra) + "</c:radarChart>")).Sheet.Charts.Single().Series.Single();
+        Assert.True(Radar("standard").Marker);
+        Assert.Equal(7.0, Radar("standard").MarkerDiameter); // Excel's 2.25 pt default line
+        Assert.False(Radar("standard", "<c:marker><c:symbol val=\"none\"/></c:marker>").Marker);
+        Assert.True(Radar("standard", "<c:marker><c:symbol val=\"circle\"/></c:marker>").Marker);
+        Assert.False(Radar("filled").Marker);
+    }
+
+    [Fact]
+    public void Hi_low_lines_read_their_stated_color_and_width()
+    {
+        string Stock(string hl) => "<c:stockChart>" + Ser(0, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + Ser(1, null, "S!$A$2:$A$4", "S!$B$2:$B$4") + hl + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:stockChart>" +
+            "<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/></c:valAx>";
+        var stated = Read(Space(Stock("<c:hiLowLines><c:spPr><a:ln w=\"9525\"><a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill></a:ln></c:spPr></c:hiLowLines>"))).Sheet.Charts.Single();
+        Assert.Equal((Color.Black, 0.75), (stated.HiLowColor, stated.HiLowWidth));
+        var plain = Read(Space(Stock("<c:hiLowLines/>"))).Sheet.Charts.Single();
+        Assert.Equal((null, null), (plain.HiLowColor, plain.HiLowWidth));
+    }
+
+    [Fact]
+    public void A_series_that_states_symbol_none_is_marked_for_the_legend()
+    {
+        var none = Read(Space("<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"none\"/></c:marker>") + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>")).Sheet.Charts.Single().Series;
+        Assert.Equal((true, false), (none[0].MarkerNone, none[1].MarkerNone));
     }
 }

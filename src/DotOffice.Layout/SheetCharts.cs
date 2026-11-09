@@ -208,8 +208,8 @@ public sealed partial class SheetLayoutEngine
             if (style?.Fill is { } boxFill && !style.NoFill)
             {
                 var box = Polygon((x - r, y - r), (x + r, y - r), (x + r, y + r), (x - r, y + r));
+                // Office draws the square fill unoutlined; only the symbol's own strokes carry the outline.
                 AddFaded(items, fillAlpha, new PathItem(box, boxFill, null));
-                if (outlined) AddFaded(items, fillAlpha, new PathItem(box, null, style.Line ?? boxFill, width));
             }
             if (!outlined) return;
             var strokes = new List<LayoutItem>();
@@ -262,7 +262,7 @@ public sealed partial class SheetLayoutEngine
         {
             bool joined = series?.Line ?? true;
             if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, series?.StrokeWidth ?? 2.25, series?.StrokeColor ?? color));
-            if (series is null || series.Marker || !joined)
+            if (series is null || series.Marker || !joined && !series.MarkerNone)
                 DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
         }
@@ -571,7 +571,7 @@ public sealed partial class SheetLayoutEngine
                     for (int i = 0; i < categories; i++)
                     {
                         var vs = list.Where(q => i < q.Values.Count && q.Values[i] is not null).Select(q => q.Values[i]!.Value).ToList();
-                        if (vs.Count >= 2) items.Add(new LineItem(CategoryX(i), ValueY(scale, vs.Max()), CategoryX(i), ValueY(scale, vs.Min()), 1, new Color(0x40, 0x40, 0x40)));
+                        if (vs.Count >= 2) items.Add(new LineItem(CategoryX(i), ValueY(scale, vs.Max()), CategoryX(i), ValueY(scale, vs.Min()), chart.HiLowWidth ?? 1, chart.HiLowColor ?? new Color(0x40, 0x40, 0x40)));
                     }
                 if (chart.UpDownBars && !group.Secondary && list.Count >= 2)
                 {

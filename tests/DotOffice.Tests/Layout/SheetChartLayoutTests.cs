@@ -235,19 +235,50 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
-    public void A_filled_open_marker_has_a_box_of_the_marker_size_behind_its_strokes()
+    public void A_filled_open_marker_has_an_unoutlined_box_of_the_marker_size_behind_its_strokes()
     {
-        // spec-fill: x, plus and star with a fill are a filled box of the marker size, outlined in the fill, under strokes in the automatic outline.
+        // Measured (Office 2016): x, plus and star with a fill are an unoutlined filled box of the marker size under strokes in the outline color.
         foreach (var symbol in new[] { ChartMarkerSymbol.X, ChartMarkerSymbol.Plus, ChartMarkerSymbol.Star })
         {
             var items = Styled(new ChartMarkerStyle(Fill: Blue), symbol).Items;
             var boxes = items.OfType<PathItem>().Where(p => p.Fill == Blue).ToList();
             Assert.Equal(3, boxes.Count);
             Assert.All(boxes, b => Assert.Equal((9.0, 9.0), (Box(b).Width, Box(b).Height)));
-            Assert.Equal(3, items.OfType<PathItem>().Count(p => p.Fill is null && p.Stroke == Blue && p.LineWidth == 0.75));
+            Assert.DoesNotContain(items.OfType<PathItem>(), p => p.Fill is null);
             Assert.Equal(symbol == ChartMarkerSymbol.Star ? 9 : 6, items.OfType<LineItem>().Count(l => l.Color == Red && l.Width == 0.75));
             Assert.True(items.IndexOf(boxes[0]) < items.IndexOf(items.OfType<LineItem>().First(l => l.Color == Red && l.Width == 0.75)));
         }
+    }
+
+    [Fact]
+    public void A_filled_dot_dash_and_square_keep_their_outline()
+    {
+        foreach (var symbol in new[] { ChartMarkerSymbol.Dot, ChartMarkerSymbol.Dash, ChartMarkerSymbol.Square })
+            Assert.Contains(Styled(new ChartMarkerStyle(Fill: Blue, Line: Red), symbol).Items.OfType<PathItem>(), p => p.Fill is null && p.Stroke == Red);
+    }
+
+    [Fact]
+    public void A_stock_series_that_states_symbol_none_has_no_legend_marker_but_a_markers_only_series_keeps_it()
+    {
+        PathItem[] Legend(ChartSeries s) => Page(Chart(ChartKind.Line, s) with { Legend = LegendPosition.Right }).Items.OfType<PathItem>().Where(p => p.Fill == Red).ToArray();
+        var hidden = Series(Red, 5, 10, 20) with { Line = false, Marker = false, MarkerNone = true };
+        Assert.Empty(Legend(hidden));
+        Assert.Equal(4, Legend(Series(Red, 5, 10, 20) with { Line = false, Marker = true }).Length); // three points and the legend entry
+        // a point that states its own marker is still drawn in the plot
+        var point = hidden with { PointMarkers = new Dictionary<int, ChartPointMarker> { [1] = new(Visible: true, Symbol: ChartMarkerSymbol.Square) } };
+        Assert.Single(Legend(point)); // that point only, no legend marker
+    }
+
+    [Fact]
+    public void Hi_low_lines_use_the_stated_color_and_width_else_the_default()
+    {
+        var series = new[] { Series(Red, 5, 10, 20), Series(Red, 8, 18, 14) };
+        var stated = Page(Chart(ChartKind.Line, series) with { HiLowLines = true, HiLowColor = Blue, HiLowWidth = 0.75 }).Items.OfType<LineItem>().Where(l => l.Color == Blue).ToList();
+        Assert.Equal(3, stated.Count);
+        Assert.All(stated, l => Assert.Equal(0.75, l.Width));
+        var plain = Page(Chart(ChartKind.Line, series) with { HiLowLines = true }).Items.OfType<LineItem>().Where(l => l.Color == new Color(0x40, 0x40, 0x40)).ToList();
+        Assert.Equal(3, plain.Count);
+        Assert.All(plain, l => Assert.Equal(1, l.Width));
     }
 
     [Fact]

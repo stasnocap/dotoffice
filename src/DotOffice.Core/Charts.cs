@@ -32,7 +32,7 @@ public enum ChartMarkerSymbol { Auto, Circle, Dash, Diamond, Dot, Plus, Square, 
 /// <remarks>
 /// <paramref name="XValues"/> are the x coordinates of scatter and bubble points (null: 1, 2, 3…), <paramref name="Sizes"/> the bubble
 /// sizes, and <paramref name="Line"/> whether the points of a line, scatter or radar series are joined. <paramref name="LineColor"/> is the
-/// color of a line chart's line when the series states none (the automatic marker outline), <paramref name="LineWidth"/> the stated or, for line charts, the default width of a line-like series' line (null: 2.25).
+/// color of a line-like series' line when it states none (the automatic marker outline), <paramref name="LineWidth"/> the stated or default width of a line-like series' line (null: 2.25). <paramref name="MarkerNone"/> is true when the series states <c>symbol none</c>.
 /// </remarks>
 public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Color Color, bool Marker = false,
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
@@ -41,7 +41,7 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
     double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null,
     IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null, ChartAutoMarker? Auto = null,
-    Color? LineColor = null, double? LineWidth = null)
+    Color? LineColor = null, double? LineWidth = null, bool MarkerNone = false)
 {
     /// <summary>The color the line of a line-like series is drawn in: <see cref="LineColor"/> where the reader chose one apart from <see cref="Color"/> (see its remarks), else <see cref="Color"/>.</summary>
     public Color StrokeColor => LineColor ?? Color;
@@ -174,6 +174,12 @@ public sealed record SheetChart : SheetObject
 
     /// <summary>Whether a vertical line joins the highest and lowest value of every category (stock charts, <c>hiLowLines</c>).</summary>
     public bool HiLowLines { get; init; }
+
+    /// <summary>The stated color of the hi-low lines (<c>hiLowLines/spPr/ln</c>); null: the default.</summary>
+    public Color? HiLowColor { get; init; }
+
+    /// <summary>The stated width in points of the hi-low lines; null: the default.</summary>
+    public double? HiLowWidth { get; init; }
 
     /// <summary>Whether a body joins the first and last series of every category (candlesticks, <c>upDownBars</c>): white when the last is above the first, black otherwise.</summary>
     public bool UpDownBars { get; init; }
