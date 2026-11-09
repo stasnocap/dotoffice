@@ -408,9 +408,8 @@ public class MetafileLayoutTests
     }
 
     [Fact]
-    public void An_emf_gradient_fill_rectangle_is_a_gradient_and_a_triangle_its_mean_color()
+    public void An_emf_gradient_fill_rectangle_is_a_gradient_and_a_triangle_a_shaded_triangle()
     {
-        static int[] Vertex(int x, int y, int r, int g, int b) => [x, y, r << 8 | g << 24, b << 8];
         var items = Lay(Emf(
             Record(118, [0, 0, 0, 0, 2, 1, 1, .. Vertex(0, 0, 255, 0, 0), .. Vertex(100, 50, 0, 0, 255), 0, 1]),
             Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 100, 255, 0, 0), .. Vertex(50, 60, 0, 255, 0), .. Vertex(100, 100, 0, 0, 255), 0, 1, 2])));
@@ -418,6 +417,46 @@ public class MetafileLayoutTests
         Assert.Equal(90, gradient.Degree, 3);
         Assert.Equal(new Color(255, 0, 0), gradient.Stops[0].Color);
         Assert.Equal(new Color(0, 0, 255), gradient.Stops[1].Color);
-        Assert.Equal(new Color(85, 85, 85), Assert.Single(items.OfType<PathItem>()).Fill);
+        var triangle = Assert.Single(items.OfType<ShadedTriangleItem>());
+        Assert.Equal([new Color(255, 0, 0), new Color(0, 255, 0), new Color(0, 0, 255)], triangle.Corners.Select(c => c.Color));
+        Assert.Empty(items.OfType<PathItem>());
+    }
+
+    private static int[] Vertex(int x, int y, int r, int g, int b) => [x, y, r << 8 | g << 24, b << 8];
+
+    [Fact]
+    public void An_emf_gradient_fill_triangle_keeps_its_corner_colors_and_places_them_through_the_transform()
+    {
+        var items = Lay(Emf(Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 0, 255, 0, 0), .. Vertex(500, 0, 0, 255, 0), .. Vertex(0, 375, 0, 0, 255), 0, 1, 2])));
+        var triangle = Assert.Single(items.OfType<ShadedTriangleItem>());
+        Assert.Equal([new Color(255, 0, 0), new Color(0, 255, 0), new Color(0, 0, 255)], triangle.Corners.Select(c => c.Color));
+        // The slide is 400 x 300 and the picture fills it (1000 x 750 pixels), so 500 pixels across are 200 units and 375 down are 150.
+        Assert.Equal(200, triangle.Corners[1].X - triangle.Corners[0].X, 3);
+        Assert.Equal(150, triangle.Corners[2].Y - triangle.Corners[0].Y, 3);
+    }
+
+    [Fact]
+    public void An_emf_gradient_fill_mesh_makes_one_shaded_triangle_per_index_triple()
+    {
+        var items = Lay(Emf(Record(118, [0, 0, 0, 0, 4, 2, 2,
+            .. Vertex(0, 0, 255, 0, 0), .. Vertex(100, 0, 0, 255, 0), .. Vertex(0, 100, 0, 0, 255), .. Vertex(100, 100, 255, 255, 0),
+            0, 1, 2, 1, 3, 2])));
+        var triangles = items.OfType<ShadedTriangleItem>().ToList();
+        Assert.Equal(2, triangles.Count);
+        Assert.Equal(new Color(255, 255, 0), triangles[1].Corners[1].Color);
+    }
+
+    [Fact]
+    public void An_emf_gradient_fill_triangle_record_cut_short_or_with_bad_indices_is_skipped()
+    {
+        byte[] full = Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 0, 255, 0, 0), .. Vertex(500, 0, 0, 255, 0), .. Vertex(0, 375, 0, 0, 255), 0, 1, 2]);
+        var cut = full[..(full.Length - 8)]; // the index triple is incomplete (the record size says so)
+        Put(cut, 4, cut.Length);
+        Assert.Empty(Lay(Emf(cut)).OfType<ShadedTriangleItem>());
+        // A vertex count larger than the record holds, including one whose byte size overflows an int.
+        foreach (int count in new[] { 100, 0x10000000, int.MaxValue })
+            Assert.Empty(Lay(Emf(Record(118, [0, 0, 0, 0, count, 1, 2, .. Vertex(0, 0, 255, 0, 0), 0, 0, 0]))).OfType<ShadedTriangleItem>());
+        // An index outside the vertices.
+        Assert.Empty(Lay(Emf(Record(118, [0, 0, 0, 0, 3, 1, 2, .. Vertex(0, 0, 255, 0, 0), .. Vertex(5, 0, 0, 255, 0), .. Vertex(0, 5, 0, 0, 255), 0, 1, 3]))).OfType<ShadedTriangleItem>());
     }
 }

@@ -12,6 +12,16 @@ public sealed class PdfShading
     private readonly double[] _coords;
     private readonly IReadOnlyList<ShadingStop> _stops;
 
+    private readonly (double X, double Y, double R, double G, double B)[]? _triangles;
+
+    private PdfShading((double X, double Y, double R, double G, double B)[] triangles)
+    {
+        Type = 4;
+        _coords = [];
+        _stops = [];
+        _triangles = triangles;
+    }
+
     private PdfShading(int type, double[] coords, IReadOnlyList<ShadingStop> stops)
     {
         if (stops.Count < 2) throw new ArgumentException("A shading needs at least two stops.", nameof(stops));
@@ -32,8 +42,41 @@ public sealed class PdfShading
     public static PdfShading Radial(double x0, double y0, double r0, double x1, double y1, double r1, IReadOnlyList<ShadingStop> stops) =>
         new(3, [x0, y0, r0, x1, y1, r1], stops);
 
+    /// <summary>
+    /// A free-form Gouraud-shaded triangle mesh (shading type 4): every three vertices (x, y, r, g, b with colors 0 to 1) are one
+    /// triangle whose color interpolates linearly between its corners. Nothing outside the triangles is painted.
+    /// </summary>
+    public static PdfShading Triangles(IReadOnlyList<(double X, double Y, double R, double G, double B)> vertices)
+    {
+        if (vertices.Count < 3 || vertices.Count % 3 != 0) throw new ArgumentException("Triangles need vertices in threes.", nameof(vertices));
+        return new PdfShading([.. vertices]);
+    }
+
+    private void WriteTriangles(PdfWriter writer, int id)
+    {
+        var v = _triangles!;
+        double minX = v.Min(p => p.X), maxX = v.Max(p => p.X), minY = v.Min(p => p.Y), maxY = v.Max(p => p.Y);
+        // 32-bit coordinates span the decode range; a degenerate range is widened so the decode stays valid.
+        if (maxX - minX < 1e-6) maxX = minX + 1;
+        if (maxY - minY < 1e-6) maxY = minY + 1;
+        uint Q(double value, double min, double max) => (uint)Math.Round(Math.Clamp((value - min) / (max - min), 0, 1) * uint.MaxValue);
+        byte C(double c) => (byte)Math.Round(Math.Clamp(c, 0, 1) * 255);
+        using var data = new MemoryStream();
+        foreach (var p in v)
+        {
+            data.WriteByte(0); // edge flag 0: each triangle is independent
+            foreach (uint q in new[] { Q(p.X, minX, maxX), Q(p.Y, minY, maxY) })
+                data.Write([(byte)(q >> 24), (byte)(q >> 16), (byte)(q >> 8), (byte)q]);
+            data.Write([C(p.R), C(p.G), C(p.B)]);
+        }
+        string N(double d) => PdfFormat.Number(d);
+        writer.WriteStream(id, $"/ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 32 /BitsPerComponent 8 /BitsPerFlag 8 " +
+                               $"/Decode [{N(minX)} {N(maxX)} {N(minY)} {N(maxY)} 0 1 0 1 0 1]", data.ToArray());
+    }
+
     internal void Write(PdfWriter writer, int id)
     {
+        if (_triangles is not null) { WriteTriangles(writer, id); return; }
         string N(double v) => PdfFormat.Number(v);
         // One exponential (type 2) function per pair of stops, joined by a stitching (type 3) function.
         var stops = _stops.OrderBy(s => Math.Clamp(s.Position, 0, 1)).Select(s => s with { Position = Math.Clamp(s.Position, 0, 1) }).ToList();

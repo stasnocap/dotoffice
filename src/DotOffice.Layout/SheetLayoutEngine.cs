@@ -450,6 +450,7 @@ public sealed partial class SheetLayoutEngine
             ClipOutline = p.ClipOutline?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList(),
         },
         GradientItem g => g with { X = dx + g.X * scale, Y = dy + g.Y * scale, Width = g.Width * scale, Height = g.Height * scale, Clip = g.Clip?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
+        ShadedTriangleItem s => s with { Corners = s.Corners.Select(c => (dx + c.X * scale, dy + c.Y * scale, c.Color)).ToList() },
         ImageItem i => i with { X = dx + i.X * scale, Y = dy + i.Y * scale, Width = i.Width * scale, Height = i.Height * scale, Clip = i.Clip?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         PolygonItem p => p with { Points = p.Points.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         EllipseItem e => e with { X = dx + e.X * scale, Y = dy + e.Y * scale, Width = e.Width * scale, Height = e.Height * scale },

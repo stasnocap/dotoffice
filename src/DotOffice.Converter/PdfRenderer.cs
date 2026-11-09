@@ -199,6 +199,9 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     canvas.PaintShading(shading!).RestoreState();
                     break;
                 }
+                case ShadedTriangleItem { Corners.Count: 3 } shaded:
+                    canvas.PaintShading(_pdf.AddShading(PdfShading.Triangles(shaded.Corners.Select(c => (c.X, h - c.Y, c.Color.R / 255.0, c.Color.G / 255.0, c.Color.B / 255.0)).ToList())));
+                    break;
                 case RectItem rect:
                     Fill(rect.Fill);
                     canvas.Rectangle(rect.X, h - rect.Y - rect.Height, rect.Width, rect.Height).Fill();

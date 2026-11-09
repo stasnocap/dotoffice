@@ -84,6 +84,8 @@ internal static class Metafiles
                     Clip = push.Clip is { } c ? (x + c.X * sx, y + c.Y * sy, c.Width * sx, c.Height * sy) : null,
                 };
             }
+            case ShadedTriangleItem shaded:
+                return shaded with { Corners = shaded.Corners.Select(c => { var (fx, fy) = P(c.X, c.Y); return (fx, fy, c.Color); }).ToList() };
             case GradientItem gradient:
             {
                 // The blend direction is a normal to the lines of equal color, so it scales by the inverse of the box's stretch.
@@ -736,14 +738,12 @@ internal sealed class GdiPlayer(FontSelector fonts)
         Add(new GradientItem(left, top, width, height, degree, [new GradientStop(0, a.Color), new GradientStop(1, b.Color)]));
     }
 
-    /// <summary>A GradientFill triangle, filled with the mean of its corners' colors.</summary>
+    /// <summary>A GradientFill triangle: its color blends between the corners' colors (Gouraud shading).</summary>
     public void GradientTriangle((double X, double Y, Color Color) a, (double X, double Y, Color Color) b, (double X, double Y, Color Color) c)
     {
         var m = Transform;
-        var color = new Color((byte)((a.Color.R + b.Color.R + c.Color.R) / 3), (byte)((a.Color.G + b.Color.G + c.Color.G) / 3), (byte)((a.Color.B + b.Color.B + c.Color.B) / 3));
-        var points = new[] { a, b, c }.Select((v, k) => { var (x, y) = m.Apply(v.X, v.Y); return new PathPoint(x, y, k == 0 ? PathPointKind.Move : PathPointKind.Line); }).ToList();
-        points.Add(new PathPoint(0, 0, PathPointKind.Close));
-        Add(new PathItem(points, color, null));
+        var corners = new[] { a, b, c }.Select(v => { var (x, y) = m.Apply(v.X, v.Y); return (x, y, v.Color); }).ToList();
+        Add(new ShadedTriangleItem(corners));
     }
 
     public void FillRegion(IEnumerable<(double L, double T, double R, double B)> rects, int brushHandle)
@@ -1069,8 +1069,10 @@ internal static class EmfReader
             case 118 when r.Length >= 36:
             {
                 // GradientFill: 16-byte vertices (x, y, then 16-bit red, green, blue), then rectangles or triangles of vertex indices.
-                int count = I32(r, 24), shapes = I32(r, 28), mode = I32(r, 32), at = 36 + 16 * count;
-                if (count < 0 || shapes < 0 || at > r.Length) break;
+                int count = I32(r, 24), shapes = I32(r, 28), mode = I32(r, 32);
+                long end = 36 + 16L * count;
+                if (count < 0 || shapes < 0 || end > r.Length) break;
+                int at = (int)end;
                 var vertices = new List<(double X, double Y, Color Color)>(count);
                 for (int k = 0; k < count; k++)
                 {

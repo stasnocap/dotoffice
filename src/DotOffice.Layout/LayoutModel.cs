@@ -93,6 +93,12 @@ public sealed record GradientItem(double X, double Y, double Width, double Heigh
         this with { X = X + dx, Y = Y + dy, Clip = Clip?.Select(p => (p.X + dx, p.Y + dy)).ToList() };
 }
 
+/// <summary>A triangle whose color blends smoothly between its three corners (Gouraud shading), clipped by the enclosing groups.</summary>
+public sealed record ShadedTriangleItem(IReadOnlyList<(double X, double Y, Color Color)> Corners) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { Corners = Corners.Select(c => (c.X + dx, c.Y + dy, c.Color)).ToList() };
+}
+
 public enum PathPointKind { Move, Line, Curve, Close }
 
 /// <summary>A point of a <see cref="PathItem"/>: three <see cref="PathPointKind.Curve"/> points in a row make a cubic Bézier segment; a close point has no position.</summary>
