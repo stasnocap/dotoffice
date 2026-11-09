@@ -177,6 +177,30 @@ public class SheetChartLayoutTests
     private static IEnumerable<PathItem> Paths(LayoutPage page) => page.Items.OfType<PathItem>();
 
     [Fact]
+    public void A_path_scales_with_the_sheet_around_the_page_margin()
+    {
+        var series = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Blue, Line: Blue, LineWidth: 2) };
+        LayoutPage Scaled(double scale)
+        {
+            var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("x")));
+            sheet.PageSetup.Scale = scale;
+            sheet.Charts.Add(Chart(ChartKind.Line, series));
+            return SheetLayoutTests.Layout(sheet).Pages[0];
+        }
+        var full = Paths(Scaled(1)).ToList();
+        var half = Paths(Scaled(0.5)).ToList();
+        Assert.NotEmpty(full);
+        Assert.Equal(full.Count, half.Count);
+        double left = OriginX; // the page margin: scaling keeps it fixed
+        for (int i = 0; i < full.Count; i++)
+        {
+            Assert.Equal(full[i].LineWidth / 2, half[i].LineWidth, 6);
+            for (int k = 0; k < full[i].Points.Count; k++)
+                Assert.Equal(left + (full[i].Points[k].X - left) / 2, half[i].Points[k].X, 6);
+        }
+    }
+
+    [Fact]
     public void A_styled_marker_sits_on_the_page_where_an_unstyled_one_does()
     {
         var plain = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle };
