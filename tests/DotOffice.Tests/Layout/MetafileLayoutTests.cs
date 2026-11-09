@@ -314,6 +314,21 @@ public class MetafileLayoutTests
     }
 
     [Fact]
+    public void An_emf_plus_path_object_with_relative_points_and_run_length_types_is_filled()
+    {
+        // Points (30, 30), then +30 across and +30 down; types: a move, then a run of two lines closing the figure.
+        byte[] body = [0x1E, 0x1E, 0x1E, 0x00, 0x00, 0x1E, 0x01, 0x00, 0x02, 0x81];
+        var items = Lay(Emf(PlusComment(false,
+            Plus(0x4008, 0x300 | 1, I(unchecked((int)0xDBC01002), 3, 0x0800), body, new byte[2]),
+            Plus(0x4014, 0x8001, I(unchecked((int)0xFFFF0000))))));
+        var path = Assert.Single(items.OfType<PathItem>());
+        Assert.Equal(new Color(255, 0, 0), path.Fill);
+        double w = path.Points.Max(q => q.X) - path.Points.Min(q => q.X), h = path.Points.Max(q => q.Y) - path.Points.Min(q => q.Y);
+        Assert.Equal(w, h, 3); // a right triangle with equal legs
+        Assert.True(w > 0);
+    }
+
+    [Fact]
     public void A_hatched_emf_brush_draws_its_lines_over_the_background_color_inside_the_shape()
     {
         var items = Lay(Emf(

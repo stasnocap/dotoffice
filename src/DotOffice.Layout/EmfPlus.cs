@@ -504,20 +504,52 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
         size = 0;
         if (at + 12 > d.Length) return null;
         int count = I32(d, at + 4), flags = I32(d, at + 8);
-        if (count < 0 || (flags & 0x0800) != 0) return null; // relative (run-length) points are not played
-        bool small = (flags & 0x4000) != 0;
-        int pointsAt = at + 12, typesAt = pointsAt + count * (small ? 4 : 8);
-        if (typesAt + count > d.Length) return null;
-        size = 12 + count * (small ? 4 : 8) + (count + 3) / 4 * 4;
+        if (count < 0 || count > d.Length) return null;
+        bool small = (flags & 0x4000) != 0, relative = (flags & 0x0800) != 0;
+        int pointsAt = at + 12;
+        var points = new List<(double X, double Y)>(count);
+        int typesAt;
+        if (relative)
+        {
+            // Run-length offsets from the point before, each coordinate a signed 7- or 15-bit number.
+            try { points = Points(d, pointsAt, count, true, true, out typesAt); }
+            catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException or InvalidDataException) { return null; }
+        }
+        else
+        {
+            typesAt = pointsAt + count * (small ? 4 : 8);
+            if (typesAt + count > d.Length) return null;
+            for (int k = 0; k < count; k++)
+                points.Add(small ? (I16(d, pointsAt + 4 * k), I16(d, pointsAt + 4 * k + 2)) : (F32(d, pointsAt + 8 * k), F32(d, pointsAt + 8 * k + 4)));
+        }
+        var types = new List<int>(count);
+        int end = typesAt;
+        if (relative)
+        {
+            // Run-length types: a run count in the low six bits (bit 7 marks Bezier points), then the point type of the run.
+            while (types.Count < count)
+            {
+                if (end + 2 > d.Length) return null;
+                int run = d[end] & 0x3F, type = d[end + 1];
+                if ((d[end] & 0x80) != 0) type = type & ~7 | 3;
+                for (int j = 0; j < Math.Max(run, 1) && types.Count < count; j++) types.Add(type);
+                end += 2;
+            }
+        }
+        else
+        {
+            if (typesAt + count > d.Length) return null;
+            for (int k = 0; k < count; k++) types.Add(d[typesAt + k]);
+            end = typesAt + count;
+        }
+        size = end - at + 3 & ~3;
         var path = new List<PathPoint>(count + 4);
         for (int k = 0; k < count; k++)
         {
-            double x = small ? I16(d, pointsAt + 4 * k) : F32(d, pointsAt + 8 * k);
-            double y = small ? I16(d, pointsAt + 4 * k + 2) : F32(d, pointsAt + 8 * k + 4);
-            int t = d[typesAt + k];
+            int t = types[k];
             var kind = (t & 7) switch { 0 => PathPointKind.Move, 3 => PathPointKind.Curve, _ => PathPointKind.Line };
             if (k == 0) kind = PathPointKind.Move;
-            path.Add(new PathPoint(x, y, kind));
+            path.Add(new PathPoint(points[k].X, points[k].Y, kind));
             if ((t & 0x80) != 0) path.Add(new PathPoint(0, 0, PathPointKind.Close));
         }
         return path;
@@ -1027,7 +1059,9 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
     }
 
     /// <summary>Points as floats, 16-bit integers, or (relative) each a run-length offset from the one before.</summary>
-    private static List<(double X, double Y)> Points(ReadOnlySpan<byte> r, int at, int count, bool small, bool relative)
+    private static List<(double X, double Y)> Points(ReadOnlySpan<byte> r, int at, int count, bool small, bool relative) => Points(r, at, count, small, relative, out _);
+
+    private static List<(double X, double Y)> Points(ReadOnlySpan<byte> r, int at, int count, bool small, bool relative, out int end)
     {
         if (count < 0 || count > r.Length) throw new InvalidDataException("A point list runs past its EMF+ record.");
         var points = new List<(double X, double Y)>(count);
@@ -1040,6 +1074,7 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
                 y += Relative(r, ref at);
                 points.Add((x, y));
             }
+            end = at;
             return points;
         }
         int step = small ? 4 : 8;
@@ -1049,6 +1084,7 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
             int o = at + k * step;
             points.Add(small ? (I16(r, o), I16(r, o + 2)) : (F32(r, o), F32(r, o + 4)));
         }
+        end = at + count * step;
         return points;
     }
 
