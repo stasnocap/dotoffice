@@ -49,6 +49,23 @@ internal sealed class DocxBuilder
         return id;
     }
 
+    /// <summary>Adds a part with a relationship from the main part and returns its relationship id; <paramref name="target"/> is relative to word/.</summary>
+    public string AddPart(string target, string relationshipType, string content)
+    {
+        var id = NextId();
+        _parts[$"word/{target}"] = Encoding.UTF8.GetBytes(content);
+        _relationships.Add((id, relationshipType, target, false));
+        return id;
+    }
+
+    /// <summary>Adds a relationship to a part that does not exist.</summary>
+    public string AddDanglingRelationship(string target, string relationshipType)
+    {
+        var id = NextId();
+        _relationships.Add((id, relationshipType, target, false));
+        return id;
+    }
+
     /// <summary>Adds an external hyperlink relationship and returns its id.</summary>
     public string AddHyperlink(string url)
     {

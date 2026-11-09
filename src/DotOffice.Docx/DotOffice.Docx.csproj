@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\OpcPackage.cs" Link="Shared\OpcPackage.cs" />
+    <Compile Include="..\Shared\NumberFormat.cs" Link="Shared\NumberFormat.cs" />
+    <Compile Include="..\Shared\NumberFormatter.cs" Link="Shared\NumberFormatter.cs" />
+    <Compile Include="..\Shared\DrawingMl\*.cs" LinkBase="Shared\DrawingMl" />
   </ItemGroup>
 
   <ItemGroup>

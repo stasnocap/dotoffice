@@ -163,6 +163,7 @@ public sealed class LayoutEngine
             result.Pages.Add(Render(page, fields, settings, lineNumbers));
         }
         Metafiles.Expand(result, _fonts, _options.Warnings);
+        ChartItems.Expand(result, _options);
         return result;
     }
 
@@ -705,6 +706,7 @@ public sealed class LayoutEngine
             return items;
         }
         if (f is FloatingTable table) return table.Items.Select(i => i.Offset(x, y)).ToList();
+        if (f is FloatingImage { Chart: { } chart }) return [new ChartItem(x, y, f.Width, f.Height, chart.Chart)];
         if (f is FloatingImage image) return [new ImageItem(x, y, f.Width, f.Height, image.Image)];
         return f is FloatingTextBox box ? TextBoxes.Realize(box, x, y, context) : [];
     }

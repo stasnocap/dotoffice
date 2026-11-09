@@ -28,7 +28,13 @@ public sealed class ImageRun(ImageData image, double width, double height, RunPr
     public ImageData Image { get; } = image;
     public double Width { get; } = width;
     public double Height { get; } = height;
+
+    /// <summary>Set when the run is a chart (the image is then empty): the chart to draw in the run's box, or null when it could not be read and its space stays empty.</summary>
+    public ChartContent? Chart { get; init; }
 }
+
+/// <summary>A chart of a document, read from its chart part; <see cref="Chart"/> is null when nothing can be drawn (the box stays empty).</summary>
+public sealed record ChartContent(SheetChart? Chart);
 
 /// <summary>What a floating object's position is measured from.</summary>
 public enum FloatReference
@@ -73,6 +79,9 @@ public abstract class FloatingObject(double width, double height, RunProperties 
 public sealed class FloatingImage(ImageData image, double width, double height, RunProperties properties) : FloatingObject(width, height, properties)
 {
     public ImageData Image { get; } = image;
+
+    /// <summary>Set when the object is a chart (the image is then empty); see <see cref="ImageRun.Chart"/>.</summary>
+    public ChartContent? Chart { get; init; }
 }
 
 public enum TextBoxAnchor { Top, Center, Bottom }

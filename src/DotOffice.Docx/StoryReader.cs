@@ -532,7 +532,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
     private void ReadInlineDrawing(XmlReader r, ParagraphState state, RunProperties props)
     {
         long cx = 0, cy = 0;
-        string? embed = null;
+        string? embed = null, chartId = null;
         string? graphicType = null;
         ShapeData? shape = null;
         int depth = r.Depth;
@@ -553,6 +553,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     long.TryParse(r.GetAttribute("cy"), NumberStyles.Integer, CultureInfo.InvariantCulture, out cy);
                 }
                 else if (r.IsA() && r.LocalName == "blip") embed ??= r.RAttr("embed");
+                else if (r.LocalName == "chart" && r.NamespaceURI == ChartNamespace) chartId ??= r.RAttr("id");
                 else if (r.IsA() && r.LocalName == "graphicData") graphicType = r.GetAttribute("uri");
             }
             r.Read();
@@ -564,6 +565,11 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
             var origin = new FloatPosition(FloatReference.Column, FloatAlignment.Offset, 0);
             if (CreateShape(shape, Units.FromEmu(cx), Units.FromEmu(cy), props, origin, origin, TextWrap.None, false, default) is { } box)
                 AddInline(state, new InlineShape(box));
+        }
+        else if (IsChart(graphicType))
+        {
+            if (LoadChart(chartId, cx, cy) is var (content, chartWidth, chartHeight))
+                AddInline(state, new ImageRun(ChartPlaceholder, chartWidth, chartHeight, props) { Chart = content });
         }
         else if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
             AddInline(state, new ImageRun(image, width, height, props));
@@ -582,7 +588,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         bool inHorizontal = true;
         var wrap = TextWrap.None;
         long cx = 0, cy = 0;
-        string? embed = null, graphicType = null;
+        string? embed = null, graphicType = null, chartId = null;
         ShapeData? shape = null;
         int depth = r.Depth;
         if (r.IsEmptyElement) { r.Read(); return; }
@@ -634,6 +640,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     case "wrapNone": wrap = TextWrap.None; break;
                 }
             }
+            else if (r.NodeType == XmlNodeType.Element && r.LocalName == "chart" && r.NamespaceURI == ChartNamespace) chartId ??= r.RAttr("id");
             else if (r.NodeType == XmlNodeType.Element && r.IsA())
             {
                 if (r.LocalName == "blip") embed ??= r.RAttr("embed");
@@ -647,6 +654,14 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         {
             if (CreateShape(shape, Units.FromEmu(cx), Units.FromEmu(cy), props, horizontal, vertical, wrap, behind, distance) is { } box)
                 AddInline(state, box);
+        }
+        else if (IsChart(graphicType))
+        {
+            if (LoadChart(chartId, cx, cy) is var (content, chartWidth, chartHeight))
+                AddInline(state, new FloatingImage(ChartPlaceholder, chartWidth, chartHeight, props)
+                {
+                    Horizontal = horizontal, Vertical = vertical, Wrap = behind ? TextWrap.None : wrap, BehindText = behind, Distance = distance, Chart = content,
+                });
         }
         else if (LoadPicture(embed, graphicType, cx, cy) is var (image, width, height))
             AddInline(state, new FloatingImage(image, width, height, props)

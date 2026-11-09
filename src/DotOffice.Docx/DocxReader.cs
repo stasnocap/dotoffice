@@ -1,6 +1,8 @@
 using System.Text;
 using System.Xml;
+using System.Xml.Linq;
 using DotOffice.Core;
+using DotOffice.Dml;
 using DotOffice.Opc;
 
 namespace DotOffice.Docx;
@@ -153,6 +155,30 @@ internal sealed class DocxContext
 
     public OpcPackage Package { get; }
     public DocxReaderOptions Options { get; }
+
+    private DmlTheme? _chartTheme;
+
+    /// <summary>The theme charts take their colors from: the document's theme part, or the Office 2013 accents when there is none.</summary>
+    public DmlTheme ChartTheme => _chartTheme ??= ReadChartTheme();
+
+    private DmlTheme ReadChartTheme()
+    {
+        if (Package.FindRelationship(MainPart, "theme") is { IsExternal: false } rel && Package.Exists(rel.Target))
+        {
+            try
+            {
+                using var r = Package.OpenXml(rel.Target);
+                return DmlTheme.Read(r);
+            }
+            catch (Exception e) when (e is XmlException or InvalidDataException) { Warn("docx.malformed-part", $"Ignoring malformed theme: {e.Message}"); }
+        }
+        // No theme part: Word uses the accents of the Office 2013 theme.
+        XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        string[] names = ["dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"];
+        string[] values = ["000000", "FFFFFF", "44546A", "E7E6E6", "5B9BD5", "ED7D31", "A5A5A5", "FFC000", "4472C4", "70AD47", "0563C1", "954F72"];
+        var scheme = new XElement(a + "clrScheme", names.Select((n, i) => new XElement(a + n, new XElement(a + "srgbClr", new XAttribute("val", values[i])))));
+        return DmlTheme.Read(new XDocument(new XElement(a + "theme", new XElement(a + "themeElements", scheme))).CreateReader());
+    }
     public string MainPart { get; }
     public StyleSheet Styles { get; }
     public Numbering Numbering { get; }

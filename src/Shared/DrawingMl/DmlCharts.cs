@@ -19,6 +19,9 @@ internal interface IChartData
     /// </summary>
     bool FramedChartArea { get; }
 
+    /// <summary>Whether the chart has Word's own default frame on a white chart area: 898989, 0.5 pt (measured in Word 2016).</summary>
+    bool WordChartFrame => false;
+
     /// <summary>
     /// The color of chart text that states none (the theme's text color in a presentation); null keeps black, with data labels in
     /// bars and slices picked for contrast.
@@ -688,6 +691,7 @@ internal static class DmlCharts
         var gridStyle = Child(valueAxis, "majorGridlines") is not null ? GridlineStyle(valueAxis, theme) : GridlineStyle(categoryAxis, theme);
         Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0x86, 0x86, 0x86) : null;
         double borderWidth = 0.75;
+        if (context.WordChartFrame) (background, border, borderWidth) = (Color.White, new Color(0x89, 0x89, 0x89), 0.5);
         Color? plotBackground = null, defaultText = null;
         var (styleP, styleBlock) = StyleParts(chartStyle);
         if (styleBlock == 4)

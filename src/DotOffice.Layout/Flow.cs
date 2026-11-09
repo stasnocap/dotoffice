@@ -375,7 +375,8 @@ internal static class ParagraphLayouter
                     {
                         if (context is not null) items.AddRange(TextBoxes.Realize(shape.Box, x0 + a.X, baseline - shape.Height, context));
                     }
-                    else items.Add(new ImageItem(x0 + a.X, baseline - a.Image!.Height, a.Image.Width, a.Image.Height, a.Image.Image));
+                    else if (a.Image!.Chart is { } chart) items.Add(new ChartItem(x0 + a.X, baseline - a.Image.Height, a.Image.Width, a.Image.Height, chart.Chart));
+                    else items.Add(new ImageItem(x0 + a.X, baseline - a.Image.Height, a.Image.Width, a.Image.Height, a.Image.Image));
                     break;
                 case AtomKind.Tab when a.Tab is { Leader: not TabLeader.None } stop && a.Advance > 4:
                     var ch = stop.Leader switch { TabLeader.Dot => ".", TabLeader.Hyphen => "-", TabLeader.Underscore => "_", _ => "·" };

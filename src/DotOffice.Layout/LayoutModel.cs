@@ -111,6 +111,12 @@ public sealed record PathItem(IReadOnlyList<PathPoint> Points, Color? Fill, Colo
     public override LayoutItem Offset(double dx, double dy) => this with { Points = Points.Select(p => p with { X = p.X + dx, Y = p.Y + dy }).ToList() };
 }
 
+/// <summary>A chart in a document, drawn into its box when the layout is finished (see <see cref="ChartItems"/>); a null chart draws nothing.</summary>
+public sealed record ChartItem(double X, double Y, double Width, double Height, SheetChart? Chart) : LayoutItem
+{
+    public override LayoutItem Offset(double dx, double dy) => this with { X = X + dx, Y = Y + dy };
+}
+
 public sealed record ImageItem(double X, double Y, double Width, double Height, ImageData Image) : LayoutItem
 {
     /// <summary>When set, the picture is painted only inside this polygon (a picture fill of a shape).</summary>

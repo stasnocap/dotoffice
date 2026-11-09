@@ -32,6 +32,10 @@ public sealed partial class SheetLayoutEngine
     /// <summary>The frame of the chart being drawn (set by <see cref="EmitChart"/>), for labels that are placed relative to the chart.</summary>
     private (double X, double Y, double Width, double Height) _chartRect;
 
+    /// <summary>Draws a chart of a text document into the box at (<paramref name="x"/>, <paramref name="y"/>).</summary>
+    internal void DrawChart(SheetChart chart, double x, double y, double w, double h, List<LayoutItem> items) =>
+        EmitChart(chart, x, y, w, h, (x, y, w, h), items);
+
     /// <summary>
     /// Draws a chart into its frame: background, title, legend, axes with gridlines and the series (columns, bars, lines or pie slices).
     /// Everything is clipped to the frame.
@@ -948,6 +952,29 @@ public sealed partial class SheetLayoutEngine
             if (series.Labels is { } l && i < l.Count && l[i].Length > 0)
                 labels.Add(new PieLabel(l[i], color, LabelStyleAt(series, i), LabelPlacementAt(series, i), start + sweep / 2, sweep, inner, outer));
             start += sweep;
+        }
+    }
+}
+
+/// <summary>Draws the charts of a text document: each <see cref="ChartItem"/> is replaced by the items of the chart drawn into its box.</summary>
+internal static class ChartItems
+{
+    public static void Expand(LayoutDocument document, LayoutOptions options)
+    {
+        SheetLayoutEngine? engine = null;
+        foreach (var page in document.Pages)
+        {
+            var items = page.Items;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] is not ChartItem item) continue;
+                var drawn = new List<LayoutItem>();
+                if (item.Chart is { } chart && item.Width > 0 && item.Height > 0)
+                    (engine ??= new SheetLayoutEngine(options)).DrawChart(chart, item.X, item.Y, item.Width, item.Height, drawn);
+                items.RemoveAt(i);
+                items.InsertRange(i, drawn);
+                i += drawn.Count - 1;
+            }
         }
     }
 }
