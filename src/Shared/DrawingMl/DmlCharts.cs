@@ -192,7 +192,10 @@ internal static class DmlCharts
         bool filled = kind == ChartKind.Radar && radarStyle == "filled";
         var groupLabels = Child(group, "dLbls");
         var series = new List<ChartSeries>();
-        int cycles = 1 + Math.Max(sers.Count, sers.Select(e => (int)Math.Clamp(Number(Child(e, "idx"), "val", -1), -1, 1_000_000) + 1).DefaultIfEmpty(0).Max()) / 6;
+        // Counted over the whole plot area: Office shades a combined chart's series by all of them, not by their group.
+        var allSers = (plot ?? group).Elements().SelectMany(g => g.Elements()).Where(e => e.Name.LocalName == "ser").ToList();
+        int seriesCount = Math.Max(Math.Max(sers.Count, allSers.Count), allSers.Concat(sers).Select(e => (int)Math.Clamp(Number(Child(e, "idx"), "val", -1), -1, 1_000_000) + 1).DefaultIfEmpty(0).Max());
+        int cycles = 1 + seriesCount / 6;
         for (int i = 0; i < sers.Count; i++)
         {
             var ser = sers[i];
@@ -215,7 +218,7 @@ internal static class DmlCharts
             // Column, bar and area series with no stated fill take the automatic color (measured in Office 2016); other kinds keep the palette.
             double idxOfSeries = Number(Child(ser, "idx"), "val", -1);
             int autoIndex = idxOfSeries >= 0 && idxOfSeries < 1_000_000 ? (int)idxOfSeries : firstIndex + i;
-            Color defaultColor = kind is ChartKind.Column or ChartKind.Bar or ChartKind.Area ? AutomaticMarkerColor(theme, autoIndex, cycles) : PaletteColor(theme, firstIndex + i);
+            Color defaultColor = kind is ChartKind.Column or ChartKind.Bar or ChartKind.Area ? AutomaticSeriesColor(theme, chartStyle, autoIndex, seriesCount) : PaletteColor(theme, firstIndex + i);
             Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? defaultColor;
 
             var (ownVisible, ownSymbol, ownSize, ownStyle) = ReadMarker(Child(ser, "marker"));
@@ -224,7 +227,7 @@ internal static class DmlCharts
             int seriesIndex = idxValue >= 0 && idxValue < 1_000_000 ? (int)idxValue : firstIndex + i;
             double? statedWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : null;
             double lineWidth = statedWidth ?? DefaultLineWidth(chartStyle, context.LineWidthScale);
-            var autoColor = AutomaticMarkerColor(theme, seriesIndex, cycles);
+            var autoColor = AutomaticSeriesColor(theme, chartStyle, seriesIndex, seriesCount);
             var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, AutomaticMarkerSize(lineWidth));
             bool marker = true;
             if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
@@ -319,7 +322,9 @@ internal static class DmlCharts
                 // Measured on line, scatter and non-filled radar series: a line with no color of its own takes the automatic outline and one with no width
                 // the application's default. Color itself is unchanged for labels, trendlines and the like. A filled radar has no line.
                 lineLike && line && SolidFill(lineProperties, theme) is null && SolidFill(spPr, theme) is null ? auto.Outline : null,
-                lineLike ? lineWidth : null, ownVisible == false));
+                lineLike ? lineWidth : null, ownVisible == false,
+                kind is ChartKind.Column or ChartKind.Bar && lineProperties is null ? BarOutlineColor(theme, chartStyle, context.DarkerMarkerOutline, seriesIndex, seriesCount) : null,
+                context.DarkerMarkerOutline ? 0.75 : 0.5));
         }
         return series;
         }
@@ -682,6 +687,21 @@ internal static class DmlCharts
 
         var gridStyle = Child(valueAxis, "majorGridlines") is not null ? GridlineStyle(valueAxis, theme) : GridlineStyle(categoryAxis, theme);
         Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0x86, 0x86, 0x86) : null;
+        double borderWidth = 0.75;
+        Color? plotBackground = null, defaultText = null;
+        var (styleP, styleBlock) = StyleParts(chartStyle);
+        if (styleBlock == 4)
+        {
+            background = Color.White;
+            (border, borderWidth) = context.FramedChartArea ? (new Color(0x86, 0x86, 0x86), 0.75) : (new Color(0x89, 0x89, 0x89), 0.5);
+            plotBackground = styleP <= 2 ? new Color(0xE7, 0xE7, 0xE7) : theme[4 + styleP - 3] ?? new Color(0x44, 0x72, 0xC4);
+        }
+        else if (styleBlock == 5)
+        {
+            (background, border, plotBackground, defaultText) = (Color.Black, null, new Color(0x3F, 0x3F, 0x3F), Color.White);
+        }
+        if (Child(plot, "spPr") is { } plotProperties)
+            plotBackground = Child(plotProperties, "noFill") is not null ? null : SolidFill(plotProperties, theme, plotBackground);
         if (Child(space, "spPr") is { } chartProperties)
         {
             background = SolidFill(chartProperties, theme, background);
@@ -704,7 +724,7 @@ internal static class DmlCharts
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
-            Background = background, Border = border, FontSize = fontSize, TextColor = context.TextColor,
+            Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,
@@ -776,6 +796,60 @@ internal static class DmlCharts
         int cycle = index / 6 % cycles;
         double amount = 0.7 * (2 * cycle - (cycles - 1)) / (cycles + 1);
         return amount < -1e-9 ? Shade(accent, 1 + amount) : amount > 1e-9 ? Tint(accent, 1 - amount) : accent;
+    }
+
+
+    /// <summary>The palette number p (1 to 8) and the block (0 to 5) of a <c>c:style</c>; an absent or out-of-range style counts as style 2.</summary>
+    internal static (int P, int Block) StyleParts(int? style)
+    {
+        int s = style is >= 1 and <= 48 ? style.Value : 2;
+        return ((s - 1) % 8 + 1, (s - 1) / 8);
+    }
+
+    // Fitted from Office 2016 PDFs of one default theme (not a documented rule): the six grays of styles 1, 9, 17, 25, 33; block 5 (41-48) lightens
+    // two of them. F0F0F0 is an estimate and the sixth gray comes from a shaded-level sample.
+    private static readonly Color[] StyleGrays = [new(0x61, 0x61, 0x61), new(0xB3, 0xB3, 0xB3), new(0x81, 0x81, 0x81), new(0x50, 0x50, 0x50), new(0x95, 0x95, 0x95), new(0xDA, 0xDA, 0xDA)];
+
+    /// <summary>
+    /// The color Office 2016 gives a series with no fill or line of its own, by <c>c:style</c> (p = palette 1 to 8): p 2 the theme's accents (<see cref="AutomaticMarkerColor"/>),
+    /// p 3 to 8 the accent p - 2 alone, shaded and tinted by 0.7 (2i - (n - 1)) / (n + 1) over n series, p 1 six grays with the same levels as p 2.
+    /// A fit to measured charts of 3 to 25 series, not a documented rule.
+    /// </summary>
+    internal static Color AutomaticSeriesColor(DmlTheme theme, int? style, int index, int count)
+    {
+        var (p, block) = StyleParts(style);
+        if (p == 2) return AutomaticMarkerColor(theme, index, 1 + count / 6);
+        if (index < 0) index = 0;
+        Color Vary(Color baseColor, int position, int levels)
+        {
+            double amount = levels < 2 ? 0 : 0.7 * (2 * position - (levels - 1)) / (levels + 1);
+            return amount < -1e-9 ? Shade(baseColor, 1 + amount) : amount > 1e-9 ? Tint(baseColor, 1 - amount) : baseColor;
+        }
+        if (p == 1)
+        {
+            var gray = StyleGrays[index % 6];
+            if (block == 5 && index % 6 == 0) gray = new Color(0xF9, 0xF9, 0xF9);
+            else if (block == 5 && index % 6 == 3) gray = new Color(0xF0, 0xF0, 0xF0);
+            int levels = 1 + count / 6;
+            return Vary(gray, index / 6 % levels, levels);
+        }
+        var accent = theme[4 + p - 3] ?? new Color(0x44, 0x72, 0xC4);
+        int n = Math.Max(count, 1);
+        return Vary(accent, index % n, n);
+    }
+
+    /// <summary>
+    /// The outline of a column or bar that states none: styles 9 to 16 white (PowerPoint) or F9F9F9 (Excel); styles 33 to 40 a 0.5 linear shade of the plain accent (35 to 40) or of
+    /// the series' fill (34), black for 33 (not measured in Excel). A fit: within 5 per channel of six measured values per application.
+    /// </summary>
+    internal static Color? BarOutlineColor(DmlTheme theme, int? style, bool excel, int index, int count)
+    {
+        var (p, block) = StyleParts(style);
+        if (block == 1) return excel ? new Color(0xF9, 0xF9, 0xF9) : Color.White;
+        if (block != 4) return null;
+        if (p == 1) return Color.Black;
+        if (p == 2) return Shade(AutomaticSeriesColor(theme, style, index, count), 0.5);
+        return Shade(theme[4 + p - 3] ?? new Color(0x44, 0x72, 0xC4), 0.5);
     }
 
     /// <summary>The default color of the i-th series: the theme's accents, then darker and lighter variants of them.</summary>

@@ -41,7 +41,8 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
     double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null,
     IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null, ChartAutoMarker? Auto = null,
-    Color? LineColor = null, double? LineWidth = null, bool MarkerNone = false)
+    Color? LineColor = null, double? LineWidth = null, bool MarkerNone = false,
+    Color? BarOutline = null, double BarOutlineWidth = 0.5)
 {
     /// <summary>The color the line of a line-like series is drawn in: <see cref="LineColor"/> where the reader chose one apart from <see cref="Color"/> (see its remarks), else <see cref="Color"/>.</summary>
     public Color StrokeColor => LineColor ?? Color;
@@ -323,6 +324,15 @@ public sealed record SheetChart : SheetObject
 
     /// <summary>The chart area's outline; null means none.</summary>
     public Color? Border { get; init; } = new Color(0xD9, 0xD9, 0xD9);
+
+    /// <summary>The width in points of <see cref="Border"/>.</summary>
+    public double BorderWidth { get; init; } = 0.75;
+
+    /// <summary>The plot area's fill; null means none.</summary>
+    public Color? PlotBackground { get; init; }
+
+    /// <summary>The color of axis, legend and title text that states none (white on the dark chart styles 41 to 48); null leaves <see cref="TextColor"/> or black.</summary>
+    public Color? DefaultTextColor { get; init; }
 
     /// <summary>A manual layout (<c>c:layout</c>) of the plot area; null means automatic.</summary>
     public ChartBox? PlotArea { get; init; }

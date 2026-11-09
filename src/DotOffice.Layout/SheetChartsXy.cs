@@ -52,6 +52,7 @@ public sealed partial class SheetLayoutEngine
         double plotTop = top + labelHeight / 2, plotBottom = bottom - xLabelSpace;
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
+        if (chart.PlotBackground is { } plotFill && plotWidth > 0 && plotHeight > 0) items.Add(new RectItem(plotLeft, plotTop, plotWidth, plotHeight, plotFill));
         var xScale = chart.XScale;
         var yScale = chart.ValueScale;
         double X(double v) => plotLeft + plotWidth * xScale.Fraction(v);

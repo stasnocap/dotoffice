@@ -812,4 +812,142 @@ public class XlsxChartTests
         var none = Read(Space("<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"none\"/></c:marker>") + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>")).Sheet.Charts.Single().Series;
         Assert.Equal((true, false), (none[0].MarkerNone, none[1].MarkerNone));
     }
+
+    // ---- c:style palettes, backgrounds, frames and bar outlines (Excel 2016 and PowerPoint 2016 PDFs of one default theme; fits)
+
+    private static string WithStyle(string xml, int? style) => style is null ? xml : xml.Replace("<c:chart>", $"<c:style val=\"{style}\"/><c:chart>");
+
+    private static List<ChartSeries> StyledLines(int style, int count) =>
+        Read(WithStyle(Space("<c:lineChart><c:grouping val=\"standard\"/>" + string.Concat(Enumerable.Range(0, count).Select(i => Ser(i, null, null, "S!$B$2:$B$4"))) + "</c:lineChart>"), style)).Sheet.Charts.Single().Series.ToList();
+
+    private static SheetChart StyledBars(int? style, string serExtra = "", string spaceExtra = "", int count = 1, string plotExtra = "")
+    {
+        var plot = Bars("col", "clustered", string.Concat(Enumerable.Range(0, count).Select(i => Ser(i, null, null, "S!$B$2:$B$4", serExtra))));
+        var xml = Space(plot + plotExtra);
+        if (spaceExtra.Length > 0) xml = xml.Replace("</c:chart>", "</c:chart>" + spaceExtra);
+        return Read(WithStyle(xml, style)).Sheet.Charts.Single();
+    }
+
+    private static void Within(int tolerance, string expected, Color actual)
+    {
+        var e = Color.TryParseHex(expected)!.Value;
+        Assert.True(Math.Abs(e.R - actual.R) <= tolerance && Math.Abs(e.G - actual.G) <= tolerance && Math.Abs(e.B - actual.B) <= tolerance, $"{actual} is not within {tolerance} of {expected}");
+    }
+
+    [Theory] // PowerPoint 2016 single-accent styles (3 to 8): accent p - 2 shaded and tinted by 0.7 (2i - (n - 1)) / (n + 1)
+    [InlineData(3, 6, "2F528F 3960A7 406DBB 6D89CB 9EADD8 C0C9E4")]
+    [InlineData(3, 3, "375DA1 4472C4 A7B5DB")]
+    [InlineData(3, 1, "4472C4")]
+    [InlineData(4, 1, "ED7D31")]
+    [InlineData(8, 1, "70AD47")]
+    [InlineData(2, 3, "4472C4 ED7D31 A5A5A5")]
+    [InlineData(19, 3, "375DA1 4472C4 A7B5DB")]
+    public void Single_accent_styles_vary_one_accent_over_the_series(int style, int count, string expected)
+    {
+        var series = StyledLines(style, count);
+        var colors = expected.Split(' ');
+        for (int i = 0; i < count; i++) Within(2, colors[i], series[i].AutomaticMarker.Color);
+    }
+
+    [Fact]
+    public void Style_3_with_25_series_starts_at_27457A() => Within(2, "27457A", StyledLines(3, 25)[0].AutomaticMarker.Color);
+
+    [Theory] // gray styles; PowerPoint measured
+    [InlineData(1, 3, "616161 B3B3B3 818181")]
+    [InlineData(1, 6, "555555 9E9E9E 727272 464646 838383 C1C1C1")]
+    [InlineData(1, 12, "4F4F4F 939393 6A6A6A 404040 7A7A7A B4B4B4 616161 B3B3B3 818181 505050 959595 DADADA")]
+    [InlineData(41, 6, "DDDDDD 9E9E9E 727272 D2D2D2 838383 C1C1C1")] // block 5: F9F9F9 and F0F0F0 (an estimate) replace two grays
+    public void Gray_styles_use_six_grays_with_the_level_rule(int style, int count, string expected)
+    {
+        var series = StyledLines(style, count);
+        var colors = expected.Split(' ');
+        for (int i = 0; i < count; i++) Within(3, colors[i], series[i].AutomaticMarker.Color);
+    }
+
+    [Fact]
+    public void Column_fills_follow_the_style_and_a_stated_fill_wins()
+    {
+        Within(2, "2F528F", StyledBars(35, count: 6).Series[0].Color);
+        Assert.Equal(new Color(0x12, 0x34, 0x56), StyledBars(35, "<c:spPr><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></c:spPr>").Series[0].Color);
+    }
+
+    [Fact]
+    public void An_absent_or_out_of_range_style_acts_as_style_2()
+    {
+        foreach (int? style in new int?[] { null, 0, 49, -3, 2 })
+        {
+            var chart = StyledBars(style, count: 3);
+            Assert.Equal(new Color(0xED, 0x7D, 0x31), chart.Series[1].Color);
+            Assert.All(chart.Series, s => Assert.Null(s.BarOutline));
+            Assert.Equal((Color.White, new Color(0x86, 0x86, 0x86), 0.75, null), (chart.Background, chart.Border, chart.BorderWidth, chart.PlotBackground));
+        }
+    }
+
+    [Theory] // Excel 2016: block 1 (9-16) F9F9F9 0.75 pt outlines; block 4 (33-40) a 0.5 shade of the accent, black for 33 (not measured in Excel)
+    [InlineData(8, null)] [InlineData(9, "F9F9F9")] [InlineData(16, "F9F9F9")] [InlineData(17, null)] [InlineData(32, null)] [InlineData(33, "000000")]
+    [InlineData(35, "2F528F")] [InlineData(36, "AE5A21")] [InlineData(40, "507E32")] [InlineData(41, null)] [InlineData(48, null)]
+    public void Bar_outlines_follow_the_style_block_in_excel(int style, string? expected)
+    {
+        var series = StyledBars(style).Series[0];
+        if (expected is null) { Assert.Null(series.BarOutline); return; }
+        Assert.Equal(Color.TryParseHex(expected!), series.BarOutline);
+        Assert.Equal(0.75, series.BarOutlineWidth);
+    }
+
+    [Fact]
+    public void The_outline_rule_fits_the_measured_shades()
+    {
+        // A 0.5 linear shade: of the accent for styles 35, 36, 40, of the series' fill for style 34.
+        void Check(string accent, string expected, Func<Color, Color> rule) => Within(6, expected, rule(Color.TryParseHex(accent)!.Value));
+        Check("4F81BD", "345B89", c => Sh(c, 0.5)); Check("C0504D", "8B3533", c => Sh(c, 0.5)); Check("F79646", "B56A2C", c => Sh(c, 0.5));
+        Check("4572A7", "2D4F79", c => Sh(c, 0.5)); Check("AA4643", "7B2E2C", c => Sh(c, 0.5)); Check("89A54E", "617734", c => Sh(c, 0.5));
+        Check("3B64AD", "29487E", c => Sh(c, 0.5)); Check("D26E2A", "9A4F1C", c => Sh(c, 0.5)); Check("929292", "6A6A6A", c => Sh(c, 0.5));
+        Check("4472C4", "2F528F", c => Sh(c, 0.5)); Check("ED7D31", "AE5A21", c => Sh(c, 0.5)); Check("70AD47", "507E32", c => Sh(c, 0.5));
+    }
+
+    private static Color Sh(Color c, double k)
+    {
+        byte One(byte v) { double s = v / 255.0, l = s <= 0.04045 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); l *= k; return (byte)Math.Round(255 * (l <= 0.0031308 ? l * 12.92 : 1.055 * Math.Pow(l, 1 / 2.4) - 0.055)); }
+        return new Color(One(c.R), One(c.G), One(c.B));
+    }
+
+    // HSL lightness scaled by lum, as DrawingML's lumMod (kept here because the reader's helper is internal to the Xlsx assembly).
+
+    [Fact]
+    public void A_stated_series_line_means_no_style_outline()
+    {
+        Assert.Null(StyledBars(9, "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>").Series[0].BarOutline);
+        Assert.Null(StyledBars(35, "<c:spPr><a:ln w=\"9525\"/></c:spPr>").Series[0].BarOutline);
+    }
+
+    [Theory] // blocks 0-3 as today, block 4 framed with a plot fill, block 5 black with a 3F3F3F plot and white text
+    [InlineData(1, "FFFFFF", "868686", null, false)] [InlineData(32, "FFFFFF", "868686", null, false)]
+    [InlineData(33, "FFFFFF", "868686", "E7E7E7", false)] [InlineData(34, "FFFFFF", "868686", "E7E7E7", false)]
+    [InlineData(35, "FFFFFF", "868686", "4472C4", false)] [InlineData(40, "FFFFFF", "868686", "70AD47", false)]
+    [InlineData(41, "000000", null, "3F3F3F", true)] [InlineData(48, "000000", null, "3F3F3F", true)]
+    public void Backgrounds_and_frames_follow_the_style_block(int style, string background, string? border, string? plot, bool whiteText)
+    {
+        var chart = StyledBars(style);
+        Assert.Equal(Color.TryParseHex(background), chart.Background);
+        Assert.Equal(border is null ? null : Color.TryParseHex(border), chart.Border);
+        Assert.Equal(plot is null ? null : Color.TryParseHex(plot), chart.PlotBackground);
+        Assert.Equal(whiteText ? Color.White : null, chart.DefaultTextColor);
+        Assert.Equal(0.75, chart.BorderWidth);
+    }
+
+    [Fact]
+    public void Stated_backgrounds_frames_and_plot_fills_win_over_the_style()
+    {
+        var chart = StyledBars(41, spaceExtra: "<c:spPr><a:solidFill><a:srgbClr val=\"112233\"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val=\"445566\"/></a:solidFill></a:ln></c:spPr>",
+            plotExtra: "<c:spPr><a:solidFill><a:srgbClr val=\"778899\"/></a:solidFill></c:spPr>");
+        Assert.Equal((new Color(0x11, 0x22, 0x33), new Color(0x44, 0x55, 0x66), new Color(0x77, 0x88, 0x99)), (chart.Background, chart.Border, chart.PlotBackground));
+        Assert.Null(StyledBars(35, plotExtra: "<c:spPr><a:noFill/></c:spPr>").PlotBackground);
+    }
+
+    [Fact]
+    public void Stated_text_color_is_kept_on_a_dark_style()
+    {
+        var chart = StyledBars(41, plotExtra: "<c:legend><c:legendPos val=\"r\"/><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang=\"en-US\"/></a:p></c:txPr></c:legend>");
+        Assert.Equal(Color.White, chart.DefaultTextColor); // the layout applies the default beneath the stated style
+    }
 }

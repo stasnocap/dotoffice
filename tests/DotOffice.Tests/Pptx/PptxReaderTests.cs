@@ -644,4 +644,48 @@ public class PptxReaderTests
         var chart = StyledLine("2", gridExtra: "<c:spPr><a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"654321\"/></a:solidFill></a:ln></c:spPr>");
         Assert.Equal((new Color(0x65, 0x43, 0x21), 1.5), (chart.GridlineColor, chart.GridlineWidth));
     }
+
+    private static SheetChart ReadStyledChart(int style, string chartXml)
+    {
+        var xml = chartXml.Replace("<c:chart>", $"<c:style val=\"{style}\"/><c:chart>");
+        var (presentation, _) = Read(new PptxBuilder().AddChart(xml).AddSlide(ChartFrame()));
+        return Assert.IsType<SheetChart>(Assert.Single(presentation.Slides[0].Objects));
+    }
+
+    [Theory] // PowerPoint 2016: block 1 white 0.5 pt, block 4 shade 0.5 of the plain accent (the builder's Office 2007 accents here: the measured 2F528F, AE5A21, 507E32 are the same rule on the 2013 accents); style 33 black
+    [InlineData(8, null)] [InlineData(9, "FFFFFF")] [InlineData(35, "385D8A")] [InlineData(36, "8C3836")] [InlineData(40, "B66D31")] [InlineData(33, "000000")] [InlineData(41, null)]
+    public void Bar_outlines_follow_the_style_block_in_powerpoint(int style, string? expected)
+    {
+        var chart = ReadStyledChart(style, ColumnChart.Replace("<c:spPr><a:solidFill><a:schemeClr val=\"tx2\"/></a:solidFill></c:spPr>", ""));
+        var outline = chart.Series[0].BarOutline;
+        Assert.Equal(expected is null ? null : Color.TryParseHex(expected), outline is null || expected is null ? outline : Near(outline.Value, expected));
+        if (expected is not null) Assert.Equal(0.5, chart.Series[0].BarOutlineWidth);
+    }
+
+    private static Color? Near(Color actual, string expected)
+    {
+        var e = Color.TryParseHex(expected)!.Value;
+        Assert.True(Math.Abs(e.R - actual.R) <= 2 && Math.Abs(e.G - actual.G) <= 2 && Math.Abs(e.B - actual.B) <= 2, $"{actual} is not near {expected}");
+        return e;
+    }
+
+    [Fact]
+    public void Style_34_outlines_are_the_darkest_shade_of_each_series_color_in_powerpoint()
+    {
+        var two = ColumnChart.Replace("<c:spPr><a:solidFill><a:schemeClr val=\"tx2\"/></a:solidFill></c:spPr>", "");
+        var chart = ReadStyledChart(34, two);
+        Near(chart.Series[0].BarOutline!.Value, "385D8A"); // the series fill (plain accent1 of Office 2007 here, two series) shaded 0.5; measured at six series on 2013 accents: 29487E, 9A4F1C, 6A6A6A
+    }
+
+    [Fact]
+    public void Chart_area_and_plot_area_follow_the_style_block_in_powerpoint()
+    {
+        var plain = ColumnChart.Replace("<c:spPr><a:solidFill><a:schemeClr val=\"tx2\"/></a:solidFill></c:spPr>", "");
+        var four = ReadStyledChart(35, plain);
+        Assert.Equal((Color.TryParseHex("898989"), 0.5, Color.TryParseHex("4F81BD")), (four.Border, four.BorderWidth, four.PlotBackground));
+        var five = ReadStyledChart(45, plain);
+        Assert.Equal((Color.Black, null, Color.TryParseHex("3F3F3F"), Color.White), (five.Background, five.Border, five.PlotBackground, five.DefaultTextColor));
+        var one = ReadStyledChart(3, plain);
+        Assert.Equal((null, null, null), (one.Background, one.Border, one.PlotBackground));
+    }
 }

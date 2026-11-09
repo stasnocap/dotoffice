@@ -45,13 +45,14 @@ public sealed partial class SheetLayoutEngine
         if (chart.Background is { } background) items.Add(new RectItem(x, y, w, h, background));
         if (chart.Border is { } border)
         {
-            items.Add(new RectItem(x, y, w, 0.75, border));
-            items.Add(new RectItem(x, y + h - 0.75, w, 0.75, border));
-            items.Add(new RectItem(x, y, 0.75, h, border));
-            items.Add(new RectItem(x + w - 0.75, y, 0.75, h, border));
+            double bw = chart.BorderWidth;
+            items.Add(new RectItem(x, y, w, bw, border));
+            items.Add(new RectItem(x, y + h - bw, w, bw, border));
+            items.Add(new RectItem(x, y, bw, h, border));
+            items.Add(new RectItem(x + w - bw, y, bw, h, border));
         }
 
-        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = chart.FontSize, Color = chart.TextColor ?? ChartText };
+        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = chart.FontSize, Color = chart.DefaultTextColor ?? chart.TextColor ?? ChartText };
         double left = x + ChartPad, top = y + ChartPad, right = x + w - ChartPad, bottom = y + h - ChartPad;
 
         // ---- title
@@ -296,6 +297,17 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
+    /// <summary>The outline of a bar that states none (see <see cref="ChartSeries.BarOutline"/>): four strips centered on its edges.</summary>
+    private static void AddBarOutline(List<LayoutItem> items, ChartSeries s, double x, double y, double w, double h)
+    {
+        if (s.BarOutline is not { } c) return;
+        double t = s.BarOutlineWidth, a = t / 2;
+        items.Add(new RectItem(x - a, y - a, w + t, t, c));
+        items.Add(new RectItem(x - a, y + h - a, w + t, t, c));
+        items.Add(new RectItem(x - a, y + a, t, Math.Max(h - t, 0), c));
+        items.Add(new RectItem(x + w - a, y + a, t, Math.Max(h - t, 0), c));
+    }
+
     private double MeasureChartText(string text, RunProperties font) => BuildBlock(ChartCell(text, font), text, 1e7).Width;
 
     private static Cell ChartCell(string text, RunProperties font) =>
@@ -427,6 +439,7 @@ public sealed partial class SheetLayoutEngine
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
+        if (chart.PlotBackground is { } plotFill) items.Add(new RectItem(plotLeft, plotTop, plotWidth, plotHeight, plotFill));
         var primary = chart.ValueScale;
         var secondaryScale = chart.SecondaryScale;
 
@@ -520,6 +533,7 @@ public sealed partial class SheetLayoutEngine
                             // In horizontal bar charts the first series sits lowest in each group.
                             double slot = stacked ? center + offset : center - offset - barWidth;
                             AddFaded(items, s.Alpha, new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
+                            AddBarOutline(items, s, ya, slot, Math.Max(yb - ya, 0), barWidth);
                             errorBars.Add((s, i, slot + barWidth / 2, stacked ? to : value, scale));
                             if (s.Labels is { } l && i < l.Count && l[i].Length > 0)
                             {
@@ -540,6 +554,7 @@ public sealed partial class SheetLayoutEngine
                             double center = plotLeft + (Slot(i) + 0.5) * band;
                             double xLeft = center + offset, ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
                             AddFaded(items, s.Alpha, new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
+                            AddBarOutline(items, s, xLeft, ya, barWidth, Math.Max(yb - ya, 0));
                             errorBars.Add((s, i, xLeft + barWidth / 2, stacked ? to : value, scale));
                             if (s.Labels is { } l && i < l.Count && l[i].Length > 0)
                             {
