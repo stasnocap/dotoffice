@@ -26,6 +26,14 @@ internal sealed class DocxBuilder
 
     public string Body { get; set; } = "";
     public string? Styles { get; set; }
+
+    /// <summary>
+    /// When true (default), the built package states empty w:rPrDefault and w:pPrDefault unless the styles
+    /// already have w:docDefaults, so tests see the spec defaults (Times New Roman 10 pt, single, 0 after)
+    /// rather than Word 2016's defaults for missing docDefaults (Calibri 11, 1.08, 8 pt after). Set false
+    /// to test absent docDefaults or a missing styles part.
+    /// </summary>
+    public bool ExplicitDefaults { get; set; } = true;
     public string? Numbering { get; set; }
     public string? Settings { get; set; }
     public string? Theme { get; set; }
@@ -115,7 +123,12 @@ internal sealed class DocxBuilder
                 Write(zip, $"word/{file}", $"<w:{root} {Namespaces}>{xml}</w:{root}>");
                 rels.Add((NextId(), $"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{type}", file, false));
             }
-            Optional(Styles, "styles", "styles.xml", "styles");
+            const string explicitDefaults = "<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault><w:pPrDefault><w:pPr/></w:pPrDefault></w:docDefaults>";
+            var styles = !ExplicitDefaults ? Styles
+                : Styles is null ? explicitDefaults
+                : Styles.Contains("<w:docDefaults", StringComparison.Ordinal) ? Styles
+                : explicitDefaults + Styles;
+            Optional(styles, "styles", "styles.xml", "styles");
             Optional(Numbering, "numbering", "numbering.xml", "numbering");
             Optional(Settings, "settings", "settings.xml", "settings");
             Optional(Footnotes, "footnotes", "footnotes.xml", "footnotes");

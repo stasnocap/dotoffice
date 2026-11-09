@@ -47,8 +47,27 @@ internal sealed class StyleSheet
     private readonly Dictionary<string, Style> _styles = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ResolvedStyle> _resolved = new(StringComparer.Ordinal);
 
-    public RunFormat DefaultRun { get; private set; } = RunFormat.Empty;
-    public ParaFormat DefaultPara { get; private set; } = ParaFormat.Empty;
+    // Word 2016 behaviour, not ISO 29500's (which says: Times New Roman 10 pt, single line, 0 after):
+    // measured from Word PDFs of hand-made files, one Word version. A missing w:rPrDefault gives
+    // Calibri 11 pt and a missing w:pPrDefault gives 1.08 lines (259/240) and 8 pt after. Whether each
+    // element exists is what counts, not what it states, and the two are independent; a present element
+    // (even empty) keeps the spec defaults plus what it states. Styles and direct formatting apply on top.
+    internal static readonly RunFormat WordRunDefault = new()
+    {
+        Ascii = new FontSpec("Calibri", null),
+        HAnsi = new FontSpec("Calibri", null),
+        Size = 11,
+        SizeCs = 11,
+    };
+
+    internal static readonly ParaFormat WordParaDefault = new()
+    {
+        After = 8,
+        Line = new LineSpacing(259 / 240.0, LineSpacingRule.Auto),
+    };
+
+    public RunFormat DefaultRun { get; private set; } = WordRunDefault;
+    public ParaFormat DefaultPara { get; private set; } = WordParaDefault;
     public Theme? Theme { get; set; }
 
     public string? DefaultParagraphStyle { get; private set; }
@@ -99,6 +118,7 @@ internal sealed class StyleSheet
             if (r.IsW() && r.LocalName is "rPrDefault" or "pPrDefault")
             {
                 bool run = r.LocalName == "rPrDefault";
+                if (run) DefaultRun = RunFormat.Empty; else DefaultPara = ParaFormat.Empty;
                 int inner = r.Depth;
                 if (!r.Enter()) continue;
                 while (r.NextChild(inner))
