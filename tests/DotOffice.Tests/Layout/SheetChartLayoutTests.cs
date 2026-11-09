@@ -909,6 +909,18 @@ public class SheetChartLayoutTests
         Assert.Equal(1, rings.Count(p => p.Stroke == Red));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_point_stating_a_symbol_without_a_size_has_size_5(bool withFill)
+    {
+        // Word, Excel and PowerPoint 2016, one retest chart: the series size is not kept, with or without the point's own fill.
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerSize = 12, MarkerStyle = new ChartMarkerStyle(Fill: Blue) },
+            (0, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Style: withFill ? new ChartMarkerStyle(Fill: Color.White) : null)));
+        var square = Paths(Page(Chart(ChartKind.Line, series))).First(p => p.Fill is not null);
+        Assert.Equal(5, square.Points.Where(p => p.Kind != PathPointKind.Close).Max(p => p.X) - square.Points.Where(p => p.Kind != PathPointKind.Close).Min(p => p.X), 3);
+    }
+
     [Fact]
     public void A_point_outline_alone_does_not_keep_the_series_fill()
     {

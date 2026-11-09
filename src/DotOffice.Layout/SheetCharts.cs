@@ -173,7 +173,9 @@ public sealed partial class SheetLayoutEngine
         var own = s.PointMarkers is { } map && map.TryGetValue(index, out var found) ? found : null;
         if (!(own?.Visible ?? seriesShows)) return;
         if (own is null) { DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo, s.MarkerStyle); return; }
-        DrawMarker(items, x, y, own.Symbol ?? s.MarkerSymbol, own.Size ?? s.MarkerDiameter, s.Color, halo, PointStyle(own.Style, s));
+        // Word, Excel and PowerPoint 2016: a point that states a symbol but no size has size 5, not the series'.
+        double size = own.Size ?? (own.Symbol is not null ? 5 : s.MarkerDiameter);
+        DrawMarker(items, x, y, own.Symbol ?? s.MarkerSymbol, size, s.Color, halo, PointStyle(own.Style, s));
     }
 
     /// <summary>
