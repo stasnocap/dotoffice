@@ -31,6 +31,12 @@ internal interface IChartData
     /// </summary>
     bool PresentationTitle { get; }
 
+    /// <summary>
+    /// Whether a short chart gets fewer value-axis intervals so that the tick labels do not overlap (PowerPoint); Excel's worksheet charts keep up
+    /// to ten whatever their height.
+    /// </summary>
+    bool FitAxisToHeight => false;
+
     /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
     IEnumerable<Cell?> Cells(string formula);
 }
@@ -82,6 +88,7 @@ internal static class DmlCharts
     {
         var theme = context.Theme;
         var chart = Child(space, "chart");
+        double fontSize0 = Descendant(Child(space, "txPr"), "defRPr")?.Attribute("sz") is { } sz0 && double.TryParse(sz0.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var z0) && z0 > 0 ? z0 / 100 : 10;
         // ---- data
         IEnumerable<Cell?> CellsOf(string formula) => context.Cells(formula);
 
@@ -392,7 +399,14 @@ internal static class DmlCharts
                 if (fallbackCode is not null && code == fallbackCode) code = "0%";
                 return (pMin, pMax, Ticks(pMin, pMax, fixedMajor ?? 0.1, v => Format(v, code)), 0, reversed);
             }
-            var scale = AutoScale(lo, hi, fixedMin, fixedMax, fixedMajor);
+            int maxIntervals = 10;
+            if (context.FitAxisToHeight && template.Height > 0)
+            {
+                // The plot is about three quarters of the chart's height (less with a title); a label needs about two lines of room.
+                double room = template.Height * (Child(chart, "title") is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1" ? 0.55 : 0.75);
+                maxIntervals = Math.Clamp((int)Math.Floor(room / (fontSize0 * 2.2)), 1, 10);
+            }
+            var scale = AutoScale(lo, hi, fixedMin, fixedMax, fixedMajor, maxIntervals);
             return (scale.Min, scale.Max, Ticks(scale.Min, scale.Max, scale.Step, v => Format(v, code)), 0, reversed);
         }
 
@@ -675,7 +689,7 @@ internal static class DmlCharts
     /// Excel's automatic value axis: the minimum is zero unless the data lies in a narrow band far from it, the maximum leaves 5 % of
     /// headroom, and the major unit is the smallest 1, 2 or 5 times a power of ten that gives at most ten intervals.
     /// </summary>
-    internal static (double Min, double Max, double Step) AutoScale(double dataMin, double dataMax, double? fixedMin, double? fixedMax, double? fixedMajor)
+    internal static (double Min, double Max, double Step) AutoScale(double dataMin, double dataMax, double? fixedMin, double? fixedMax, double? fixedMajor, int maxIntervals = 10)
     {
         double lo = dataMin, hi = dataMax;
         if (lo >= 0)
@@ -698,12 +712,12 @@ internal static class DmlCharts
         if (fixedMajor is { } fixedStep) step = fixedStep;
         else
         {
-            double magnitude = Math.Pow(10, Math.Floor(Math.Log10((hi - lo) / 10)));
+            double magnitude = Math.Pow(10, Math.Floor(Math.Log10((hi - lo) / maxIntervals)));
             step = magnitude;
             foreach (var factor in new[] { 1.0, 2, 5, 10 })
             {
                 step = factor * magnitude;
-                if ((hi - lo) / step <= 10 + 1e-9) break;
+                if ((hi - lo) / step <= maxIntervals + 1e-9) break;
             }
         }
         if (fixedMin is null) lo = Math.Floor(lo / step + 1e-9) * step;

@@ -349,6 +349,8 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
 
         public bool FramedChartArea => false;
 
+        public bool FitAxisToHeight => true;
+
         public IEnumerable<Cell?> Cells(string formula) => [];
     }
 
