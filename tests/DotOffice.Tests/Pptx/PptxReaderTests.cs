@@ -341,6 +341,30 @@ public class PptxReaderTests
         Assert.Empty(warnings.Warnings);
     }
 
+    private const string LineChartXml =
+        "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><c:chart><c:plotArea>" +
+        "<c:lineChart><c:grouping val=\"standard\"/><c:ser><c:idx val=\"0\"/><c:order val=\"0\"/>MARKER<c:cat><c:strLit><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>a</c:v></c:pt><c:pt idx=\"1\"><c:v>b</c:v></c:pt></c:strLit></c:cat>" +
+        "<c:val><c:numLit><c:ptCount val=\"2\"/><c:pt idx=\"0\"><c:v>1</c:v></c:pt><c:pt idx=\"1\"><c:v>2</c:v></c:pt></c:numLit></c:val></c:ser><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" +
+        "<c:catAx><c:axId val=\"1\"/><c:crossAx val=\"2\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:crossAx val=\"1\"/></c:valAx></c:plotArea></c:chart></c:chartSpace>";
+
+    private static ChartSeries LineSeries(string marker) =>
+        Assert.Single(Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(LineChartXml.Replace("MARKER", marker)).AddSlide(ChartFrame())).Objects)).Series);
+
+    [Fact]
+    public void A_line_series_without_c_size_has_the_schema_default_marker_of_5_points()
+    {
+        var series = LineSeries("");
+        Assert.True(series.Marker);
+        Assert.Null(series.MarkerSize);
+        Assert.Equal(5, series.MarkerDiameter);
+    }
+
+    [Fact]
+    public void An_explicit_c_size_wins_over_the_default_marker_size()
+    {
+        Assert.Equal(9, LineSeries("<c:marker><c:symbol val=\"circle\"/><c:size val=\"9\"/></c:marker>").MarkerDiameter);
+    }
+
     [Fact]
     public void A_chart_automatic_title_is_larger_and_bold_and_its_text_takes_the_theme_text_color()
     {

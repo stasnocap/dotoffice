@@ -522,8 +522,8 @@ public sealed partial class SheetLayoutEngine
                         foreach (var p in points)
                             if (p is { } q)
                             {
-                                items.Add(new EllipseItem(q.X - 3.2, q.Y - 3.2, 6.4, 6.4, Color.White));
-                                items.Add(new EllipseItem(q.X - 2.5, q.Y - 2.5, 5, 5, s.Color));
+                                items.Add(new EllipseItem(q.X - (s.MarkerDiameter + 1.4) / 2, q.Y - (s.MarkerDiameter + 1.4) / 2, s.MarkerDiameter + 1.4, s.MarkerDiameter + 1.4, Color.White));
+                                items.Add(new EllipseItem(q.X - s.MarkerDiameter / 2, q.Y - s.MarkerDiameter / 2, s.MarkerDiameter, s.MarkerDiameter, s.Color));
                             }
                 }
             }

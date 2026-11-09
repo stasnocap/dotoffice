@@ -188,6 +188,8 @@ internal static class DmlCharts
                     : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
             }
 
+            double? markerSize = double.TryParse(Path(ser, "marker", "size")?.Attribute("val")?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sz) && sz >= 2 && sz <= 72 ? sz : null;
+
             List<Color>? pointColors = null;
             if (slices)
             {
@@ -257,7 +259,7 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize));
         }
         return series;
         }

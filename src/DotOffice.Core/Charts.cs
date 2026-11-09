@@ -34,7 +34,15 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<Color>? PointColors = null, IReadOnlyList<string>? Labels = null,
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
-    IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null);
+    IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
+    double? MarkerSize = null)
+{
+    /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
+    public const double DefaultMarkerSize = 5;
+
+    /// <summary>The marker's diameter in points: the series' explicit <c>c:size</c>, else the schema default of 5. How PowerPoint sizes a marker with no <c>c:size</c> is an estimate (the spec's default), not compared with PowerPoint.</summary>
+    public double MarkerDiameter => MarkerSize ?? DefaultMarkerSize;
+}
 
 /// <summary>
 /// Where a data label sits relative to its point or bar (<c>dLblPos</c>). <see cref="InsideEnd"/>, <see cref="InsideBase"/> and

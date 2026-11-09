@@ -83,6 +83,15 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_marker_is_5_points_across_unless_the_series_gives_a_size()
+    {
+        var auto = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true }));
+        Assert.All(auto.Items.OfType<EllipseItem>().Where(e => e.Fill == Red), e => Assert.Equal(5, e.Width));
+        var big = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSize = 9 }));
+        Assert.All(big.Items.OfType<EllipseItem>().Where(e => e.Fill == Red), e => Assert.Equal(9, e.Width));
+    }
+
+    [Fact]
     public void A_pie_has_one_slice_per_value_and_a_legend_lists_the_categories()
     {
         var pie = Chart(ChartKind.Pie, new ChartSeries("S", [1, 1, 2], Red, PointColors: [Red, Blue, Color.Black])) with { Legend = LegendPosition.Right, Title = "Share" };

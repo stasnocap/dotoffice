@@ -85,6 +85,24 @@ public class XlsxChartTests
     }
 
     [Fact]
+    public void Marker_size_is_automatic_5_points_unless_c_size_is_given()
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4") + Ser(1, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"circle\"/><c:size val=\"11\"/></c:marker>") + "</c:lineChart>";
+        var chart = Read(Space(line)).Sheet.Charts.Single();
+        Assert.Equal([5.0, 11.0], chart.Series.Select(s => s.MarkerDiameter));
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("1")]
+    [InlineData("73")]
+    public void An_invalid_marker_size_falls_back_to_the_automatic_size(string size)
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", $"<c:marker><c:size val=\"{size}\"/></c:marker>") + "</c:lineChart>";
+        Assert.Equal(5.0, Read(Space(line)).Sheet.Charts.Single().Series.Single().MarkerDiameter);
+    }
+
+    [Fact]
     public void Reads_line_markers_pie_colors_labels_and_legend()
     {
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", "<c:marker><c:symbol val=\"none\"/></c:marker>") + Ser(1, null, null, "S!$B$2:$B$4") + "</c:lineChart>";
