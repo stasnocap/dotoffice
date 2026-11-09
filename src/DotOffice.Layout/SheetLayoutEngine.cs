@@ -455,6 +455,7 @@ public sealed partial class SheetLayoutEngine
         PolygonItem p => p with { Points = p.Points.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         EllipseItem e => e with { X = dx + e.X * scale, Y = dy + e.Y * scale, Width = e.Width * scale, Height = e.Height * scale },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
+        PathItem p => p with { Points = p.Points.Select(q => q with { X = dx + q.X * scale, Y = dy + q.Y * scale }).ToList(), LineWidth = p.LineWidth * scale },
         _ => item,
     };
 

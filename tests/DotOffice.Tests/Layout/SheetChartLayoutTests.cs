@@ -150,6 +150,23 @@ public class SheetChartLayoutTests
     private static IEnumerable<PathItem> Paths(LayoutPage page) => page.Items.OfType<PathItem>();
 
     [Fact]
+    public void A_styled_marker_sits_on_the_page_where_an_unstyled_one_does()
+    {
+        var plain = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle };
+        var styled = plain with { MarkerStyle = new ChartMarkerStyle(Fill: Blue) };
+        var page = Page(Chart(ChartKind.Line, plain, styled));
+        var circles = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        var paths = Paths(page).ToList();
+        Assert.Equal(circles.Count, paths.Count);
+        for (int i = 0; i < paths.Count; i++)
+        {
+            var points = paths[i].Points.Where(p => p.Kind != PathPointKind.Close).ToList();
+            Assert.Equal(circles[i].X + circles[i].Width / 2, (points.Min(p => p.X) + points.Max(p => p.X)) / 2, 1);
+            Assert.Equal(circles[i].Y + circles[i].Height / 2, (points.Min(p => p.Y) + points.Max(p => p.Y)) / 2, 1);
+        }
+    }
+
+    [Fact]
     public void A_marker_without_a_style_is_drawn_exactly_as_before_with_its_halo()
     {
         var plain = Marked(ChartMarkerSymbol.Circle);
