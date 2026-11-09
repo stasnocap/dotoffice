@@ -434,6 +434,13 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
         var stops = GradientStops(d, at, flags, surround, center, out double alpha);
         if (stops is null) return null;
         stops = stops.Select(s => new GradientStop(1 - s.Position, s.Color)).Reverse().ToList();
+        // Focus scales keep the center color over that fraction of the way out (the mean of the two, as the gradient is radial).
+        int scaleAt = at + ((flags & 0x0C) != 0 ? 4 + 8 * I32(d, at) : 0);
+        if ((flags & 0x40) != 0 && scaleAt + 12 <= d.Length && I32(d, scaleAt) == 2)
+        {
+            double focus = Math.Clamp((F32(d, scaleAt + 4) + F32(d, scaleAt + 8)) / 2, 0, 0.99);
+            if (focus > 0) stops = [new GradientStop(0, stops[0].Color), .. stops.Select(s => new GradientStop(focus + s.Position * (1 - focus), s.Color))];
+        }
         double left = boundary.Min(p => p.X), top = boundary.Min(p => p.Y);
         var rect = (left, top, boundary.Max(p => p.X) - left, boundary.Max(p => p.Y) - top);
         bool rectangular = boundary.Distinct().Count() == 4 && boundary.All(p => (p.X == left || p.X == left + rect.Item3) && (p.Y == top || p.Y == top + rect.Item4))

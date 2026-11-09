@@ -339,6 +339,19 @@ public class MetafileLayoutTests
     }
 
     [Fact]
+    public void An_emf_plus_path_gradient_focus_scale_keeps_the_center_color_over_that_share()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            Plus(0x4008, 0x100 | 1, I(unchecked((int)0xDBC01002), 3, 0x40, 0, unchecked((int)0xFFFFFFFF)), F(250, 125), I(1, Red, 4), F(0, 0, 500, 0, 500, 250, 0, 250), I(2), F(0.5f, 0.5f)),
+            Plus(0x400A, 0, I(1, 1), F(0, 0, 500, 250)))));
+        var stops = Assert.Single(items.OfType<GradientItem>()).Stops;
+        Assert.Equal(3, stops.Count);
+        Assert.Equal(Color.White, stops[0].Color);
+        Assert.Equal(Color.White, stops[1].Color);
+        Assert.Equal(0.5, stops[1].Position, 3);
+    }
+
+    [Fact]
     public void A_hatched_emf_brush_draws_its_lines_over_the_background_color_inside_the_shape()
     {
         var items = Lay(Emf(
