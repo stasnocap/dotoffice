@@ -225,8 +225,7 @@ internal sealed class Itemizer(FontSelector fonts)
     /// <summary>
     /// Bidi embedding levels per UTF-16 index of the paragraph text, or null when everything is at level 0
     /// (a left-to-right paragraph without right-to-left text). Breaks count as whitespace, not paragraph
-    /// separators; neutral characters of runs marked right-to-left (w:rtl) are treated as right-to-left unless
-    /// they sit between left-to-right letters (so "two words" keeps its order, as in LibreOffice).
+    /// separators; each stretch of runs marked right-to-left (w:rtl) is a right-to-left embedding, as Word orders it.
     /// </summary>
     private static byte[]? BidiLevels(List<Segment> segments, string text, byte paragraphLevel)
     {
@@ -237,42 +236,44 @@ internal sealed class Itemizer(FontSelector fonts)
                     or BidiClass.RLI or BidiClass.FSI) { any = true; break; }
         if (!any) return null;
 
-        var classes = new BidiClass[text.Length];
-        var codePoints = new int[text.Length];
-        var forced = new List<int>();
+        // A run marked right-to-left (w:rtl) is an embedding of its own: its letters, digits and neutrals are
+        // ordered as in a right-to-left paragraph, while the paragraph keeps its own direction and alignment.
+        // Inside such a run whitespace is a plain neutral, so trailing spaces are not reset to the paragraph level (L1).
+        var classes = new List<BidiClass>(text.Length + 8);
+        var codePoints = new List<int>(text.Length + 8);
+        var source = new List<int>(text.Length + 8);
         int offset = 0;
+        bool embedded = false;
         foreach (var s in segments)
         {
+            bool rtl = s.Props.RightToLeft && s.Text.Length > 0;
+            if (rtl != embedded && s.Text.Length > 0)
+            {
+                classes.Add(rtl ? BidiClass.RLE : BidiClass.PDF);
+                codePoints.Add(0);
+                source.Add(-1);
+                embedded = rtl;
+            }
             for (int i = 0; i < s.Text.Length; i++)
             {
                 int cp = char.IsSurrogatePair(s.Text, i) ? char.ConvertToUtf32(s.Text, i) : s.Text[i];
                 var cls = s.Kind is AtomKind.LineBreak or AtomKind.PageBreak ? BidiClass.WS
                     : char.IsLowSurrogate(s.Text[i]) ? BidiClass.BN : BidiAlgorithm.GetClass(cp);
-                if (s.Props.RightToLeft && cls is BidiClass.WS or BidiClass.ON) forced.Add(offset + i);
-                classes[offset + i] = cls;
-                codePoints[offset + i] = cp;
+                if (rtl && cls == BidiClass.WS) cls = BidiClass.ON;
+                classes.Add(cls);
+                codePoints.Add(cp);
+                source.Add(offset + i);
             }
             offset += s.Text.Length;
         }
-        foreach (int i in forced.Where(i => StrongNeighbor(classes, i, -1) != BidiClass.L || StrongNeighbor(classes, i, 1) != BidiClass.L).ToList())
-            classes[i] = BidiClass.R;
-        var levels = BidiAlgorithm.ResolveLevels(classes, codePoints, paragraphLevel);
+        var resolved = BidiAlgorithm.ResolveLevels(classes.ToArray(), codePoints.ToArray(), paragraphLevel);
+        var levels = new byte[text.Length];
+        for (int i = 0; i < resolved.Length; i++)
+            if (source[i] >= 0) levels[source[i]] = resolved[i];
         // The low half of a surrogate pair goes with its high half.
         for (int i = 1; i < text.Length; i++)
             if (char.IsLowSurrogate(text[i])) levels[i] = levels[i - 1];
         return levels;
-    }
-
-    /// <summary>Nearest strong direction before (<paramref name="step"/> -1) or after (+1) index <paramref name="i"/>; numbers count as R.</summary>
-    private static BidiClass? StrongNeighbor(BidiClass[] classes, int i, int step)
-    {
-        for (i += step; i >= 0 && i < classes.Length; i += step)
-            switch (classes[i])
-            {
-                case BidiClass.L: return BidiClass.L;
-                case BidiClass.R or BidiClass.AL or BidiClass.EN or BidiClass.AN: return BidiClass.R;
-            }
-        return null;
     }
 
     private void AddTextAtoms(List<Atom> atoms, Segment s, int offset, LineBreakOpportunity[] breaks, Func<int, byte> level)
