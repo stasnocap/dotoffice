@@ -399,6 +399,13 @@ internal sealed class EmfPlusPlayer(GdiPlayer gdi, FontSelector fonts)
         int flags = I32(d, 8), count = I32(d, 28), at = 32 + 4 * count;
         if (count < 1 || at + 4 > d.Length) return null;
         PlusBrush center = ReadColor(d, 16), surround = ReadColor(d, 32);
+        // With several surrounding colors (one per boundary point) the ring takes their mean, since the gradient has one outer color.
+        if (count > 1)
+        {
+            var all = new List<PlusBrush>(count);
+            for (int k = 0; k < count; k++) all.Add(ReadColor(d, 32 + 4 * k));
+            surround = new PlusBrush(new Color((byte)all.Average(c => c.Color.R), (byte)all.Average(c => c.Color.G), (byte)all.Average(c => c.Color.B)), all.Average(c => c.Alpha));
+        }
         var centerPoint = ((double)F32(d, 20), (double)F32(d, 24));
         List<(double X, double Y)> boundary;
         if ((flags & 0x01) != 0)

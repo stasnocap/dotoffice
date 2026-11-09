@@ -329,6 +329,16 @@ public class MetafileLayoutTests
     }
 
     [Fact]
+    public void An_emf_plus_path_gradient_with_several_surrounding_colors_uses_their_mean()
+    {
+        var items = Lay(Emf(PlusComment(false,
+            Plus(0x4008, 0x100 | 1, I(unchecked((int)0xDBC01002), 3, 0, 0, unchecked((int)0xFFFFFFFF)), F(250, 125), I(2, unchecked((int)0xFFFF0000), unchecked((int)0xFF0000FF), 4), F(0, 0, 500, 0, 500, 250, 0, 250)),
+            Plus(0x400A, 0, I(1, 1), F(0, 0, 500, 250)))));
+        var gradient = Assert.Single(items.OfType<GradientItem>());
+        Assert.Equal(new Color(127, 0, 127), gradient.Stops[^1].Color);
+    }
+
+    [Fact]
     public void A_hatched_emf_brush_draws_its_lines_over_the_background_color_inside_the_shape()
     {
         var items = Lay(Emf(
