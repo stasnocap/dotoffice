@@ -177,6 +177,14 @@ public class SheetChartLayoutTests
     private static IEnumerable<PathItem> Paths(LayoutPage page) => page.Items.OfType<PathItem>();
 
     [Fact]
+    public void Axis_lines_are_black_at_the_width_the_chart_gives_them()
+    {
+        var page = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20)) with { AxisLineWidth = 0.5, MajorGridlines = false, Border = null, Legend = LegendPosition.None });
+        Assert.Contains(page.Items, i => i is LineItem { Width: 0.5 } l && l.Color == Color.Black && l.Y1 == l.Y2);
+        Assert.Contains(page.Items, i => i is LineItem { Width: 0.5 } l && l.Color == Color.Black && l.X1 == l.X2);
+    }
+
+    [Fact]
     public void A_path_scales_with_the_sheet_around_the_page_margin()
     {
         var series = Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Blue, Line: Blue, LineWidth: 2) };
@@ -1185,6 +1193,19 @@ public class SheetChartLayoutTests
         Assert.Equal(2, circles.Count);
         // category 0 is at the top and 2 at the lower left, so category 1 (lower right) is right of both
         Assert.All(circles, c => Assert.True(rect.X + 4.5 > CenterX(c)));
+    }
+
+    [Fact]
+    public void Gridlines_use_the_chart_color_and_width_and_axis_text_is_black_unless_stated()
+    {
+        var chart = Chart(ChartKind.Column, Series(Red, 5, 10, 20));
+        var plain = Page(chart);
+        Assert.Contains(plain.Items, i => i is LineItem l && l.Color == Color.Black && l.Width == 0.75); // the model's default (Excel)
+        Assert.All(plain.Items.OfType<TextItem>().Where(t => t.Text is "0" or "10" or "20" or "a"), t => Assert.Equal(Color.Black, t.Color));
+        var stated = Page(chart with { GridlineColor = Blue, GridlineWidth = 0.5 });
+        Assert.Contains(stated.Items, i => i is LineItem l && l.Color == Blue && l.Width == 0.5);
+        var colored = Page(chart with { TextStyles = new ChartTextStyles { ValueAxis = new ChartTextStyle(Color: Blue) } });
+        Assert.All(colored.Items.OfType<TextItem>().Where(t => t.Text is "0" or "10" or "20"), t => Assert.Equal(Blue, t.Color));
     }
 
     [Fact]

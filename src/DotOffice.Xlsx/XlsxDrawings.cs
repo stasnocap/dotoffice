@@ -270,7 +270,9 @@ internal static class XlsxDrawings
 
         public bool DarkerMarkerOutline => true;
 
-        public double DefaultLineWidth => 2.25;
+        public double LineWidthScale => 1.5;
+
+        public double GridlineWidth => 0.75;
 
         public IEnumerable<Cell?> Cells(string formula)
         {

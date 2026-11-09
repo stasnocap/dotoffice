@@ -60,17 +60,17 @@ public sealed partial class SheetLayoutEngine
         foreach (var tick in chart.Ticks)
         {
             double ty = Y(tick.Value);
-            if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
+            if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
             if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
         }
         foreach (var tick in chart.XTicks)
         {
             double tx = X(tick.Value);
-            if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
+            if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
             if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + 4, styles.CategoryAxis?.Rotation ?? 0, items);
         }
-        if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), 0.75, ChartGrid));
-        if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, 0.75, ChartGrid));
+        if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), chart.AxisLineWidth, Color.Black));
+        if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, chart.AxisLineWidth, Color.Black));
 
         var labels = new List<(string Text, double X, double Y, Color? Fill, ChartTextStyle? Style, LabelSide Side)>();
         var trendLabels = new List<LayoutItem>();
@@ -204,7 +204,7 @@ public sealed partial class SheetLayoutEngine
                 {
                     var a = Point(k, r);
                     var b = Point((k + 1) % n, r);
-                    items.Add(new LineItem(a.X, a.Y, b.X, b.Y, 0.75, ChartGrid));
+                    items.Add(new LineItem(a.X, a.Y, b.X, b.Y, chart.GridlineWidth, chart.GridlineColor));
                 }
             if (chart.ShowValueAxis && r - lastLabel >= labelHeight)
             {
@@ -215,7 +215,7 @@ public sealed partial class SheetLayoutEngine
         for (int k = 0; k < n; k++)
         {
             var end = Point(k, radius);
-            items.Add(new LineItem(cx, cy, end.X, end.Y, 0.75, ChartGrid));
+            items.Add(new LineItem(cx, cy, end.X, end.Y, 0.75, ChartRadarSpoke));
             if (!chart.ShowCategoryAxis || k >= chart.Categories.Count) continue;
             var at = Point(k, radius + 6);
             double cos = (at.X - cx) / (radius + 6), sin = (at.Y - cy) / (radius + 6);

@@ -20,7 +20,7 @@ internal interface IChartData
     bool FramedChartArea { get; }
 
     /// <summary>
-    /// The color of chart text that states none (the theme's text color in a presentation); null keeps Excel's dark gray, with data labels in
+    /// The color of chart text that states none (the theme's text color in a presentation); null keeps black, with data labels in
     /// bars and slices picked for contrast.
     /// </summary>
     Color? TextColor { get; }
@@ -43,8 +43,14 @@ internal interface IChartData
     /// <summary>Whether an automatic marker outline is a little darker than the fill (Excel 2016: 97.5 % of its HSL lightness); PowerPoint 2016 draws it in the fill's color.</summary>
     bool DarkerMarkerOutline => false;
 
-    /// <summary>The width in points of a series line that states none: 2.25 in Excel, 1.5 in PowerPoint (Word 1.5 too, but Word charts are not read here).</summary>
-    double DefaultLineWidth => 1.5;
+    /// <summary>
+    /// How much wider than PowerPoint a series line that states no width is drawn: 1.5 in Excel (2.25 pt against 1.5 pt for styles 1 to 8, and
+    /// likewise 3.75 against 2.5 and 5.25 against 3.5), 1 in PowerPoint (Word 1.5 too, but Word charts are not read here).
+    /// </summary>
+    double LineWidthScale => 1;
+
+    /// <summary>The width in points of a gridline that states none: 0.75 in Excel 2016, 0.5 in PowerPoint 2016, whatever the chart style.</summary>
+    double GridlineWidth => 0.5;
 
     /// <summary>The cells of a reference such as <c>Sheet1!$B$2:$B$5</c>, row by row, null for each missing one; empty when the data cannot be reached.</summary>
     IEnumerable<Cell?> Cells(string formula);
@@ -58,6 +64,21 @@ internal interface IChartData
 internal static class DmlCharts
 {
     private static readonly HashSet<string> Supported = ["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart", "scatterChart", "bubbleChart", "radarChart", "stockChart"];
+
+    /// <summary>
+    /// The width in points of a series line that states none, by <c>c:style</c> (null, or outside 1 to 48, counts as style 2): PowerPoint 1.5 for
+    /// styles 1 to 8, 2.5 for 9 to 24 and 33 to 48, 3.5 for 25 to 32, times <paramref name="scale"/> for the application (1.5 for Excel).
+    /// </summary>
+    internal static double DefaultLineWidth(int? style, double scale) => scale * (style is >= 1 and <= 48 ? style switch { <= 8 => 1.5, >= 25 and <= 32 => 3.5, _ => 2.5 } : 1.5);
+
+    /// <summary>The gridline formatting <c>c:majorGridlines</c> states: a width, a color, or that no line is drawn.</summary>
+    private static (double? Width, Color? Color, bool Hidden) GridlineStyle(XElement? axis, DmlTheme theme)
+    {
+        var ln = Path(axis, "majorGridlines", "spPr", "ln");
+        if (ln is null) return (null, null, false);
+        double? width = ln.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 && emu < 2e9 ? emu / 12700 : null;
+        return (width, SolidFill(ln, theme), Child(ln, "noFill") is not null);
+    }
 
     /// <summary>What a chart type is called in warnings.</summary>
     private static string Describe(string element) => element switch
@@ -160,6 +181,9 @@ internal static class DmlCharts
             _ => ((string?)Child(g, "barDir")?.Attribute("val") ?? "col") == "bar" ? ChartKind.Bar : ChartKind.Column,
         };
 
+        // c:style on the chart space (the plain element only: Excel and PowerPoint 2016 write it so; an mc:AlternateContent c14:style is not read).
+        int? chartStyle = Child(space, "style")?.Attribute("val") is { } styleValue && int.TryParse(styleValue.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var styleNumber) ? styleNumber : null;
+
         List<ChartSeries> ReadSeries(XElement group, ChartKind kind, int firstIndex)
         {
         bool slices = kind is ChartKind.Pie or ChartKind.Doughnut, xy = kind is ChartKind.Scatter or ChartKind.Bubble;
@@ -195,7 +219,7 @@ internal static class DmlCharts
             double idxValue = Number(Child(ser, "idx"), "val", -1);
             int seriesIndex = idxValue >= 0 && idxValue < 1_000_000 ? (int)idxValue : firstIndex + i;
             double? statedWidth = lineProperties?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lineEmu) && lineEmu > 0 && lineEmu < 2e9 ? lineEmu / 12700 : null;
-            double lineWidth = statedWidth ?? context.DefaultLineWidth;
+            double lineWidth = statedWidth ?? DefaultLineWidth(chartStyle, context.LineWidthScale);
             var autoColor = AutomaticMarkerColor(theme, seriesIndex, cycles);
             var auto = new ChartAutoMarker(seriesIndex, autoColor, context.DarkerMarkerOutline ? LumMod(autoColor, 0.975) : autoColor, context.AutomaticMarkerOutlineWidth, AutomaticMarkerSize(lineWidth));
             bool marker = true;
@@ -647,6 +671,7 @@ internal static class DmlCharts
             Legend = Part(Child(legendElement, "txPr")), DataLabels = Part(labelProperties),
         };
 
+        var gridStyle = Child(valueAxis, "majorGridlines") is not null ? GridlineStyle(valueAxis, theme) : GridlineStyle(categoryAxis, theme);
         Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0xD9, 0xD9, 0xD9) : null;
         if (Child(space, "spPr") is { } chartProperties)
         {
@@ -665,12 +690,13 @@ internal static class DmlCharts
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),
-            MajorGridlines = Child(valueAxis, "majorGridlines") is not null,
+            MajorGridlines = Child(valueAxis, "majorGridlines") is not null && !gridStyle.Hidden,
+            AxisLineWidth = context.GridlineWidth, GridlineWidth = gridStyle.Width ?? context.GridlineWidth, GridlineColor = gridStyle.Color ?? Color.Black,
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
             Background = background, Border = border, FontSize = fontSize, TextColor = context.TextColor,
-            XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null,
+            XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,
             FirstSliceAngle = Child(group, "firstSliceAng") is { } angle ? Number(angle, "val") : 0,

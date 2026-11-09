@@ -4,8 +4,8 @@ namespace DotOffice.Layout;
 
 public sealed partial class SheetLayoutEngine
 {
-    private static readonly Color ChartText = new(0x59, 0x59, 0x59);
-    private static readonly Color ChartGrid = new(0xD9, 0xD9, 0xD9);
+    private static readonly Color ChartText = new(0, 0, 0);
+    private static readonly Color ChartRadarSpoke = new(0xD9, 0xD9, 0xD9);
     private const double ChartPad = 7;
 
     private enum Anchor { Start, Middle, End }
@@ -450,13 +450,13 @@ public sealed partial class SheetLayoutEngine
             if (horizontalBars)
             {
                 double tx = ValueX(primary, tick.Value);
-                if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, 0.75, ChartGrid));
+                if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
                 if (chart.ShowValueAxis) PlaceTurnedBelow(tick.Label, valueFont, tx, plotBottom + 4, valueAngle, items);
             }
             else
             {
                 double ty = ValueY(primary, tick.Value);
-                if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, 0.75, ChartGrid));
+                if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
                 if (!chart.ShowValueAxis) { }
                 else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
                 else
@@ -669,13 +669,18 @@ public sealed partial class SheetLayoutEngine
         items.AddRange(trendLabels);
 
         // ---- category axis line and labels
+        if (chart.ShowValueAxis)
+        {
+            if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, chart.AxisLineWidth, Color.Black));
+            else items.Add(new LineItem(plotLeft, plotTop, plotLeft, plotBottom, chart.AxisLineWidth, Color.Black));
+        }
         if (chart.ShowCategoryAxis)
         {
             double crossing = Baseline(primary);
             if (horizontalBars)
             {
                 double ax = ValueX(primary, crossing);
-                items.Add(new LineItem(ax, plotTop, ax, plotBottom, 0.75, ChartGrid));
+                items.Add(new LineItem(ax, plotTop, ax, plotBottom, chart.AxisLineWidth, Color.Black));
                 double band = plotHeight / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i++)
                 {
@@ -690,7 +695,7 @@ public sealed partial class SheetLayoutEngine
             else
             {
                 double ay = ValueY(primary, crossing);
-                items.Add(new LineItem(plotLeft, ay, plotRight, ay, 0.75, ChartGrid));
+                items.Add(new LineItem(plotLeft, ay, plotRight, ay, chart.AxisLineWidth, Color.Black));
                 for (int i = 0; i < categories && i < chart.Categories.Count; i += (int)stride)
                 {
                     double cx = CategoryX(i);
@@ -750,7 +755,7 @@ public sealed partial class SheetLayoutEngine
     /// </summary>
     private static void DrawErrorBar(List<LayoutItem> items, bool alongX, double across, double from, double to, ChartErrorBars bars)
     {
-        var color = bars.Color ?? ChartText;
+        var color = bars.Color ?? new Color(0x59, 0x59, 0x59); // not measured
         const double cap = 3;
         if (alongX)
         {

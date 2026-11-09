@@ -216,6 +216,15 @@ public sealed record SheetChart : SheetObject
 
     public bool MajorGridlines { get; init; } = true;
 
+    /// <summary>The color of gridlines that state none: black.</summary>
+    public Color GridlineColor { get; init; } = Color.Black;
+
+    /// <summary>The width in points of the gridlines: 0.75 as Excel draws them, 0.5 in PowerPoint (the reader sets it).</summary>
+    public double GridlineWidth { get; init; } = 0.75;
+
+    /// <summary>The width in points of the axis lines, which are black: 0.75 in Excel, 0.5 in PowerPoint (the reader sets it).</summary>
+    public double AxisLineWidth { get; init; } = 0.75;
+
     public string? ValueAxisTitle { get; init; }
 
     public string? CategoryAxisTitle { get; init; }

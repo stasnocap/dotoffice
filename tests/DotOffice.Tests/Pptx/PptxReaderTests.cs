@@ -608,4 +608,40 @@ public class PptxReaderTests
         var series = ManyLineSeries(1, "<c:spPr><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></a:ln></c:spPr>").Single();
         Assert.Equal((new Color(0x12, 0x34, 0x56), 2.25), (series.StrokeColor, series.StrokeWidth));
     }
+
+    private static SheetChart StyledLine(string? style, string serExtra = "", string gridExtra = "")
+    {
+        var xml = LineChartXml.Replace("MARKER", serExtra).Replace("<c:valAx><c:axId val=\"2\"/><c:crossAx val=\"1\"/>", $"<c:valAx><c:axId val=\"2\"/><c:crossAx val=\"1\"/><c:majorGridlines>{gridExtra}</c:majorGridlines>");
+        if (style is not null) xml = xml.Replace("<c:chart>", $"<c:style val=\"{style}\"/><c:chart>");
+        return Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(xml).AddSlide(ChartFrame())).Objects));
+    }
+
+    [Theory] // PowerPoint 2016: 1.5 for styles 1 to 8, 2.5 for 9 to 24 and 33 to 48, 3.5 for 25 to 32; no style or one out of range acts as style 2
+    [InlineData("1", 1.5)] [InlineData("8", 1.5)] [InlineData("9", 2.5)] [InlineData("24", 2.5)] [InlineData("25", 3.5)] [InlineData("32", 3.5)]
+    [InlineData("33", 2.5)] [InlineData("48", 2.5)] [InlineData("0", 1.5)] [InlineData("49", 1.5)] [InlineData(null, 1.5)]
+    public void The_default_line_width_follows_the_chart_style_in_powerpoint(string? style, double width)
+    {
+        var series = StyledLine(style).Series.Single();
+        Assert.Equal(width, series.StrokeWidth);
+        Assert.Equal(2 * Math.Floor(width) + 3, series.MarkerDiameter);
+    }
+
+    [Fact]
+    public void A_stated_line_width_wins_over_the_chart_style_in_powerpoint() =>
+        Assert.Equal(2.0, StyledLine("25", "<c:spPr><a:ln w=\"25400\"/></c:spPr>").Series.Single().StrokeWidth);
+
+    [Theory]
+    [InlineData(null)] [InlineData("2")] [InlineData("41")]
+    public void Gridlines_with_no_stated_line_are_black_and_05_pt_in_powerpoint(string? style)
+    {
+        var chart = StyledLine(style);
+        Assert.Equal((Color.Black, 0.5), (chart.GridlineColor, chart.GridlineWidth));
+    }
+
+    [Fact]
+    public void Stated_gridline_color_and_width_win_in_powerpoint()
+    {
+        var chart = StyledLine("2", gridExtra: "<c:spPr><a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"654321\"/></a:solidFill></a:ln></c:spPr>");
+        Assert.Equal((new Color(0x65, 0x43, 0x21), 1.5), (chart.GridlineColor, chart.GridlineWidth));
+    }
 }

@@ -109,6 +109,44 @@ public class XlsxChartTests
         Assert.Equal(size, Read(Space(line)).Sheet.Charts.Single().Series.Single().MarkerDiameter);
     }
 
+    private static SheetChart ReadLine(string? style, string serExtra = "", string valAxisExtra = "")
+    {
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", serExtra) + "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>" +
+            $"<c:catAx><c:axId val=\"1\"/><c:scaling/><c:delete val=\"0\"/></c:catAx><c:valAx><c:axId val=\"2\"/><c:scaling/><c:delete val=\"0\"/><c:majorGridlines>{valAxisExtra}</c:majorGridlines></c:valAx>";
+        var xml = Space(line);
+        if (style is not null) xml = xml.Replace("<c:chart>", $"<c:style val=\"{style}\"/><c:chart>");
+        return Read(xml).Sheet.Charts.Single();
+    }
+
+    [Theory] // Excel 2016: 2.25 for styles 1 to 8, 3.75 for 9 to 24 and 33 to 48, 5.25 for 25 to 32; no style or one out of range acts as style 2
+    [InlineData("1", 2.25)] [InlineData("8", 2.25)] [InlineData("9", 3.75)] [InlineData("24", 3.75)] [InlineData("25", 5.25)] [InlineData("32", 5.25)]
+    [InlineData("33", 3.75)] [InlineData("48", 3.75)] [InlineData("0", 2.25)] [InlineData("49", 2.25)] [InlineData(null, 2.25)]
+    public void The_default_line_width_follows_the_chart_style_in_excel(string? style, double width)
+    {
+        var series = ReadLine(style).Series.Single();
+        Assert.Equal(width, series.StrokeWidth);
+        Assert.Equal(2 * Math.Floor(width) + 3, series.MarkerDiameter); // the automatic marker follows the width
+    }
+
+    [Fact]
+    public void A_stated_line_width_wins_over_the_chart_style_in_excel()
+    {
+        var series = ReadLine("25", "<c:spPr><a:ln w=\"12700\"/></c:spPr>").Series.Single();
+        Assert.Equal((1.0, 5.0), (series.StrokeWidth, series.MarkerDiameter));
+    }
+
+    [Theory]
+    [InlineData(null)] [InlineData("2")] [InlineData("41")]
+    public void Gridlines_with_no_stated_line_are_black_and_075_pt_in_excel(string? style) =>
+        Assert.Equal((Color.Black, 0.75), (ReadLine(style).GridlineColor, ReadLine(style).GridlineWidth));
+
+    [Fact]
+    public void Stated_gridline_color_and_width_win_in_excel()
+    {
+        var chart = ReadLine("2", valAxisExtra: "<c:spPr><a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></a:ln></c:spPr>");
+        Assert.Equal((new Color(0x12, 0x34, 0x56), 2.0), (chart.GridlineColor, chart.GridlineWidth));
+    }
+
     private static List<ChartSeries> SeriesWithIndexes(params int[] indexes)
     {
         var line = "<c:lineChart><c:grouping val=\"standard\"/>" + string.Concat(indexes.Select((idx, i) => Ser(idx, null, null, "S!$B$2:$B$4").Replace($"<c:order val=\"{idx}\"/>", $"<c:order val=\"{i}\"/>"))) + "</c:lineChart>";
