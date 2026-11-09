@@ -212,7 +212,11 @@ internal static class DmlCharts
             var lineProperties = Child(spPr, "ln");
             bool line = !(lineLike && lineProperties is not null && Child(lineProperties, "noFill") is not null);
             // A series with no line of its own color takes the automatic one; only a markers-only series is named by its marker's fill.
-            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
+            // Column, bar and area series with no stated fill take the automatic color (measured in Office 2016); other kinds keep the palette.
+            double idxOfSeries = Number(Child(ser, "idx"), "val", -1);
+            int autoIndex = idxOfSeries >= 0 && idxOfSeries < 1_000_000 ? (int)idxOfSeries : firstIndex + i;
+            Color defaultColor = kind is ChartKind.Column or ChartKind.Bar or ChartKind.Area ? AutomaticMarkerColor(theme, autoIndex, cycles) : PaletteColor(theme, firstIndex + i);
+            Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? defaultColor;
 
             var (ownVisible, ownSymbol, ownSize, ownStyle) = ReadMarker(Child(ser, "marker"));
             // The automatic marker: symbol and theme color follow the series' c:idx (which is not always its position), the size the line's width.
@@ -425,7 +429,7 @@ internal static class DmlCharts
                     minus[i] = type == "plus" ? 0 : Math.Abs(down);
                 }
                 var line = Path(bars, "spPr", "ln");
-                double lineWidth = line?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 ? emu / 12700 : 1;
+                double lineWidth = line?.Attribute("w") is { } w && double.TryParse(w.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var emu) && emu > 0 ? emu / 12700 : context.GridlineWidth;
                 result.Add(new ChartErrorBars(horizontal, plus, minus, !Flag(Child(bars, "noEndCap"), "val"), SolidFill(line, theme), lineWidth));
             }
             return result.Count > 0 ? result : null;
@@ -660,7 +664,12 @@ internal static class DmlCharts
         ChartTextStyle? Part(XElement? holder) => MergeStyles(baseWithoutSize, TextStyleOf(holder, theme));
         var labelProperties = group.Descendants().Where(e => e.Name.LocalName == "dLbls").Select(d => Child(d, "txPr")).FirstOrDefault(x => x is not null);
         var titleStyle = Part(Path(titleElement, "tx", "rich"));
-        if (context.PresentationTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
+        // A title whose rich text states no size, bold or typeface (in its runs or defaults, nor the chart's own text properties) is 18 pt regular Arial (measured in Office 2016, Excel and PowerPoint).
+        bool plainRichTitle = titleElement is not null && Path(titleElement, "tx", "rich") is { } richTitle && title is not null
+            && !richTitle.Descendants().Where(e => e.Name.LocalName is "rPr" or "defRPr").Any(e => e.Attribute("sz") is not null || e.Attribute("b") is not null || Child(e, "latin") is not null)
+            && baseStyle is not { Bold: not null } && baseStyle is not { Family: not null };
+        if (plainRichTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: false, Family: "Arial"), titleStyle);
+        else if (context.PresentationTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
         var textStyles = new ChartTextStyles
         {
             Title = titleStyle,
@@ -672,7 +681,7 @@ internal static class DmlCharts
         };
 
         var gridStyle = Child(valueAxis, "majorGridlines") is not null ? GridlineStyle(valueAxis, theme) : GridlineStyle(categoryAxis, theme);
-        Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0xD9, 0xD9, 0xD9) : null;
+        Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0x86, 0x86, 0x86) : null;
         if (Child(space, "spPr") is { } chartProperties)
         {
             background = SolidFill(chartProperties, theme, background);
@@ -686,7 +695,7 @@ internal static class DmlCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (plainRichTitle ? 18 : context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),

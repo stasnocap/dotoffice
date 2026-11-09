@@ -1042,6 +1042,40 @@ public class SheetChartLayoutTests
 
     private static double Distance(TextItem t, double width) => Math.Sqrt(Math.Pow(t.X + width / 2 - (OriginX + 150), 2) + Math.Pow(t.Baseline - (OriginY + 100), 2));
 
+    [Theory]
+    [InlineData(ChartKind.Column)] [InlineData(ChartKind.Bar)]
+    public void Data_labels_on_column_and_bar_fills_are_black_inside_or_out_unless_the_chart_states_a_color(ChartKind kind)
+    {
+        var series = Series(Red, 5, 10, 20) with { Labels = ["L5", "L10", "L20"] };
+        var stacked = Series(Blue, 5, 10, 20) with { Labels = ["M5", "M10", "M20"] };
+        var page = Page(Chart(kind, series, stacked) with { Grouping = ChartGrouping.Stacked });
+        Assert.All(page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('L') || t.Text.StartsWith('M')), t => Assert.Equal(Color.Black, t.Color)); // inside, over red and blue
+        var outside = Page(Chart(kind, series));
+        Assert.All(outside.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('L')), t => Assert.Equal(Color.Black, t.Color));
+        var stated = Page(Chart(kind, series, stacked) with { Grouping = ChartGrouping.Stacked, TextColor = Red });
+        Assert.All(stated.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('L')), t => Assert.Equal(Red, t.Color));
+        var styled = Page(Chart(kind, series, stacked) with { Grouping = ChartGrouping.Stacked, TextStyles = new ChartTextStyles { DataLabels = new ChartTextStyle(Color: Blue) } });
+        Assert.All(styled.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('L')), t => Assert.Equal(Blue, t.Color));
+    }
+
+    [Fact]
+    public void Pie_labels_inside_the_slices_keep_the_contrast_color()
+    {
+        var pie = new ChartSeries("S", [1, 1, 2], Red, PointColors: [Red, Color.White, Color.Black], Labels: ["A", "B", "C"]);
+        var items = Page(Chart(ChartKind.Pie, pie)).Items.OfType<TextItem>().ToList();
+        Assert.Equal(Color.White, items.Single(t => t.Text == "A").Color);        // over red
+        Assert.Equal(new Color(0x40, 0x40, 0x40), items.Single(t => t.Text == "B").Color); // over white
+        Assert.Equal(Color.White, items.Single(t => t.Text == "C").Color);        // over black
+    }
+
+    [Fact]
+    public void Error_bars_without_a_color_are_drawn_black()
+    {
+        var bars = new ChartErrorBars(false, [2, 2, 2], [2, 2, 2], true, null, 0.75);
+        var lines = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20) with { ErrorBars = [bars] })).Items.OfType<LineItem>().Where(l => l.Color == Color.Black && l.Width == 0.75).ToList();
+        Assert.True(lines.Count >= 9);
+    }
+
     [Fact]
     public void Pie_labels_sit_at_the_asked_position()
     {

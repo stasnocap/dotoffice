@@ -508,6 +508,85 @@ public class XlsxChartTests
         Assert.Equal((plus, minus, false), (read.Plus[0], read.Minus[0], read.EndCap));
     }
 
+    private static string Sers(int count) => string.Concat(Enumerable.Range(0, count).Select(i => Ser(i, null, null, "S!$B$2:$B$4")));
+
+    [Theory]
+    [InlineData("col")] [InlineData("bar")]
+    public void Unfilled_column_and_bar_series_take_the_automatic_color_of_their_index(string dir)
+    {
+        var series = Read(Space(Bars(dir, "clustered", Sers(6)))).Sheet.Charts.Single().Series;
+        Assert.All(series, s => Assert.Equal(s.Auto!.Color, s.Color));
+        Assert.NotEqual(Color.TryParseHex("ED7D31"), series[1].Color); // six series are shaded, not the plain accents
+        var gap = Read(Space(Bars(dir, "clustered", Ser(2, null, null, "S!$B$2:$B$4")))).Sheet.Charts.Single().Series[0];
+        Assert.Equal(gap.Auto!.Color, gap.Color); // follows c:idx, not the position
+    }
+
+    [Fact]
+    public void Unfilled_area_series_take_the_automatic_color_and_stated_fills_win()
+    {
+        var area = "<c:areaChart><c:grouping val=\"standard\"/>" + Sers(6).Replace("</c:ser><c:ser><c:idx val=\"5\"/>", "<c:spPr><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></c:spPr></c:ser><c:ser><c:idx val=\"5\"/>") + "</c:areaChart>";
+        var series = Read(Space(area)).Sheet.Charts.Single().Series;
+        Assert.Equal(series[0].Auto!.Color, series[0].Color);
+        Assert.Equal(series[3].Auto!.Color, series[3].Color);
+        Assert.Equal(Color.TryParseHex("123456"), series[4].Color); // a stated fill wins
+        var fill = Ser(0, null, null, "S!$B$2:$B$4", "<c:spPr><a:solidFill><a:srgbClr val=\"123456\"/></a:solidFill></c:spPr>");
+        Assert.Equal(Color.TryParseHex("123456"), Read(Space(Bars("col", "clustered", fill + Sers(0)))).Sheet.Charts.Single().Series[0].Color);
+    }
+
+    [Fact]
+    public void Scatter_and_line_series_keep_the_palette_color()
+    {
+        var series = Read(Space(ScatterOf("", "", "", "", "", ""))).Sheet.Charts.Single().Series;
+        Assert.Equal(Color.TryParseHex("ED7D31"), series[1].Color);
+        Assert.NotEqual(series[1].Auto!.Color, series[5].Color);
+        var lines = Read(Space("<c:lineChart><c:grouping val=\"standard\"/>" + Sers(7) + "</c:lineChart>")).Sheet.Charts.Single().Series;
+        Assert.Equal(Color.TryParseHex("ED7D31"), lines[1].Color);
+    }
+
+    [Fact]
+    public void Error_bars_without_a_line_are_black_at_the_gridline_width_and_a_stated_line_wins()
+    {
+        var plain = "<c:errBars><c:errDir val=\"y\"/><c:errBarType val=\"both\"/><c:errValType val=\"fixedVal\"/><c:val val=\"3\"/></c:errBars>";
+        var bars = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", plain)))).Sheet.Charts.Single().Series[0].ErrorBars![0];
+        Assert.Equal((null, 0.75), (bars.Color, bars.Width)); // drawn black by the layout
+        var stated = plain.Replace("</c:errBars>", "<c:spPr><a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln></c:spPr></c:errBars>");
+        bars = Read(Space(Bars("col", "clustered", Ser(0, null, null, "S!$B$2:$B$4", stated)))).Sheet.Charts.Single().Series[0].ErrorBars![0];
+        Assert.Equal((new Color(255, 0, 0), 2.0), (bars.Color, bars.Width));
+    }
+
+    [Fact]
+    public void The_excel_chart_frame_defaults_to_868686_and_a_stated_border_wins()
+    {
+        Assert.Equal(Color.TryParseHex("868686"), Read(Space(Bars("col", "clustered", Sers(1)))).Sheet.Charts.Single().Border);
+        var stated = Read(Space(Bars("col", "clustered", Sers(1))).Replace("</c:chart>", "</c:chart><c:spPr><a:ln><a:solidFill><a:srgbClr val=\"00FF00\"/></a:solidFill></a:ln></c:spPr>")).Sheet.Charts.Single();
+        Assert.Equal(Color.TryParseHex("00FF00"), stated.Border);
+    }
+
+    [Theory] // only a run that states no size, bold or typeface is changed; a stated property keeps the old behavior
+    [InlineData("<a:rPr lang=\"en-US\"/>", 18.0, false, "Arial")]
+    [InlineData("<a:rPr lang=\"en-US\" sz=\"2400\"/>", 24.0, null, null)]
+    [InlineData("<a:rPr lang=\"en-US\" b=\"1\"/>", 14.0, true, null)]
+    [InlineData("<a:rPr lang=\"en-US\"><a:latin typeface=\"Times New Roman\"/></a:rPr>", 14.0, null, "Times New Roman")]
+    public void A_rich_title_that_states_nothing_is_18_point_regular_arial(string run, double size, bool? bold, string? family)
+    {
+        var title = $"<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r>{run}<a:t>T</a:t></a:r></a:p></c:rich></c:tx></c:title>";
+        var chart = Read(Space(Bars("col", "clustered", Sers(1)), title)).Sheet.Charts.Single();
+        Assert.Equal((size, bold, family), (chart.TitleSize, chart.TextStyles.Title?.Bold, chart.TextStyles.Title?.Family));
+    }
+
+    [Fact]
+    public void A_title_without_rich_text_or_with_properties_in_the_chart_text_keeps_the_old_defaults()
+    {
+        var auto = Read(Space(Bars("col", "clustered", Sers(1)), "<c:title/>")).Sheet.Charts.Single();
+        Assert.Equal(14, auto.TitleSize);
+        Assert.Null(auto.TextStyles.Title);
+        var inherited = Space(Bars("col", "clustered", Sers(1)), "<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>T</a:t></a:r></a:p></c:rich></c:tx></c:title>")
+            .Replace("</c:chart>", "</c:chart><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr b=\"1\"/></a:pPr></a:p></c:txPr>");
+        var chart = Read(inherited).Sheet.Charts.Single();
+        Assert.Equal(14, chart.TitleSize);
+        Assert.NotEqual("Arial", chart.TextStyles.Title?.Family);
+    }
+
     [Fact]
     public void Error_bars_widen_the_automatic_scale()
     {

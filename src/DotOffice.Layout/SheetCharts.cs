@@ -722,7 +722,7 @@ public sealed partial class SheetLayoutEngine
         // ---- data labels last, on top of the series
         foreach (var (text, lx, ly, inside, fill, pointStyle, side) in labels)
         {
-            var labelFont = Styled(Styled(font with { Color = inside ? LabelColor(chart, fill) : chart.TextColor ?? ChartText }, styles.DataLabels), pointStyle);
+            var labelFont = Styled(Styled(font with { Color = chart.TextColor ?? ChartText }, styles.DataLabels), pointStyle);
             if (side != LabelSide.Auto)
             {
                 switch (side)
@@ -755,7 +755,7 @@ public sealed partial class SheetLayoutEngine
     /// </summary>
     private static void DrawErrorBar(List<LayoutItem> items, bool alongX, double across, double from, double to, ChartErrorBars bars)
     {
-        var color = bars.Color ?? new Color(0x59, 0x59, 0x59); // not measured
+        var color = bars.Color ?? Color.Black;
         const double cap = 3;
         if (alongX)
         {
