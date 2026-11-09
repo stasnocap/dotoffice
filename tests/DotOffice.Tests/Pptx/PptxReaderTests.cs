@@ -365,6 +365,34 @@ public class PptxReaderTests
         Assert.Equal(9, LineSeries("<c:marker><c:symbol val=\"circle\"/><c:size val=\"9\"/></c:marker>").MarkerDiameter);
     }
 
+    [Theory]
+    [InlineData("circle", ChartMarkerSymbol.Circle)]
+    [InlineData("dash", ChartMarkerSymbol.Dash)]
+    [InlineData("diamond", ChartMarkerSymbol.Diamond)]
+    [InlineData("dot", ChartMarkerSymbol.Dot)]
+    [InlineData("plus", ChartMarkerSymbol.Plus)]
+    [InlineData("square", ChartMarkerSymbol.Square)]
+    [InlineData("star", ChartMarkerSymbol.Star)]
+    [InlineData("triangle", ChartMarkerSymbol.Triangle)]
+    [InlineData("x", ChartMarkerSymbol.X)]
+    [InlineData("auto", ChartMarkerSymbol.Auto)]
+    [InlineData("picture", ChartMarkerSymbol.Auto)]
+    [InlineData("hexagon", ChartMarkerSymbol.Auto)]
+    [InlineData("", ChartMarkerSymbol.Auto)]
+    public void A_marker_symbol_is_read_and_an_unknown_one_is_automatic(string symbol, ChartMarkerSymbol expected)
+    {
+        var series = LineSeries($"<c:marker><c:symbol val=\"{symbol}\"/></c:marker>");
+        Assert.Equal(expected, series.MarkerSymbol);
+        Assert.True(series.Marker);
+    }
+
+    [Fact]
+    public void A_none_marker_symbol_draws_no_marker_and_no_symbol_is_automatic()
+    {
+        Assert.False(LineSeries("<c:marker><c:symbol val=\"none\"/></c:marker>").Marker);
+        Assert.Equal(ChartMarkerSymbol.Auto, LineSeries("").MarkerSymbol);
+    }
+
     [Fact]
     public void A_chart_automatic_title_is_larger_and_bold_and_its_text_takes_the_theme_text_color()
     {

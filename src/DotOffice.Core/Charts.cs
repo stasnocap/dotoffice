@@ -22,6 +22,9 @@ public enum ChartGrouping { Clustered, Stacked, PercentStacked }
 
 public enum LegendPosition { None, Right, Left, Top, Bottom }
 
+/// <summary>The shape of a series' markers (<c>c:marker/c:symbol</c>, ISO 29500 ST_MarkerStyle). <c>none</c> is <see cref="ChartSeries.Marker"/> = false; <c>picture</c> and unknown values read as <see cref="Auto"/>.</summary>
+public enum ChartMarkerSymbol { Auto, Circle, Dash, Diamond, Dot, Plus, Square, Star, Triangle, X }
+
 /// <summary>
 /// One data series with everything needed to draw it. <paramref name="Labels"/> are the data-label texts per point (null when the
 /// series shows none); <paramref name="PointColors"/> are the per-point colors of pie slices.
@@ -35,7 +38,7 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
-    double? MarkerSize = null)
+    double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto)
 {
     /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
     public const double DefaultMarkerSize = 5;

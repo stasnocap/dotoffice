@@ -188,6 +188,13 @@ internal static class DmlCharts
                     : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
             }
 
+            var markerSymbol = ((string?)Path(ser, "marker", "symbol")?.Attribute("val"))?.Trim() switch
+            {
+                "circle" => ChartMarkerSymbol.Circle, "dash" => ChartMarkerSymbol.Dash, "diamond" => ChartMarkerSymbol.Diamond,
+                "dot" => ChartMarkerSymbol.Dot, "plus" => ChartMarkerSymbol.Plus, "square" => ChartMarkerSymbol.Square,
+                "star" => ChartMarkerSymbol.Star, "triangle" => ChartMarkerSymbol.Triangle, "x" => ChartMarkerSymbol.X,
+                _ => ChartMarkerSymbol.Auto, // auto, picture (no image support), none (Marker is false) and unknown values
+            };
             double? markerSize = double.TryParse(Path(ser, "marker", "size")?.Attribute("val")?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sz) && sz >= 2 && sz <= 72 ? sz : null;
 
             List<Color>? pointColors = null;
@@ -259,7 +266,7 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol));
         }
         return series;
         }

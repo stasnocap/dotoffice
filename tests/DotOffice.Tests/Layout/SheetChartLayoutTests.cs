@@ -91,6 +91,59 @@ public class SheetChartLayoutTests
         Assert.All(big.Items.OfType<EllipseItem>().Where(e => e.Fill == Red), e => Assert.Equal(9, e.Width));
     }
 
+    private static LayoutPage Marked(ChartMarkerSymbol symbol, bool marker = true) =>
+        Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = marker, MarkerSize = 9, MarkerSymbol = symbol }));
+
+    [Fact]
+    public void A_square_marker_is_a_rectangle_of_the_marker_size_over_a_white_halo()
+    {
+        var page = Marked(ChartMarkerSymbol.Square);
+        Assert.Equal(3, page.Items.OfType<RectItem>().Count(r => r.Fill == Red && r.Width == 9 && r.Height == 9));
+        Assert.Equal(3, page.Items.OfType<RectItem>().Count(r => r.Fill == Color.White && Math.Abs(r.Width - 10.4) < 1e-9));
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+    }
+
+    [Fact]
+    public void A_diamond_marker_is_a_four_point_polygon_as_wide_and_high_as_the_marker_size()
+    {
+        var diamonds = Marked(ChartMarkerSymbol.Diamond).Items.OfType<PolygonItem>().Where(p => p.Fill == Red).ToList();
+        Assert.Equal(3, diamonds.Count);
+        Assert.All(diamonds, d =>
+        {
+            Assert.Equal(4, d.Points.Count);
+            Assert.Equal(9, d.Points.Max(p => p.X) - d.Points.Min(p => p.X), 6);
+            Assert.Equal(9, d.Points.Max(p => p.Y) - d.Points.Min(p => p.Y), 6);
+        });
+    }
+
+    [Fact]
+    public void An_x_marker_is_two_crossing_strokes_in_the_series_color()
+    {
+        var page = Marked(ChartMarkerSymbol.X);
+        var strokes = page.Items.OfType<LineItem>().Where(l => l.Color == Red && l.Width == 1.5 && Math.Abs(l.X2 - l.X1) == 9 && Math.Abs(l.Y2 - l.Y1) == 9).ToList();
+        Assert.Equal(6, strokes.Count);
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+    }
+
+    [Fact]
+    public void A_none_symbol_draws_no_marker_and_automatic_ones_stay_circles()
+    {
+        var none = Marked(ChartMarkerSymbol.Auto, marker: false);
+        Assert.DoesNotContain(none.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        var auto = Marked(ChartMarkerSymbol.Auto);
+        Assert.Equal(3, auto.Items.OfType<EllipseItem>().Count(e => e.Fill == Red && e.Width == 9));
+        Assert.Equal(3, auto.Items.OfType<EllipseItem>().Count(e => e.Fill == Color.White && Math.Abs(e.Width - 10.4) < 1e-9));
+        Assert.Equal(auto.Items.OfType<EllipseItem>().Select(e => e.Width), Marked(ChartMarkerSymbol.Circle).Items.OfType<EllipseItem>().Select(e => e.Width));
+    }
+
+    [Fact]
+    public void A_legend_entry_uses_the_series_marker_shape()
+    {
+        var chart = Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Square }) with { Legend = LegendPosition.Right };
+        var page = Page(chart);
+        Assert.Equal(4, page.Items.OfType<RectItem>().Count(r => r.Fill == Red && r.Width == 5));
+    }
+
     [Fact]
     public void A_pie_has_one_slice_per_value_and_a_legend_lists_the_categories()
     {

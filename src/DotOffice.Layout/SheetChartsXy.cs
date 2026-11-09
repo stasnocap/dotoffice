@@ -142,8 +142,7 @@ public sealed partial class SheetLayoutEngine
                     foreach (var p in points)
                         if (p is { } q)
                         {
-                            items.Add(new EllipseItem(q.X - (s.MarkerDiameter + 1.4) / 2, q.Y - (s.MarkerDiameter + 1.4) / 2, s.MarkerDiameter + 1.4, s.MarkerDiameter + 1.4, Color.White));
-                            items.Add(new EllipseItem(q.X - s.MarkerDiameter / 2, q.Y - s.MarkerDiameter / 2, s.MarkerDiameter, s.MarkerDiameter, s.Color));
+                            DrawMarker(items, q.X, q.Y, s, true);
                         }
             }
         }
@@ -238,8 +237,7 @@ public sealed partial class SheetLayoutEngine
             if (s.Marker)
                 foreach (var p in polygon)
                 {
-                    items.Add(new EllipseItem(p.X - (s.MarkerDiameter + 1.4) / 2, p.Y - (s.MarkerDiameter + 1.4) / 2, s.MarkerDiameter + 1.4, s.MarkerDiameter + 1.4, Color.White));
-                    items.Add(new EllipseItem(p.X - s.MarkerDiameter / 2, p.Y - s.MarkerDiameter / 2, s.MarkerDiameter, s.MarkerDiameter, s.Color));
+                    DrawMarker(items, p.X, p.Y, s, true);
                 }
         }
     }

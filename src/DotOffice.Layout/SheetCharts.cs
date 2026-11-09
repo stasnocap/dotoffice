@@ -163,6 +163,46 @@ public sealed partial class SheetLayoutEngine
 
     private static Color ChartColor(int index) => new[] { new Color(0x44, 0x72, 0xC4), new Color(0xED, 0x7D, 0x31), new Color(0xA5, 0xA5, 0xA5), new Color(0xFF, 0xC0, 0x00), new Color(0x5B, 0x9B, 0xD5), new Color(0x70, 0xAD, 0x47) }[index % 6];
 
+    private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartSeries s, bool halo) =>
+        DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo);
+
+    /// <summary>
+    /// Draws one marker centered on (x, y), <paramref name="d"/> points across, over a white halo 1.4 points wider when asked. Automatic
+    /// symbols are circles: ISO 29500 says only that the application selects them. Dash and dot sizes are estimates, and open shapes
+    /// (plus, x, star) are stroked 1.5 points wide.
+    /// </summary>
+    private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartMarkerSymbol symbol, double d, Color color, bool halo)
+    {
+        for (int pass = halo ? 0 : 1; pass < 2; pass++)
+        {
+            double e = pass == 0 ? d + 1.4 : d, r = e / 2;
+            var c = pass == 0 ? Color.White : color;
+            double stroke = pass == 0 ? 2.9 : 1.5;
+            switch (symbol)
+            {
+                case ChartMarkerSymbol.Square:
+                    items.Add(new RectItem(x - r, y - r, e, e, c)); break;
+                case ChartMarkerSymbol.Dash:
+                    items.Add(new RectItem(x - r, y - e / 6, e, e / 3, c)); break;
+                case ChartMarkerSymbol.Dot:
+                    items.Add(new EllipseItem(x - r / 2, y - r / 2, r, r, c)); break;
+                case ChartMarkerSymbol.Diamond:
+                    items.Add(new PolygonItem([(x, y - r), (x + r, y), (x, y + r), (x - r, y)], c)); break;
+                case ChartMarkerSymbol.Triangle:
+                    items.Add(new PolygonItem([(x, y - r), (x + r, y + r), (x - r, y + r)], c)); break;
+                case ChartMarkerSymbol.Plus:
+                    items.Add(new LineItem(x - r, y, x + r, y, stroke, c)); items.Add(new LineItem(x, y - r, x, y + r, stroke, c)); break;
+                case ChartMarkerSymbol.X:
+                    items.Add(new LineItem(x - r, y - r, x + r, y + r, stroke, c)); items.Add(new LineItem(x - r, y + r, x + r, y - r, stroke, c)); break;
+                case ChartMarkerSymbol.Star:
+                    items.Add(new LineItem(x - r, y - r, x + r, y + r, stroke, c)); items.Add(new LineItem(x - r, y + r, x + r, y - r, stroke, c));
+                    items.Add(new LineItem(x, y - r, x, y + r, stroke, c)); break;
+                default:
+                    items.Add(new EllipseItem(x - r, y - r, e, e, c)); break;
+            }
+        }
+    }
+
     private void DrawLegendEntry(SheetChart chart, string name, Color color, ChartSeries? series, ChartKind kind, double x, double y, double swatch, double height, RunProperties font, List<LayoutItem> items)
     {
         double cy = y + height / 2;
@@ -172,7 +212,7 @@ public sealed partial class SheetLayoutEngine
             bool joined = series?.Line ?? true;
             if (joined) items.Add(new LineItem(x, cy, x + swatch + 4, cy, 2.25, color));
             if (series is null || series.Marker || !joined)
-                items.Add(new EllipseItem(x + (swatch + 4) / 2 - 2.5, cy - 2.5, 5, 5, color));
+                DrawMarker(items, x + (swatch + 4) / 2, cy, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, 5, color, false);
             PlaceText(name, font, x + swatch + 8, cy, Anchor.Start, true, 0, items);
         }
         else if (kind == ChartKind.Bubble)
@@ -522,8 +562,7 @@ public sealed partial class SheetLayoutEngine
                         foreach (var p in points)
                             if (p is { } q)
                             {
-                                items.Add(new EllipseItem(q.X - (s.MarkerDiameter + 1.4) / 2, q.Y - (s.MarkerDiameter + 1.4) / 2, s.MarkerDiameter + 1.4, s.MarkerDiameter + 1.4, Color.White));
-                                items.Add(new EllipseItem(q.X - s.MarkerDiameter / 2, q.Y - s.MarkerDiameter / 2, s.MarkerDiameter, s.MarkerDiameter, s.Color));
+                                DrawMarker(items, q.X, q.Y, s, true);
                             }
                 }
             }
