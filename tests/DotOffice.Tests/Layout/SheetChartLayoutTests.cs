@@ -824,4 +824,91 @@ public class SheetChartLayoutTests
         Assert.Equal(["Top", "Bottom"], lines.Select(t => t.Text));
         Assert.True(lines[1].Baseline - lines[0].Baseline > 5);
     }
+
+    // ---- per-point markers (c:dPt/c:marker)
+
+    private static ChartSeries Pointed(ChartSeries s, params (int Index, ChartPointMarker Marker)[] points) =>
+        s with { PointMarkers = points.ToDictionary(p => p.Index, p => p.Marker) };
+
+    private static double CenterX(EllipseItem e) => e.X + e.Width / 2;
+
+    [Fact]
+    public void A_point_marker_changes_only_its_own_point_even_after_a_null_value()
+    {
+        var series = Pointed(Series(Red, null, 10, 20) with { Marker = true }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var page = Page(Chart(ChartKind.Line, series));
+        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
+        var circle = Assert.Single(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        Assert.Equal(9, rect.Width);
+        Assert.Equal(5, circle.Width);
+        Assert.True(rect.X + 4.5 > CenterX(circle)); // idx 2 is the third category, to the right of idx 1
+    }
+
+    [Fact]
+    public void A_point_with_no_symbol_draws_no_marker_and_the_others_are_untouched()
+    {
+        var plain = Page(Chart(ChartKind.Line, Series(Red, 5, 10, 20) with { Marker = true }));
+        var hidden = Page(Chart(ChartKind.Line, Pointed(Series(Red, 5, 10, 20) with { Marker = true }, (1, new ChartPointMarker(Visible: false)))));
+        Assert.Equal(3, plain.Items.OfType<EllipseItem>().Count(e => e.Fill == Red));
+        var left = hidden.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        Assert.Equal(2, left.Count);
+        var all = plain.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        Assert.Equal([all[0], all[2]], left);
+    }
+
+    [Fact]
+    public void A_visible_point_marker_on_a_series_without_markers_draws_only_that_marker()
+    {
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = false }, (1, new ChartPointMarker(true, ChartMarkerSymbol.Square, 8)));
+        var page = Page(Chart(ChartKind.Line, series));
+        Assert.DoesNotContain(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        Assert.Equal(8, Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red).Width);
+    }
+
+    [Fact]
+    public void A_point_that_states_only_a_size_keeps_the_series_symbol_and_style()
+    {
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Square, MarkerSize = 6, MarkerStyle = new ChartMarkerStyle(Fill: Blue) },
+            (1, new ChartPointMarker(Size: 12)));
+        var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
+        Assert.Equal(3, paths.Count);
+        Assert.All(paths, p => Assert.Equal((Color?)Blue, p.Fill));
+        var widths = paths.Select(p => p.Points.Where(q => q.Kind != PathPointKind.Close)).Select(pts => pts.Max(q => q.X) - pts.Min(q => q.X)).ToList();
+        Assert.Equal([6.0, 12.0, 6.0], widths.Select(w => Math.Round(w)));
+    }
+
+    [Fact]
+    public void A_point_fill_keeps_the_series_outline_and_the_other_points_keep_both()
+    {
+        var series = Pointed(Series(Red, 5, 10, 20) with { Marker = true, MarkerSymbol = ChartMarkerSymbol.Circle, MarkerStyle = new ChartMarkerStyle(Fill: Red, Line: Blue, LineWidth: 2) },
+            (0, new ChartPointMarker(Style: new ChartMarkerStyle(Fill: Color.White))));
+        var paths = Paths(Page(Chart(ChartKind.Line, series))).ToList();
+        var fills = paths.Where(p => p.Fill is not null).ToList();
+        Assert.Equal([(Color?)Color.White, Red, Red], fills.Select(p => p.Fill));
+        var rings = paths.Where(p => p.Stroke is not null).ToList();
+        Assert.Equal(3, rings.Count);
+        Assert.All(rings, p => Assert.Equal(((Color?)Blue, 2.0), (p.Stroke, p.LineWidth)));
+    }
+
+    [Fact]
+    public void A_scatter_point_marker_follows_the_point_index_across_a_null_value()
+    {
+        var series = Pointed(Series(Red, 5, null, 20) with { Marker = true, XValues = new double?[] { 1, 2, 3 } }, (2, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var page = Page(Chart(ChartKind.Scatter, series) with { XMin = 0, XMax = 4 });
+        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
+        var circle = Assert.Single(page.Items.OfType<EllipseItem>(), e => e.Fill == Red);
+        Assert.True(rect.X + 4.5 > CenterX(circle));
+    }
+
+    [Fact]
+    public void A_radar_point_marker_belongs_to_the_category_with_the_same_index()
+    {
+        var series = Pointed(Series(Red, 20, 20, 20) with { Marker = true }, (1, new ChartPointMarker(Symbol: ChartMarkerSymbol.Square, Size: 9)));
+        var page = Page(Chart(ChartKind.Radar, series));
+        var rect = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Red);
+        var circles = page.Items.OfType<EllipseItem>().Where(e => e.Fill == Red).ToList();
+        Assert.Equal(2, circles.Count);
+        // category 0 is at the top and 2 at the lower left, so category 1 (lower right) is right of both
+        Assert.All(circles, c => Assert.True(rect.X + 4.5 > CenterX(c)));
+    }
 }

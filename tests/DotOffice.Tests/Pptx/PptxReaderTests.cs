@@ -350,6 +350,59 @@ public class PptxReaderTests
     private static ChartSeries LineSeries(string marker) =>
         Assert.Single(Assert.IsType<SheetChart>(Assert.Single(ReadSlide(new PptxBuilder().AddChart(LineChartXml.Replace("MARKER", marker)).AddSlide(ChartFrame())).Objects)).Series);
 
+    private static string Dpt(string idx, string marker) => $"<c:dPt><c:idx val=\"{idx}\"/>{marker}</c:dPt>";
+
+    [Fact]
+    public void A_data_point_marker_states_symbol_size_and_style_and_the_series_keeps_its_own()
+    {
+        var series = LineSeries("<c:marker><c:symbol val=\"circle\"/><c:size val=\"7\"/></c:marker>" +
+            Dpt("1", "<c:marker><c:symbol val=\"diamond\"/><c:size val=\"11\"/><c:spPr><a:solidFill><a:srgbClr val=\"00FF00\"/></a:solidFill></c:spPr></c:marker>"));
+        Assert.Equal((ChartMarkerSymbol.Circle, 7.0), (series.MarkerSymbol, series.MarkerSize));
+        var point = Assert.Single(series.PointMarkers!);
+        Assert.Equal(1, point.Key);
+        Assert.Equal((true, (ChartMarkerSymbol?)ChartMarkerSymbol.Diamond, (double?)11), (point.Value.Visible, point.Value.Symbol, point.Value.Size));
+        Assert.Equal(new Color(0, 255, 0), point.Value.Style!.Fill);
+    }
+
+    [Fact]
+    public void A_data_point_marker_states_only_what_it_says()
+    {
+        var size = Assert.Single(LineSeries(Dpt("0", "<c:marker><c:size val=\"9\"/></c:marker>")).PointMarkers!).Value;
+        Assert.Equal(new ChartPointMarker(null, null, 9, null), size);
+        var none = Assert.Single(LineSeries(Dpt("0", "<c:marker><c:symbol val=\"none\"/></c:marker>")).PointMarkers!).Value;
+        Assert.Equal(new ChartPointMarker(false), none);
+        var style = Assert.Single(LineSeries(Dpt("0", "<c:marker><c:spPr><a:ln w=\"25400\"/><a:noFill/></c:spPr></c:marker>")).PointMarkers!).Value;
+        Assert.True(style.Style!.NoFill);
+        Assert.Null(style.Symbol);
+    }
+
+    [Fact]
+    public void A_data_point_marker_inherits_the_series_marker_and_a_point_symbol_shows_a_series_with_none()
+    {
+        var series = LineSeries("<c:marker><c:symbol val=\"none\"/></c:marker>" + Dpt("1", "<c:marker><c:symbol val=\"square\"/></c:marker>"));
+        Assert.False(series.Marker);
+        Assert.True(Assert.Single(series.PointMarkers!).Value.Visible);
+    }
+
+    [Theory]
+    [InlineData("5")]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1e400")]
+    [InlineData("")]
+    public void A_data_point_marker_with_a_bad_or_out_of_range_index_is_ignored(string idx) =>
+        Assert.Null(LineSeries(Dpt(idx, "<c:marker><c:symbol val=\"square\"/></c:marker>")).PointMarkers);
+
+    [Fact]
+    public void A_data_point_without_idx_or_marker_and_malformed_marker_values_are_tolerated()
+    {
+        Assert.Null(LineSeries("<c:dPt><c:marker><c:symbol val=\"square\"/></c:marker></c:dPt>").PointMarkers);
+        Assert.Null(LineSeries(Dpt("0", "<c:spPr><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></c:spPr>")).PointMarkers);
+        Assert.Null(LineSeries(Dpt("0", "<c:marker><c:size val=\"x\"/><c:spPr><a:ln w=\"abc\"/></c:spPr></c:marker>")).PointMarkers);
+        var odd = LineSeries(Dpt("0", "<c:marker><c:symbol val=\"blob\"/><c:size val=\"500\"/></c:marker>"));
+        Assert.Equal(new ChartPointMarker(true, ChartMarkerSymbol.Auto), Assert.Single(odd.PointMarkers!).Value);
+    }
+
     [Fact]
     public void A_line_series_without_c_size_has_the_schema_default_marker_of_5_points()
     {

@@ -206,6 +206,17 @@ public class XlsxChartTests
         $"{(size.Length == 0 ? "" : $"<c:bubbleSize><c:numRef><c:f>{size}</c:f></c:numRef></c:bubbleSize>")}</c:ser>";
 
     [Fact]
+    public void Reads_the_per_point_markers_of_a_line_series()
+    {
+        var extra = "<c:marker><c:symbol val=\"circle\"/></c:marker><c:dPt><c:idx val=\"2\"/><c:marker><c:symbol val=\"none\"/></c:marker></c:dPt><c:dPt><c:idx val=\"1\"/><c:marker><c:size val=\"10\"/></c:marker></c:dPt>";
+        var line = "<c:lineChart><c:grouping val=\"standard\"/>" + Ser(0, null, null, "S!$B$2:$B$4", extra) + "</c:lineChart>";
+        var series = Read(Space(line)).Sheet.Charts.Single().Series.Single();
+        Assert.Equal(new ChartPointMarker(Size: 10), series.PointMarkers![1]);
+        Assert.Equal(new ChartPointMarker(Visible: false), series.PointMarkers[2]);
+        Assert.Equal(2, series.PointMarkers.Count);
+    }
+
+    [Fact]
     public void Reads_the_marker_fill_and_outline_of_a_line_series()
     {
         var marker = "<c:marker><c:symbol val=\"circle\"/><c:spPr><a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill><a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"00AA00\"/></a:solidFill></a:ln></c:spPr></c:marker>";

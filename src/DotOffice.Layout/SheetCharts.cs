@@ -163,8 +163,29 @@ public sealed partial class SheetLayoutEngine
 
     private static Color ChartColor(int index) => new[] { new Color(0x44, 0x72, 0xC4), new Color(0xED, 0x7D, 0x31), new Color(0xA5, 0xA5, 0xA5), new Color(0xFF, 0xC0, 0x00), new Color(0x5B, 0x9B, 0xD5), new Color(0x70, 0xAD, 0x47) }[index % 6];
 
-    private static void DrawMarker(List<LayoutItem> items, double x, double y, ChartSeries s, bool halo) =>
-        DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo, s.MarkerStyle);
+    /// <summary>
+    /// Draws the marker of point <paramref name="index"/> (the <c>c:idx</c> of its <c>c:dPt</c>, i.e. the position in the series' values,
+    /// null values included). A point states its own visibility, symbol, size and style; what it does not state comes from the series, and
+    /// <paramref name="seriesShows"/> says whether the series draws markers at all. A series without per-point markers draws as always.
+    /// </summary>
+    private static void DrawMarkerAt(List<LayoutItem> items, double x, double y, ChartSeries s, int index, bool seriesShows, bool halo)
+    {
+        var own = s.PointMarkers is { } map && map.TryGetValue(index, out var found) ? found : null;
+        if (!(own?.Visible ?? seriesShows)) return;
+        if (own is null) { DrawMarker(items, x, y, s.MarkerSymbol, s.MarkerDiameter, s.Color, halo, s.MarkerStyle); return; }
+        DrawMarker(items, x, y, own.Symbol ?? s.MarkerSymbol, own.Size ?? s.MarkerDiameter, s.Color, halo, MergeStyle(s.MarkerStyle, own.Style));
+    }
+
+    /// <summary>A point's style over the series': the fill (color, none, opacity) and the outline (color, none, width, opacity) are each the point's when it states them, else the series'.</summary>
+    private static ChartMarkerStyle? MergeStyle(ChartMarkerStyle? series, ChartMarkerStyle? point)
+    {
+        if (point is null) return series;
+        if (series is null) return point;
+        bool fill = point.Fill is not null || point.NoFill, line = point.Line is not null || point.NoLine || point.LineWidth is not null;
+        var f = fill ? point : series;
+        var l = line ? point : series;
+        return new ChartMarkerStyle(f.Fill, f.NoFill, f.FillAlpha, l.Line, l.NoLine, l.LineWidth, l.LineAlpha);
+    }
 
     /// <summary>
     /// Draws one marker centered on (x, y), <paramref name="d"/> points across, over a white halo 1.4 points wider when asked. Automatic
@@ -611,12 +632,10 @@ public sealed partial class SheetLayoutEngine
                         }
                     }
                     if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
-                    if (s.Marker)
-                        foreach (var p in points)
-                            if (p is { } q)
-                            {
-                                DrawMarker(items, q.X, q.Y, s, true);
-                            }
+                    if (s.Marker || s.PointMarkers is not null)
+                        for (int i = 0; i < points.Length; i++)
+                            if (points[i] is { } q)
+                                DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker, true);
                 }
             }
         }

@@ -180,23 +180,26 @@ internal static class DmlCharts
             // A series with no line of its own color takes the automatic one; only a markers-only series is named by its marker's fill.
             Color color = (lineLike ? SolidFill(lineProperties, theme) ?? (line ? null : SolidFill(Child(Child(ser, "marker"), "spPr"), theme)) : null) ?? SolidFill(spPr, theme) ?? PaletteColor(theme, firstIndex + i);
 
+            var (ownVisible, ownSymbol, ownSize, ownStyle) = ReadMarker(Child(ser, "marker"));
             bool marker = true;
             if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
-            {
-                var symbol = (string?)Path(ser, "marker", "symbol")?.Attribute("val");
-                marker = symbol is not null ? symbol != "none"
-                    : kind == ChartKind.Radar ? radarStyle == "marker"
-                    : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false");
-            }
+                marker = ownVisible
+                    ?? (kind == ChartKind.Radar ? radarStyle == "marker"
+                    : group.Name.LocalName == "stockChart" ? false : (string?)Child(group, "marker")?.Attribute("val") is not ("0" or "false"));
+            var markerSymbol = ownSymbol ?? ChartMarkerSymbol.Auto; // none draws nothing (Marker is false); picture and unknown values are Auto
+            var markerSize = ownSize;
 
-            var markerSymbol = ((string?)Path(ser, "marker", "symbol")?.Attribute("val"))?.Trim() switch
-            {
-                "circle" => ChartMarkerSymbol.Circle, "dash" => ChartMarkerSymbol.Dash, "diamond" => ChartMarkerSymbol.Diamond,
-                "dot" => ChartMarkerSymbol.Dot, "plus" => ChartMarkerSymbol.Plus, "square" => ChartMarkerSymbol.Square,
-                "star" => ChartMarkerSymbol.Star, "triangle" => ChartMarkerSymbol.Triangle, "x" => ChartMarkerSymbol.X,
-                _ => ChartMarkerSymbol.Auto, // auto, picture (no image support), none (Marker is false) and unknown values
-            };
-            double? markerSize = double.TryParse(Path(ser, "marker", "size")?.Attribute("val")?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sz) && sz >= 2 && sz <= 72 ? sz : null;
+            // Per-point markers (c:dPt/c:marker) of line, scatter and radar series: only what a point states is kept.
+            Dictionary<int, ChartPointMarker>? pointMarkers = null;
+            if (kind is ChartKind.Line or ChartKind.Scatter or ChartKind.Radar)
+                foreach (var point in ser.Elements().Where(e => e.Name.LocalName == "dPt"))
+                {
+                    double at = Number(Child(point, "idx"), "val", -1);
+                    if (!(at >= 0 && at < values.Count) || Child(point, "marker") is not { } own) continue;
+                    var (visible, symbol, size, style) = ReadMarker(own);
+                    if (visible is null && symbol is null && size is null && style is null) continue;
+                    (pointMarkers ??= [])[(int)at] = new ChartPointMarker(visible, symbol, size, style);
+                }
 
             List<Color>? pointColors = null;
             if (slices)
@@ -267,7 +270,7 @@ internal static class DmlCharts
             double alpha = Opacity(spPr);
             if (alpha >= 1 && lineLike) alpha = 1;
             series.Add(new ChartSeries(name, values, color, marker, pointColors, labels, xValues, sizes, line, smooth, alpha,
-                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ReadMarkerStyle(Child(Child(ser, "marker"), "spPr"))));
+                ReadTrendline(ser, color), ReadErrorBars(ser, values, xValues, kind), labelStyles, labelPlacements, markerSize, markerSymbol, ownStyle, pointMarkers));
         }
         return series;
         }
@@ -281,6 +284,23 @@ internal static class DmlCharts
 
         // c:marker/c:spPr: a fill (solid or none) and an outline (a:ln: color, width in EMU, or none). A part that is absent, or a color that
         // cannot be resolved, is left unstated; a series with nothing stated has no style at all.
+        // One c:marker (series or data point): whether it shows (false for symbol none, true for another symbol, null when no symbol is
+        // stated), its shape, its size (2-72 only) and its spPr style. Anything missing or malformed is null.
+        (bool? Visible, ChartMarkerSymbol? Symbol, double? Size, ChartMarkerStyle? Style) ReadMarker(XElement? marker)
+        {
+            if (marker is null) return (null, null, null, null);
+            string? name = ((string?)Child(marker, "symbol")?.Attribute("val"))?.Trim();
+            ChartMarkerSymbol? symbol = name is null or "none" ? null : name switch
+            {
+                "circle" => ChartMarkerSymbol.Circle, "dash" => ChartMarkerSymbol.Dash, "diamond" => ChartMarkerSymbol.Diamond,
+                "dot" => ChartMarkerSymbol.Dot, "plus" => ChartMarkerSymbol.Plus, "square" => ChartMarkerSymbol.Square,
+                "star" => ChartMarkerSymbol.Star, "triangle" => ChartMarkerSymbol.Triangle, "x" => ChartMarkerSymbol.X,
+                _ => ChartMarkerSymbol.Auto, // auto, picture (no image support) and unknown values
+            };
+            double? size = double.TryParse(Child(marker, "size")?.Attribute("val")?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sz) && sz >= 2 && sz <= 72 ? sz : null;
+            return (name is null ? null : name != "none", symbol, size, ReadMarkerStyle(Child(marker, "spPr")));
+        }
+
         ChartMarkerStyle? ReadMarkerStyle(XElement? spPr)
         {
             if (spPr is null) return null;

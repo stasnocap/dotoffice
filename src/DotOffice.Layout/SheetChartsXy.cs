@@ -138,12 +138,10 @@ public sealed partial class SheetLayoutEngine
                 }
                 if (overlays.Count > 0) { items.Add(new PushItem((plotLeft, plotTop, plotWidth, plotHeight))); items.AddRange(overlays); items.Add(new PopItem()); }
                 if (s.Line) DrawPolyline(points, s.Smooth, 2.25, s.Color, items);
-                if (s.Marker || !s.Line)
-                    foreach (var p in points)
-                        if (p is { } q)
-                        {
-                            DrawMarker(items, q.X, q.Y, s, true);
-                        }
+                if (s.Marker || !s.Line || s.PointMarkers is not null)
+                    for (int i = 0; i < points.Length; i++)
+                        if (points[i] is { } q)
+                            DrawMarkerAt(items, q.X, q.Y, s, i, s.Marker || !s.Line, true);
             }
         }
         if (chart.Kind == ChartKind.Bubble)
@@ -234,11 +232,9 @@ public sealed partial class SheetLayoutEngine
             if (s.Line || chart.Filled)
                 for (int k = 0; k < n; k++)
                     items.Add(new LineItem(polygon[k].X, polygon[k].Y, polygon[(k + 1) % n].X, polygon[(k + 1) % n].Y, 2.25, s.Color));
-            if (s.Marker)
-                foreach (var p in polygon)
-                {
-                    DrawMarker(items, p.X, p.Y, s, true);
-                }
+            if (s.Marker || s.PointMarkers is not null)
+                for (int k = 0; k < polygon.Count; k++)
+                    DrawMarkerAt(items, polygon[k].X, polygon[k].Y, s, k, s.Marker, true);
         }
     }
 }

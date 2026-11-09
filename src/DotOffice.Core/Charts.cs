@@ -38,7 +38,8 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
     IReadOnlyList<double?>? XValues = null, IReadOnlyList<double?>? Sizes = null, bool Line = true, bool Smooth = false,
     double Alpha = 1, ChartTrendline? Trendline = null, IReadOnlyList<ChartErrorBars>? ErrorBars = null,
     IReadOnlyList<ChartTextStyle?>? LabelStyles = null, IReadOnlyList<ChartLabelPlacement?>? LabelPlacements = null,
-    double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null)
+    double? MarkerSize = null, ChartMarkerSymbol MarkerSymbol = ChartMarkerSymbol.Auto, ChartMarkerStyle? MarkerStyle = null,
+    IReadOnlyDictionary<int, ChartPointMarker>? PointMarkers = null)
 {
     /// <summary>The ISO 29500 default of <c>c:marker/c:size</c>, in points.</summary>
     public const double DefaultMarkerSize = 5;
@@ -54,6 +55,13 @@ public sealed record ChartSeries(string Name, IReadOnlyList<double?> Values, Col
 /// </summary>
 public sealed record ChartMarkerStyle(Color? Fill = null, bool NoFill = false, double FillAlpha = 1,
     Color? Line = null, bool NoLine = false, double? LineWidth = null, double LineAlpha = 1);
+
+/// <summary>
+/// What a data point's own <c>c:dPt/c:marker</c> states, keyed by point index in <see cref="ChartSeries.PointMarkers"/>. Every aspect is
+/// null when the point does not state it and then comes from the series: <paramref name="Visible"/> is false for <c>symbol="none"</c>
+/// and true for any other symbol; <paramref name="Style"/> is merged with the series' per fill and per outline.
+/// </summary>
+public sealed record ChartPointMarker(bool? Visible = null, ChartMarkerSymbol? Symbol = null, double? Size = null, ChartMarkerStyle? Style = null);
 
 /// <summary>
 /// Where a data label sits relative to its point or bar (<c>dLblPos</c>). <see cref="InsideEnd"/>, <see cref="InsideBase"/> and
