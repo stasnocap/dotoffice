@@ -11,6 +11,9 @@ internal class Slice
 {
     public double Height { get; set; }
 
+    /// <summary>Part of <see cref="Height"/> at the bottom that need not fit on the page (multiple line spacing above single).</summary>
+    public double Overhang { get; set; }
+
     /// <summary>Space at the top of the slice (paragraph spacing before), included in <see cref="Height"/>.
     /// Dropped when the slice starts a page after a natural (not forced) page break, as in Word.</summary>
     public double LeadingSpace { get; set; }
@@ -144,7 +147,7 @@ internal static class BlockFlow
                 return [];
         }
         if (produced.Count == 0) return produced;
-        if (i > 0 && blocks[i - 1] is Paragraph before && !ctx.Settings.SplitPageBreakAndParagraphMark && ParagraphLayouter.IsPageBreakOnly(before))
+        if (i > 0 && blocks[i - 1] is Paragraph before && ParagraphLayouter.EndsWithPageBreak(before))
         {
             // The page-break paragraph keeps its mark, so there is no empty line to carry the break to the next page.
             produced[0].BreakBefore = true;
@@ -243,7 +246,7 @@ internal static class ParagraphLayouter
             hyphenation: ctx.Settings.AutoHyphenation && !props.SuppressAutoHyphens
                 ? new HyphenationOptions(ctx.Settings.HyphenationZone, ctx.Settings.ConsecutiveHyphenLimit, ctx.Settings.DoNotHyphenateCaps)
                 : null,
-            markStaysWithBreak: !ctx.Settings.SplitPageBreakAndParagraphMark && IsPageBreakOnly(p));
+            markStaysWithBreak: EndsWithPageBreak(p));
         double areaLeft = x0 + props.LeftIndent - (borders.Left.IsVisible ? borders.Left.Space + borders.Left.Width : 0);
         double areaRight = x0 + width - props.RightIndent + (borders.Right.IsVisible ? borders.Right.Space + borders.Right.Width : 0);
 
@@ -257,6 +260,9 @@ internal static class ParagraphLayouter
             double ascent = line.Ascent, descent = line.Descent;
             if (ascent + descent <= 0) (ascent, descent) = (mark.Ascent, mark.Descent);
             var (height, baseline) = LineHeight(props.LineSpacing, ascent, descent);
+            // Multiple spacing above single: the extra below the text may hang over the page bottom (Word 2016); not before a bottom border.
+            double overhang = props.LineSpacing is { Rule: LineSpacingRule.Auto, Value: > 1 } && !(last && bottomExtra > 0)
+                ? height - (ascent + descent) : 0;
 
             double y = first ? spaceBefore : 0;
             double areaTop = y;
@@ -270,6 +276,7 @@ internal static class ParagraphLayouter
             var slice = new Slice
             {
                 Height = y,
+                Overhang = overhang,
                 LeadingSpace = first ? spaceBefore : 0,
                 TrailingSpace = last ? spaceAfter : 0,
                 BreakBefore = breakBefore,
@@ -311,16 +318,16 @@ internal static class ParagraphLayouter
         return slices;
     }
 
-    /// <summary>A paragraph whose only content is one page break (bookmarks and empty runs aside).</summary>
-    internal static bool IsPageBreakOnly(Paragraph p)
+    /// <summary>A paragraph whose last content is a page break (bookmarks and empty runs aside): its mark stays with the break.</summary>
+    internal static bool EndsWithPageBreak(Paragraph p)
     {
-        int breaks = 0;
-        foreach (var inline in p.Inlines)
+        for (int i = p.Inlines.Count - 1; i >= 0; i--)
         {
-            if (inline is Break { Kind: BreakKind.Page }) breaks++;
-            else if (inline is not BookmarkStart && inline is not TextRun { Text.Length: 0 }) return false;
+            var inline = p.Inlines[i];
+            if (inline is Break { Kind: BreakKind.Page }) return true;
+            if (inline is not BookmarkStart && inline is not TextRun { Text.Length: 0 }) return false;
         }
-        return breaks == 1;
+        return false;
     }
 
     private static bool SameBorderGroup(Paragraph a, Paragraph b) =>

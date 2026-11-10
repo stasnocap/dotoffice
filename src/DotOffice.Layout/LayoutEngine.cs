@@ -225,8 +225,7 @@ public sealed class LayoutEngine
             bool keepWithNext = false;
             for (int i = 0; i < section.Blocks.Count; i++)
             {
-                bool afterPageBreak = i > 0 && !bodyContext.Settings.SplitPageBreakAndParagraphMark
-                    && section.Blocks[i - 1] is Paragraph pageBreak && ParagraphLayouter.IsPageBreakOnly(pageBreak);
+                bool afterPageBreak = i > 0 && section.Blocks[i - 1] is Paragraph pageBreak && ParagraphLayouter.EndsWithPageBreak(pageBreak);
                 if (section.Blocks[i] is Paragraph { Properties.Frame: { } frame })
                 {
                     if (afterPageBreak) paginator.BreakPage();
@@ -305,6 +304,10 @@ public sealed class LayoutEngine
                     j = k - 1;
                 }
             }
+            // The mark of a final paragraph ending in a page break stays with the break, so the break itself makes the last page.
+            if (ReferenceEquals(section, sections[^1]) && section.Blocks.Count > 0 && section.Blocks[^1] is Paragraph tail
+                && ParagraphLayouter.EndsWithPageBreak(tail))
+                paginator.BreakPage();
             int index = sections.IndexOf(section);
             var next = index + 1 < sections.Count ? sections[index + 1] : null;
             // A continuous section break balances the columns above it, as in Word.
@@ -777,7 +780,7 @@ public sealed class LayoutEngine
         public double BodyHeight => Current.ContentBottom - Current.ContentTop;
 
         /// <summary>Places a floating table; one anchored to the text moves to a new page when it would not fit below the cursor.</summary>
-        /// <summary>Starts a new page for a block that follows a page-break-only paragraph (which has no empty line to carry the break).</summary>
+        /// <summary>Starts a new page for a block that follows a paragraph ending in a page break (which has no empty line to carry the break).</summary>
         public void BreakPage()
         {
             if (Current.HasBody) NextPage(natural: false);
@@ -851,7 +854,7 @@ public sealed class LayoutEngine
         /// <summary>True when <paramref name="slice"/> cannot start in the current, non-empty column.</summary>
         public bool StartsInNextColumn(Slice slice) =>
             Current.ColumnHasBody && !slice.BreakBefore && !slice.KeepWithPrevious
-            && (slice.ColumnBreakBefore || slice.Height > Current.BodyBottom - Current.Cursor + Epsilon);
+            && (slice.ColumnBreakBefore || slice.Height - slice.Overhang > Current.BodyBottom - Current.Cursor + Epsilon);
 
         public void NextColumn(bool natural = true)
         {
@@ -953,7 +956,7 @@ public sealed class LayoutEngine
                         return;
                     }
                 }
-                else if (slice.Height <= available + Epsilon)
+                else if (slice.Height - slice.Overhang <= available + Epsilon)
                 {
                     Put(page, slice, builtX);
                     return;

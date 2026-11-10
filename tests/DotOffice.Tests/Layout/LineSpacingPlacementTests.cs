@@ -102,7 +102,7 @@ public class LineSpacingPlacementTests
         Assert.Equal(2, layout.Pages.Count);
         Assert.Equal(["a", "b"], PageLines(layout.Pages[0]));
         Assert.Equal(["c"], PageLines(layout.Pages[1]));
-        Assert.Single(Render(Doc(Para("first"), breaker)).Pages);
+        Assert.Equal(2, Render(Doc(Para("first"), breaker)).Pages.Count);   // the final break makes a blank last page
     }
 
     [Fact]
@@ -116,23 +116,65 @@ public class LineSpacingPlacementTests
     }
 
     [Fact]
-    public void Page_break_after_text_keeps_the_empty_line_on_the_next_page()
+    public void Page_break_after_text_leaves_no_empty_line_on_the_next_page()
     {
         var p = Para(ParagraphProperties.Default, new TextRun("before", Text), new Break(BreakKind.Page, Text));
         var layout = Render(Doc(p, Para("after")));
         Assert.Equal(["after"], PageLines(layout.Pages[1]));
-        Assert.True(Lines(layout.Pages[1])[0].Baseline > 72 + NotoLineHeight());   // empty line first, as before
+        Assert.Equal(72 + NotoLineHeight() - NotoDescent(), Lines(layout.Pages[1])[0].Baseline, 0.01);   // Word 2016: first line of the page
     }
 
     [Fact]
-    public void Split_page_break_and_paragraph_mark_keeps_the_empty_line()
+    public void Two_page_breaks_in_one_paragraph_leave_one_blank_page()
+    {
+        var p = Para(ParagraphProperties.Default, new Break(BreakKind.Page, Text), new Break(BreakKind.Page, Text));
+        var layout = Render(Doc(Para("a"), p, Para("b")));
+        Assert.Equal(3, layout.Pages.Count);
+        Assert.Equal(["b"], PageLines(layout.Pages[2]));
+    }
+
+    [Fact]
+    public void Split_page_break_and_paragraph_mark_has_no_effect()
     {
         var breaker = Para(ParagraphProperties.Default, new Break(BreakKind.Page, Text));
-        var doc = new Document { Settings = new DocumentSettings { SplitPageBreakAndParagraphMark = true } };
+        var doc = new Document();
         doc.Sections.Add(new Section());
         doc.Sections[0].Blocks.AddRange([Para("first"), breaker, Para("after")]);
         var layout = Render(doc);
         Assert.Equal(2, layout.Pages.Count);
-        Assert.Equal(72 + 2 * NotoLineHeight() - NotoDescent(), Lines(layout.Pages[1])[0].Baseline, 0.01);
+        Assert.Equal(72 + NotoLineHeight() - NotoDescent(), Lines(layout.Pages[1])[0].Baseline, 0.01);
+    }
+
+    [Fact]
+    public void Document_ending_in_a_page_break_paragraph_has_a_blank_last_page()
+    {
+        var breaker = Para(ParagraphProperties.Default, new Break(BreakKind.Page, Text));
+        var layout = Render(Doc(Para("e1"), Para("e2"), breaker));
+        Assert.Equal(2, layout.Pages.Count);
+        Assert.Empty(Lines(layout.Pages[1]));
+        var textBreak = Para(ParagraphProperties.Default, new TextRun("e2", Text), new Break(BreakKind.Page, Text));
+        Assert.Equal(2, Render(Doc(Para("e1"), textBreak)).Pages.Count);
+    }
+
+    [Fact]
+    public void Auto_spacing_above_single_fits_the_last_line_by_its_natural_height()
+    {
+        // Body of 3.5 natural lines: the second line at factor 2 starts at 2N, so it ends at 3N naturally but 4N with its extra space.
+        var props = ParagraphProperties.Default with { LineSpacing = new LineSpacing(2, LineSpacingRule.Auto) };
+        Section Small() => new() { PageHeight = 72 + 72 + 3.5 * NotoLineHeight() };
+        Assert.Single(Render(Doc(Small(), Para("a", props), Para("b", props))).Pages);
+        var three = Render(Doc(Small(), Para("a", props), Para("b", props), Para("c", props))).Pages;
+        Assert.Equal(["a b", "c"], three.Select(p => string.Join(" ", PageLines(p))));
+    }
+
+    [Fact]
+    public void Exact_and_at_least_spacing_need_their_full_height_at_the_page_bottom()
+    {
+        foreach (var rule in new[] { LineSpacingRule.Exact, LineSpacingRule.AtLeast })
+        {
+            var props = ParagraphProperties.Default with { LineSpacing = new LineSpacing(2 * NotoLineHeight(), rule) };
+            var layout = Render(Doc(new Section { PageHeight = 72 + 72 + 3.5 * NotoLineHeight() }, Para("a", props), Para("b", props)));
+            Assert.Equal(["a"], PageLines(layout.Pages[0]));
+        }
     }
 }

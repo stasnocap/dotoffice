@@ -44,12 +44,6 @@ public sealed class DocumentSettings
 
     /// <summary>When false, lines ending in a manual line break are not stretched in justified paragraphs.</summary>
     public bool JustifyLinesEndingWithBreak { get; init; } = true;
-
-    /// <summary>
-    /// When true (w:splitPgBreakAndParaMark), the mark of a paragraph that ends in a page break moves to the next page as an empty
-    /// line; when false (Word 2013 and later) a paragraph holding only a page break leaves no empty line on the next page.
-    /// </summary>
-    public bool SplitPageBreakAndParagraphMark { get; init; }
 }
 
 public enum Orientation { Portrait, Landscape }

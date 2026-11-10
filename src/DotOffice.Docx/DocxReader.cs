@@ -56,7 +56,6 @@ internal sealed record NoteNumbering(string Format, int Start, string Restart = 
 
 internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeaders, int CompatibilityMode, bool DoNotExpandShiftReturn)
 {
-    public bool SplitPageBreakAndParagraphMark { get; init; }
     public static DocxSettings Default { get; } = new(36, false, 15, false);
 
     public bool MirrorMargins { get; init; }
@@ -92,7 +91,6 @@ internal sealed record DocxSettings(double DefaultTabStop, bool EvenAndOddHeader
                     break;
                 case "doNotHyphenateCaps": s = s with { DoNotHyphenateCaps = r.OnOff() }; break;
                 case "mirrorMargins": s = s with { MirrorMargins = r.OnOff() }; break;
-                case "splitPgBreakAndParaMark": s = s with { SplitPageBreakAndParagraphMark = r.OnOff() }; break;
                 case "doNotExpandShiftReturn": s = s with { DoNotExpandShiftReturn = r.OnOff() }; break;
                 case "compatSetting" when r.WAttr("name") == "compatibilityMode":
                     if (int.TryParse(r.WAttr("val"), out var mode)) s = s with { CompatibilityMode = mode };
@@ -291,7 +289,6 @@ internal sealed class DocxContext
                 DoNotHyphenateCaps = Settings.DoNotHyphenateCaps,
                 TableEdgeAtIndent = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
-                SplitPageBreakAndParagraphMark = Settings.SplitPageBreakAndParagraphMark,
             },
         };
         ReadCoreProperties(document);
