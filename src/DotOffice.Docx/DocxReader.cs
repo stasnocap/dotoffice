@@ -288,6 +288,7 @@ internal sealed class DocxContext
                 ConsecutiveHyphenLimit = Settings.ConsecutiveHyphenLimit,
                 DoNotHyphenateCaps = Settings.DoNotHyphenateCaps,
                 TableEdgeAtIndent = Settings.CompatibilityMode >= 15,
+                PageBreakBeforeDropsSpaceBefore = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
             },
         };

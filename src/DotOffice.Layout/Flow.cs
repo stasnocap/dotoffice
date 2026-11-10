@@ -15,8 +15,14 @@ internal class Slice
     public double Overhang { get; set; }
 
     /// <summary>Space at the top of the slice (paragraph spacing before), included in <see cref="Height"/>.
-    /// Dropped when the slice starts a page after a natural (not forced) page break, as in Word.</summary>
+    /// Dropped when the slice starts a page after a natural page break, or after a forced one with <see cref="DropLeadingSpaceAfterBreak"/>, as in Word.</summary>
     public double LeadingSpace { get; set; }
+
+    /// <summary>
+    /// <see cref="LeadingSpace"/> is dropped when <see cref="BreakBefore"/> puts this slice at the top of a new page (Word 2016): a paragraph
+    /// after one ending in a page break, and in compatibility mode 15 a paragraph with w:pageBreakBefore.
+    /// </summary>
+    public bool DropLeadingSpaceAfterBreak { get; set; }
 
     /// <summary>Space below the slice (paragraph spacing after); may be cut at the bottom of a page.</summary>
     public double TrailingSpace { get; set; }
@@ -152,6 +158,8 @@ internal static class BlockFlow
             // The page-break paragraph keeps its mark, so there is no empty line to carry the break to the next page.
             produced[0].BreakBefore = true;
             produced[0].KeepWithPrevious = false;
+            // Word 2016 drops the space before of the paragraph that starts the page after the break (any compatibility mode).
+            produced[0].DropLeadingSpaceAfterBreak = blocks[i] is Paragraph target && ParagraphLayouter.DropsSpaceBeforeAfterBreak(target);
         }
         if (keepWithNext) produced[0].KeepWithPrevious = true;
         keepWithNext = blocks[i] is Paragraph { Properties.KeepWithNext: true };
@@ -252,6 +260,7 @@ internal static class ParagraphLayouter
 
         var slices = new List<Slice>(lines.Count);
         bool breakBefore = props.PageBreakBefore && !continued, columnBreakBefore = false;
+        bool plainTop = DropsSpaceBeforeAfterBreak(p);
         int consumed = 0; // atoms in the lines before line i
         for (int i = 0; i < lines.Count; i++)
         {
@@ -280,6 +289,7 @@ internal static class ParagraphLayouter
                 LeadingSpace = first ? spaceBefore : 0,
                 TrailingSpace = last ? spaceAfter : 0,
                 BreakBefore = breakBefore,
+                DropLeadingSpaceAfterBreak = first && breakBefore && ctx.Settings.PageBreakBeforeDropsSpaceBefore && plainTop,
                 ColumnBreakBefore = columnBreakBefore,
                 KeepWithPrevious = (i > 0 || continued) && !breakBefore && !columnBreakBefore && (props.KeepLinesTogether
                                    || (props.WidowControl && (i == 1 || i == lines.Count - 1))),
@@ -329,6 +339,13 @@ internal static class ParagraphLayouter
         }
         return false;
     }
+
+    /// <summary>
+    /// Whether the paragraph is one whose space before Word 2016 was measured to drop at the top of a page after a forced page break:
+    /// no borders, shading, frame, contextual spacing or automatic space before (those were not measured and keep their space).
+    /// </summary>
+    internal static bool DropsSpaceBeforeAfterBreak(Paragraph p) =>
+        p.Properties is { Borders.HasAny: false, Shading: null, Frame: null, ContextualSpacing: false, SpaceBeforeAuto: false };
 
     private static bool SameBorderGroup(Paragraph a, Paragraph b) =>
         a.Properties.Borders.HasAny && a.Properties.Borders == b.Properties.Borders

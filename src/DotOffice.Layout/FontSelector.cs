@@ -12,7 +12,8 @@ internal readonly record struct FontMetrics(double Ascent, double Descent)
     /// <summary>
     /// Ascent and descent as Word (GDI) takes them from the font: the OS/2 win metrics, plus the external leading
     /// (<c>max(0, hhea lineGap − (winAscent + winDescent − (hhea ascender − hhea descender)))</c>) below the baseline. Fonts
-    /// without win metrics use hhea. USE_TYPO_METRICS is ignored, as in Word. Each metric is rounded to twips. Spreadsheets use the same model.
+    /// without win metrics use hhea. USE_TYPO_METRICS is ignored, as in Word. The metrics are not rounded
+    /// (Word 2016's single-spaced pitch is the unrounded sum: Calibri 11 13.4297, Times New Roman 10 11.4997). Spreadsheets and slides use the same model.
     /// </summary>
     public static FontMetrics Of(TrueTypeFont font, double size)
     {
@@ -25,8 +26,7 @@ internal readonly record struct FontMetrics(double Ascent, double Descent)
             if (hhea) gap = Math.Max(0, font.LineGap - (ascent + descent - (font.Ascender - font.Descender)));
         }
         else if (hhea) (ascent, descent, gap) = (font.Ascender, -font.Descender, font.LineGap);
-        static double Twips(double points) => Math.Round(points * 20, MidpointRounding.AwayFromZero) / 20;
-        return new FontMetrics(Twips(ascent * scale), Twips(descent * scale) + Twips(Math.Max(0, gap) * scale));
+        return new FontMetrics(ascent * scale, (descent + Math.Max(0, gap)) * scale);
     }
 }
 

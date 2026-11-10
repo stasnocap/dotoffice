@@ -90,7 +90,10 @@ public sealed class LayoutEngine
         public int Column { get; set; }
         public int ColumnStart { get; set; }
 
-        /// <summary>The current column was started because content overflowed (not by a forced break or section start).</summary>
+        /// <summary>
+        /// The current column was started because content overflowed (not by a section start or column break), or by a forced page break
+        /// whose slice has <see cref="Slice.DropLeadingSpaceAfterBreak"/>: its first slice loses its leading space.
+        /// </summary>
         public bool NaturalBreak { get; set; }
         public double Cursor { get; set; }
         public bool HasBody => Placed.Exists(p => !IsRepeated(p.Slice));
@@ -846,7 +849,7 @@ public sealed class LayoutEngine
 
         public void Add(Slice slice, double builtX)
         {
-            if (slice.BreakBefore && Current.HasBody) NextPage(natural: false);
+            if (slice.BreakBefore && Current.HasBody) NextPage(natural: slice.DropLeadingSpaceAfterBreak);
             else if (slice.ColumnBreakBefore && Current.ColumnHasBody) NextColumn(natural: false);
             Place(slice, builtX, allowMove: true);
         }

@@ -163,6 +163,9 @@ public sealed record ParagraphProperties
     public double FirstLineIndent { get; init; }
 
     public double SpaceBefore { get; init; }
+
+    /// <summary><see cref="SpaceBefore"/> is automatic (w:beforeAutospacing) rather than a set amount.</summary>
+    public bool SpaceBeforeAuto { get; init; }
     public double SpaceAfter { get; init; }
     public LineSpacing LineSpacing { get; init; } = LineSpacing.Single;
 

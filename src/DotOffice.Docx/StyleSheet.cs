@@ -332,6 +332,7 @@ internal sealed class StyleSheet
             RightIndent = f.Right ?? 0,
             FirstLineIndent = f.FirstLine ?? 0,
             SpaceBefore = f.BeforeAuto == true ? 14 : Math.Max(0, f.Before ?? 0),
+            SpaceBeforeAuto = f.BeforeAuto == true,
             SpaceAfter = f.AfterAuto == true ? 14 : Math.Max(0, f.After ?? 0),
             LineSpacing = f.Line ?? LineSpacing.Single,
             ContextualSpacing = f.ContextualSpacing ?? false,

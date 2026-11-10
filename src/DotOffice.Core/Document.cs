@@ -30,6 +30,12 @@ public sealed class DocumentSettings
     /// </summary>
     public bool TableEdgeAtIndent { get; init; } = true;
 
+    /// <summary>
+    /// When true, a paragraph with w:pageBreakBefore that starts a page loses its space before (Word 2016 in compatibility mode 15);
+    /// when false (modes 14 and 12) it keeps it.
+    /// </summary>
+    public bool PageBreakBeforeDropsSpaceBefore { get; init; } = true;
+
     /// <summary>Break long words at hyphenation points (w:autoHyphenation); English patterns only.</summary>
     public bool AutoHyphenation { get; init; }
 

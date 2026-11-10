@@ -7,8 +7,8 @@ namespace DotOffice.Tests.Layout;
 /// <summary>Where line spacing puts the baseline, from Word 2016 PDFs (Arial 12: single line 13.8 pt, top margin 72).</summary>
 public class LineSpacingPlacementTests
 {
-    // Arial 12: ascent 10.85 and descent 2.95 (natural 13.8), as the layout model computes them.
-    private const double Ascent = 10.85, Descent = 2.95, Natural = Ascent + Descent;
+    // Arial 12: win ascent 1854 and win descent 434 plus external leading 67, of 2048 units per em (natural 13.80), not rounded, as the layout model computes them.
+    private const double Ascent = 1854 * 12 / 2048.0, Descent = (434 + 67) * 12 / 2048.0, Natural = Ascent + Descent;
 
     [Theory]
     [InlineData(1.15, 15.87)]
