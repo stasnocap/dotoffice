@@ -15,11 +15,20 @@ internal sealed class RowSlice : Slice
 {
     private readonly IReadOnlyList<CellPart> _cells;
     private readonly bool _cantSplit;
+    private readonly double _top, _bottom, _next;
 
-    public RowSlice(IReadOnlyList<CellPart> cells, double height, bool cantSplit)
+    /// <summary>
+    /// <paramref name="top"/> and <paramref name="bottom"/> are the heights of the border bands at the row's top and bottom edge, both
+    /// inside <paramref name="height"/> (cell lines are already below the top band); <paramref name="next"/> is the band of the edge
+    /// under the row when it belongs to the next row. Horizontal border lines are centered in their band.
+    /// </summary>
+    public RowSlice(IReadOnlyList<CellPart> cells, double height, bool cantSplit, double top = 0, double bottom = 0, double next = 0)
     {
         _cells = cells;
         _cantSplit = cantSplit;
+        _top = top;
+        _bottom = bottom;
+        _next = next;
         Height = height;
         Footnotes = cells.SelectMany(c => c.Lines).SelectMany(l => l.Footnotes).ToList();
         Floats = cells.SelectMany(c => c.Lines).SelectMany(l => l.Floats).ToList();
@@ -40,8 +49,9 @@ internal sealed class RowSlice : Slice
         foreach (var c in _cells)
         {
             var b = c.Borders;
-            if (c.DrawTop && b.Top.IsVisible) ParagraphLayouter.AddBorder(Items, b.Top, c.X, 0, c.X + c.Width, 0);
-            if (c.DrawBottom && b.Bottom.IsVisible) ParagraphLayouter.AddBorder(Items, b.Bottom, c.X, Height, c.X + c.Width, Height);
+            double top = _top / 2, bottom = Height - _bottom / 2 + _next / 2;
+            if (c.DrawTop && b.Top.IsVisible) ParagraphLayouter.AddBorder(Items, b.Top, c.X, top, c.X + c.Width, top);
+            if (c.DrawBottom && b.Bottom.IsVisible) ParagraphLayouter.AddBorder(Items, b.Bottom, c.X, bottom, c.X + c.Width, bottom);
             if (b.Left.IsVisible) ParagraphLayouter.AddBorder(Items, b.Left, c.X, 0, c.X, Height);
             if (b.Right.IsVisible) ParagraphLayouter.AddBorder(Items, b.Right, c.X + c.Width, 0, c.X + c.Width, Height);
         }
@@ -69,11 +79,12 @@ internal sealed class RowSlice : Slice
             rest.Add(c with { Lines = moved, DrawTop = false });
         }
         if (!anyFirst || !anyRest) return null;
-        var firstSlice = new RowSlice(first, Math.Min(available, firstHeight), cantSplit: false)
+        // The first part keeps the band of the top edge (its lines stay below it); the rest starts without one and keeps the bottom edge.
+        var firstSlice = new RowSlice(first, Math.Min(available, firstHeight), cantSplit: false, top: _top)
         {
             KeepWithPrevious = KeepWithPrevious, BreakBefore = BreakBefore, RepeatHeader = RepeatHeader, IsHeaderRow = IsHeaderRow,
         };
-        var restSlice = new RowSlice(rest, restHeight, cantSplit: false) { RepeatHeader = RepeatHeader, IsHeaderRow = IsHeaderRow };
+        var restSlice = new RowSlice(rest, restHeight + _bottom, cantSplit: false, bottom: _bottom, next: _next) { RepeatHeader = RepeatHeader, IsHeaderRow = IsHeaderRow };
         return (firstSlice, restSlice);
     }
 }
@@ -178,7 +189,20 @@ internal static class TableLayouter
             contents[p] = (lines, h);
         }
 
-        // Row heights: single-row cells first, then grow the last row of each merge group to fit it.
+        // Horizontal borders take vertical space (Word 2016): every row edge is a band as high as its widest border line, and the
+        // rows' content goes between the bands. edges[r] is the edge above row r, edges[rows.Count] the table's bottom edge.
+        var edges = new double[rows.Count + 1];
+        for (int r = 0; r < rows.Count; r++)
+        {
+            foreach (var p in placed[r])
+            {
+                if (!continued.Contains(p)) edges[r] = Math.Max(edges[r], LineSpace(p.Cell.Borders.Top));
+                bool goesOn = r + 1 < rows.Count && placed[r + 1].FirstOrDefault(q => q.Column == p.Column) is { } below && continued.Contains(below);
+                if (!goesOn) edges[r + 1] = Math.Max(edges[r + 1], LineSpace(p.Cell.Borders.Bottom));
+            }
+        }
+
+        // Row heights (content, without the edges): single-row cells first, then grow the last row of each merge group to fit it.
         var heights = new double[rows.Count];
         for (int r = 0; r < rows.Count; r++)
         {
@@ -201,7 +225,7 @@ internal static class TableLayouter
             if (end == p.Row) continue;
             double needed = p.Cell.Margins.Top + contents[p].Height + p.Cell.Margins.Bottom;
             double have = 0;
-            for (int r = p.Row; r <= end; r++) have += heights[r];
+            for (int r = p.Row; r <= end; r++) have += heights[r] + (r > p.Row ? edges[r] : 0);
             if (needed > have && rows[end].HeightRule != RowHeightRule.Exact) heights[end] += needed - have;
         }
 
@@ -217,12 +241,14 @@ internal static class TableLayouter
             for (int r = p.Row; r <= end; r++)
             {
                 rowTops[r - p.Row] = groupHeight;
-                groupHeight += heights[r];
+                groupHeight += edges[r] + heights[r];
             }
+            // The cell's box starts under the edge above its first row and spans the edges between its rows.
+            groupHeight -= edges[p.Row];
             var (lines, contentHeight) = contents[p];
             double free = Math.Max(0, groupHeight - m.Top - m.Bottom - contentHeight);
             // In rotated text the vertical alignment acts across the lines, inside the rotated group.
-            double offset = m.Top + (p.Cell.TextDirection != CellTextDirection.LeftToRight ? 0 : p.Cell.VerticalAlignment switch
+            double offset = edges[p.Row] + m.Top + (p.Cell.TextDirection != CellTextDirection.LeftToRight ? 0 : p.Cell.VerticalAlignment switch
             {
                 CellVerticalAlignment.Center => free / 2,
                 CellVerticalAlignment.Bottom => free,
@@ -258,7 +284,9 @@ internal static class TableLayouter
         for (int r = 0; r < rows.Count; r++)
         {
             leadingHeaders &= rows[r].IsHeader;
-            var slice = new RowSlice(parts[r], heights[r], rows[r].CantSplit || leadingHeaders) { IsHeaderRow = leadingHeaders };
+            bool last = r == rows.Count - 1;
+            var slice = new RowSlice(parts[r], edges[r] + heights[r] + (last ? edges[r + 1] : 0), rows[r].CantSplit || leadingHeaders,
+                top: edges[r], bottom: last ? edges[r + 1] : 0, next: last ? 0 : edges[r + 1]) { IsHeaderRow = leadingHeaders };
             if (leadingHeaders) header.Add(slice);
             else if (header.Count > 0)
             {
@@ -271,6 +299,10 @@ internal static class TableLayouter
         }
         return result;
     }
+
+    /// <summary>The height a horizontal border takes: the thickness it is drawn with (<see cref="ParagraphLayouter.AddBorder"/>).</summary>
+    private static double LineSpace(Border b) =>
+        !b.IsVisible ? 0 : b.Style == BorderStyle.Thick ? Math.Max(b.Width, 1.5) : b.Width;
 
     /// <summary>
     /// Lays out a cell whose text runs up or down: the content goes through the horizontal flow in a frame as long as the cell is high
