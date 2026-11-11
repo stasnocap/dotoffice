@@ -39,10 +39,11 @@ public class TableLayoutTests
     public void Uses_grid_columns_and_cell_margins()
     {
         var page = Render(Doc(Table([100, 200], null, Row(Cell("a"), Cell("b"))))).Pages.Single();
-        Assert.Equal(72 + 5.4, Find(page, "a").X, 2);
-        Assert.Equal(72 + 100 + 5.4, Find(page, "b").X, 2);
+        // The 0.5 pt left border has its outer edge at the margin, so every column edge is 0.25 pt further right.
+        Assert.Equal(72.25 + 5.4, Find(page, "a").X, 2);
+        Assert.Equal(72.25 + 100 + 5.4, Find(page, "b").X, 2);
         var verticals = page.Items.OfType<LineItem>().Where(l => l.X1 == l.X2).Select(l => l.X1).Distinct().Order().ToArray();
-        Assert.Equal([72.0, 172.0, 372.0], verticals);
+        Assert.Equal([72.25, 172.25, 372.25], verticals);
     }
 
     [Fact]
@@ -50,7 +51,7 @@ public class TableLayoutTests
     {
         var page = Render(Doc(Table([100, 100], new TableProperties { Width = new TableWidth(100, TableWidthUnit.Percent) },
             Row(Cell("a"), Cell("b"))))).Pages.Single();
-        Assert.Equal(72 + 234 + 5.4, Find(page, "b").X, 2); // 468pt split evenly
+        Assert.Equal(72.25 + 234 + 5.4, Find(page, "b").X, 2); // 468pt split evenly
     }
 
     [Fact]
@@ -59,17 +60,17 @@ public class TableLayoutTests
         var page = Render(Doc(Table([], null, Row(Cell("x"), Cell(Words(60)))))).Pages.Single();
         var x = Find(page, "x");
         var first = Find(page, "word1");
-        double firstColumn = first.X - 5.4 - 72;
+        double firstColumn = first.X - 5.4 - 72.25;
         Assert.True(firstColumn < 40, $"narrow content should get a narrow column, got {firstColumn}");
         Assert.True(Right(Texts(page).Where(t => t.Text.StartsWith("word")).MaxBy(Right)!) <= 72 + 468 + 0.01);
-        Assert.Equal(72 + 5.4, x.X, 2);
+        Assert.Equal(72.25 + 5.4, x.X, 2);
     }
 
     [Fact]
     public void Auto_layout_respects_preferred_cell_widths()
     {
         var page = Render(Doc(Table([], null, Row(Cell("a", width: new TableWidth(150, TableWidthUnit.Points)), Cell("b"))))).Pages.Single();
-        Assert.Equal(72 + 150 + 5.4, Find(page, "b").X, 2);
+        Assert.Equal(72.25 + 150 + 5.4, Find(page, "b").X, 2);
     }
 
     [Fact]
@@ -108,7 +109,7 @@ public class TableLayoutTests
         Assert.True(Find(page, "r2").Baseline > Find(page, "r1").Baseline);
         // No horizontal border inside the merged cell between rows 1 and 2.
         double r2Top = Find(page, "r2").Baseline - 12;
-        Assert.DoesNotContain(page.Items.OfType<LineItem>(), l => l.Y1 == l.Y2 && l.X1 == 72 && l.Y1 > Find(page, "r1").Baseline && l.Y1 < r2Top + 12);
+        Assert.DoesNotContain(page.Items.OfType<LineItem>(), l => l.Y1 == l.Y2 && l.X1 == 72.25 && l.Y1 > Find(page, "r1").Baseline && l.Y1 < r2Top + 12);
     }
 
     [Fact]
@@ -153,7 +154,8 @@ public class TableLayoutTests
         cell.Blocks.Add(inner);
         cell.Blocks.Add(Para(""));
         var page = Render(Doc(Table([200], null, Row(cell)))).Pages.Single();
-        Assert.Equal(72 + 5.4 + 5.4, Find(page, "inner").X, 2);
+        // Both tables are a quarter point right of their indent, for their 0.5 pt left borders.
+        Assert.Equal(72.25 + 5.4 + 0.25 + 5.4, Find(page, "inner").X, 2);
     }
 
     private static TableCell Cell(string text, BorderSet borders)
@@ -243,7 +245,7 @@ public class TableLayoutTests
         Assert.Equal(4, horizontals.Length);
         for (int i = 0; i < 4; i++) Assert.Equal(2 + i * (line + 4), horizontals[i], 5);
         // The vertical lines of the rows join: each row's ends where the next one's starts.
-        var left = verticals.Where(l => l.X1 == 72).OrderBy(l => l.Y1).ToList();
+        var left = verticals.Where(l => l.X1 == 74).OrderBy(l => l.Y1).ToList();
         Assert.Equal(3, left.Count);
         Assert.Equal(left[0].Y2, left[1].Y1, 6);
         Assert.Equal(left[1].Y2, left[2].Y1, 6);
@@ -291,7 +293,7 @@ public class TableLayoutTests
         double edge = Find(page, "r1").Baseline + NotoDescent() + 1;
         var lines = page.Items.OfType<LineItem>().Where(l => l.Y1 == l.Y2 && Math.Abs(l.Y1 - edge) < 0.001).ToList();
         Assert.NotEmpty(lines);
-        Assert.All(lines, l => Assert.Equal(172, Math.Min(l.X1, l.X2), 6));
+        Assert.All(lines, l => Assert.Equal(173, Math.Min(l.X1, l.X2), 6));
     }
 
     // Word 2016: a table that starts a page has its first row lower than a first line of text by the top border's width.
@@ -328,5 +330,137 @@ public class TableLayoutTests
         Assert.Equal(NotoLineHeight() + 6, Find(rest, "after").Baseline - lastFiller, 6);
         var bottom = rest.Items.OfType<LineItem>().Single(l => l.Y1 == l.Y2);
         Assert.Equal(lastFiller + NotoDescent() + 3, bottom.Y1, 6);
+    }
+
+    private static Border Wide(double w) => w > 0 ? new Border(BorderStyle.Single, w, Color.Black) : Border.None;
+
+    private static BorderSet Sides(double left, double right) => new() { Left = Wide(left), Right = Wide(right) };
+
+    private static TableCell Cell(string text, BorderSet borders, Thickness margins)
+    {
+        var cell = new TableCell { Borders = borders, Margins = margins };
+        cell.Blocks.Add(Para(text));
+        return cell;
+    }
+
+    private static Document WithSettings(Document doc, DocumentSettings settings)
+    {
+        var copy = new Document { Settings = settings };
+        copy.Sections.AddRange(doc.Sections);
+        return copy;
+    }
+
+    private static double[] Verticals(LayoutPage page) =>
+        [.. page.Items.OfType<LineItem>().Where(l => l.X1 == l.X2).Select(l => Math.Round(l.X1, 6)).Distinct().Order()];
+
+    // Word 2016, compatibility mode 15, left margin 72 pt, two 150 pt columns, all borders of one width: the left border's outer
+    // edge is at 72.02 for 0.25, 0.5, 1, 1.5, 3 and 6 pt, the inside border starts at 222.05 and the right one at 372.07, and the
+    // text of the first cell (left margin 5 pt) is at 77.30, 78.50 and 80.06 for 0.5, 3 and 6 pt (77.06 without borders).
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.25)]
+    [InlineData(0.5)]
+    [InlineData(1)]
+    [InlineData(1.5)]
+    [InlineData(3)]
+    [InlineData(6)]
+    public void Left_border_has_its_outer_edge_at_the_indent(double width)
+    {
+        var box = Sides(width, width);
+        var margins = new Thickness(0, 5, 0, 5);
+        var page = Render(Doc(Table([150, 150], null, Row(Cell("a", box, margins), Cell("b", box, margins))))).Pages.Single();
+        Assert.Equal(72 + width / 2 + 5, Find(page, "a").X, 6);
+        Assert.Equal(72 + width / 2 + 150 + 5, Find(page, "b").X, 6);
+        if (width > 0) Assert.Equal([72 + width / 2, 222 + width / 2, 372 + width / 2], Verticals(page));
+    }
+
+    // Word 2016, mode 15: with tblInd 10 pt and 0.5 pt borders the left border starts at 81.98 and the text at 87.26.
+    [Fact]
+    public void Left_border_edge_follows_the_table_indent()
+    {
+        var box = Sides(0.5, 0.5);
+        var page = Render(Doc(Table([150, 150], new TableProperties { Indent = 10 },
+            Row(Cell("a", box, new Thickness(0, 5, 0, 5)), Cell("b", box, new Thickness(0, 5, 0, 5)))))).Pages.Single();
+        Assert.Equal(82.25, Verticals(page)[0], 6);
+        Assert.Equal(87.25, Find(page, "a").X, 6);
+    }
+
+    // Word 2016, mode 15: a centered table with 0.5 pt borders has its text where a borderless one has it (161.06).
+    // Right-aligned tables were not measured and are left alone as well.
+    [Theory]
+    [InlineData(TableAlignment.Center, 72 + 84.0)]
+    [InlineData(TableAlignment.Right, 72 + 168.0)]
+    public void Centered_and_right_aligned_tables_are_not_shifted_by_their_border(TableAlignment alignment, double left)
+    {
+        var box = Sides(3, 3);
+        var page = Render(Doc(Table([150, 150], new TableProperties { Alignment = alignment },
+            Row(Cell("a", box, new Thickness(0, 5, 0, 5)), Cell("b", box, new Thickness(0, 5, 0, 5)))))).Pages.Single();
+        Assert.Equal([left, left + 150, left + 300], Verticals(page));
+        Assert.Equal(left + 5, Find(page, "a").X, 6);
+    }
+
+    // Word 2016, mode 15, 0.5 pt borders: cell margins of 5, 10 and 20 pt put the text at 77.30, 82.22 and 92.30 (border center
+    // plus margin), and no margin puts it at 72.50, clear of the border (one sample).
+    [Theory]
+    [InlineData(0, 0.5, 72.5)]
+    [InlineData(5, 0.5, 77.25)]
+    [InlineData(10, 0.5, 82.25)]
+    [InlineData(20, 0.5, 92.25)]
+    [InlineData(1, 6, 78)] // not measured: half of a wide border is more than a small margin
+    public void Cell_content_is_inset_by_the_margin_or_half_the_left_border(double margin, double border, double x)
+    {
+        var page = Render(Doc(Table([150], null, Row(Cell("a", Sides(border, border), new Thickness(0, margin, 0, margin)))))).Pages.Single();
+        Assert.Equal(x, Find(page, "a").X, 6);
+    }
+
+    // Not measured in Word: the right side and inner cells are taken to behave like the left side of the first cell.
+    [Fact]
+    public void Inner_cells_and_right_sides_keep_clear_of_their_borders_too()
+    {
+        var none = new Thickness(0, 0, 0, 0);
+        var right = Para("b", new ParagraphProperties { Alignment = ParagraphAlignment.Right });
+        var second = new TableCell { Borders = Sides(4, 6), Margins = none };
+        second.Blocks.Add(right);
+        var page = Render(Doc(Table([150, 150], null, Row(Cell("a", Sides(0, 4), none), second)))).Pages.Single();
+        Assert.Equal(72, Find(page, "a").X, 6); // no left border: no shift and no inset
+        Assert.Equal(72 + 300 - 3, Right(Find(page, "b")), 6);
+        var left = new TableCell { Borders = Sides(4, 6), Margins = none };
+        left.Blocks.Add(Para("c"));
+        page = Render(Doc(Table([150, 150], null, Row(Cell("a", Sides(0, 4), none), left)))).Pages.Single();
+        Assert.Equal(72 + 150 + 2, Find(page, "c").X, 6);
+    }
+
+    // Not measured in Word: the shift is half the left border of the first row's first cell, whatever the other rows have, and
+    // a table without a left border is not shifted by its other borders.
+    [Fact]
+    public void The_first_cell_of_the_first_row_decides_the_shift()
+    {
+        var margins = new Thickness(0, 5, 0, 5);
+        var page = Render(Doc(Table([150], null, Row(Cell("r1", Sides(2, 2), margins)), Row(Cell("r2", Sides(6, 6), margins))))).Pages.Single();
+        Assert.Equal(78, Find(page, "r1").X, 6);
+        Assert.Equal(78, Find(page, "r2").X, 6);
+        Assert.Equal([73.0, 223.0], Verticals(page));
+
+        page = Render(Doc(Table([150], null, Row(Cell("r1", Sides(0, 6) with { Top = Wide(6), Bottom = Wide(6) }, margins))))).Pages.Single();
+        Assert.Equal(77, Find(page, "r1").X, 6);
+        Assert.Equal([222.0], Verticals(page));
+    }
+
+    // Word 2016, modes 14 and lower: the table is outdented by the first cell's left margin and its border width changes nothing.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.5)]
+    [InlineData(6)]
+    public void Legacy_tables_ignore_the_border_width(double width)
+    {
+        var box = Sides(width, width);
+        var doc = WithSettings(Doc(
+            Table([150, 150], null, Row(Cell("a", box, new Thickness(0, 5, 0, 5)), Cell("b", box, new Thickness(0, 5, 0, 5)))),
+            Table([150], null, Row(Cell("flush", box, new Thickness(0, 0, 0, 0))))), new DocumentSettings { TableEdgeAtIndent = false });
+        var page = Render(doc).Pages.Single();
+        Assert.Equal(72, Find(page, "a").X, 6);
+        Assert.Equal(72 + 150, Find(page, "b").X, 6);
+        Assert.Equal(72, Find(page, "flush").X, 6);
+        if (width > 0) Assert.Equal([67.0, 72.0, 217.0, 222.0, 367.0], Verticals(page));
     }
 }

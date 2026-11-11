@@ -25,8 +25,9 @@ public sealed class DocumentSettings
     public bool MirrorMargins { get; init; }
 
     /// <summary>
-    /// When true, a table's left edge is placed at its indent; when false (legacy Word behavior) the table
-    /// is shifted left by its first cell's left margin so cell text lines up with surrounding paragraphs.
+    /// When true (Word 2016 in compatibility mode 15), a left-aligned table has the outer edge of its left border at its indent
+    /// and cell content keeps clear of the cell's side borders; when false (legacy Word behavior) the table is shifted left by
+    /// its first cell's left margin so cell text lines up with surrounding paragraphs.
     /// </summary>
     public bool TableEdgeAtIndent { get; init; } = true;
 

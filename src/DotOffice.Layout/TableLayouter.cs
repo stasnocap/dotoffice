@@ -133,6 +133,12 @@ internal static class TableLayouter
             if (!rtl && alignment == TableAlignment.Left) left -= placed[0][0].Cell.Margins.Left;
             else if (rtl && alignment == TableAlignment.Right) left += placed[0][0].Cell.Margins.Right;
         }
+        // Word 2016 in compatibility mode 15 puts the outer edge of a left-aligned table's left border at the indent, so the border's
+        // center line and with it every column edge is half the border's width further right (the table keeps its width). The width
+        // is that of the first row's first cell's left border (not measured for tables whose rows differ).
+        bool edgeAtIndent = ctx.Settings.TableEdgeAtIndent;
+        if (edgeAtIndent && !rtl && alignment == TableAlignment.Left && placed[0].Count > 0)
+            left += LineSpace(placed[0][0].Cell.Borders.Left) / 2;
         // Column edges in logical order: increasing to the right, or (right-to-left table) decreasing from the table's right edge.
         var colX = new double[columns + 1];
         colX[0] = rtl ? left + tableWidth : left;
@@ -177,13 +183,21 @@ internal static class TableLayouter
         {
             double w = Math.Abs(colX[p.Column + p.Span] - colX[p.Column]);
             var m = p.Cell.Margins;
-            double inner = Math.Max(1, w - m.Left - m.Right);
+            // The content stays clear of the cell's own side borders, which are centered on the cell's edges (Word 2016, mode 15:
+            // measured for the left side of a first cell with no left margin; the right side and inner cells are assumed alike).
+            double inLeft = m.Left, inRight = m.Right;
+            if (edgeAtIndent)
+            {
+                inLeft = Math.Max(inLeft, LineSpace(p.Cell.Borders.Left) / 2);
+                inRight = Math.Max(inRight, LineSpace(p.Cell.Borders.Right) / 2);
+            }
+            double inner = Math.Max(1, w - inLeft - inRight);
             if (p.Cell.TextDirection != CellTextDirection.LeftToRight)
             {
-                contents[p] = LayoutVertical(p, CellLeft(p) + m.Left, inner, RowHint(p), nested, ctx);
+                contents[p] = LayoutVertical(p, CellLeft(p) + inLeft, inner, RowHint(p), nested, ctx);
                 continue;
             }
-            var slices = BlockFlow.Build(p.Cell.Blocks, CellLeft(p) + m.Left, inner, nested);
+            var slices = BlockFlow.Build(p.Cell.Blocks, CellLeft(p) + inLeft, inner, nested);
             var lines = new List<(double, Slice)>();
             double h = BlockFlow.Stack(slices, lines);
             contents[p] = (lines, h);
@@ -300,7 +314,7 @@ internal static class TableLayouter
         return result;
     }
 
-    /// <summary>The height a horizontal border takes: the thickness it is drawn with (<see cref="ParagraphLayouter.AddBorder"/>).</summary>
+    /// <summary>The space a border line takes: the thickness it is drawn with (<see cref="ParagraphLayouter.AddBorder"/>).</summary>
     private static double LineSpace(Border b) =>
         !b.IsVisible ? 0 : b.Style == BorderStyle.Thick ? Math.Max(b.Width, 1.5) : b.Width;
 
