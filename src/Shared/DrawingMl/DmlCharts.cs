@@ -482,7 +482,7 @@ internal static class DmlCharts
             double band = 0;
             if (titleElement0 is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1")
             {
-                double titleFont = Descendant(Path(titleElement0, "tx", "rich"), "rPr", "defRPr")?.Attribute("sz") is { } tsz && double.TryParse(tsz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tz) && tz > 0 ? tz / 100 : Math.Round(fontSize0 * 1.2, 1);
+                double titleFont = Descendant(Path(titleElement0, "tx", "rich"), "rPr", "defRPr")?.Attribute("sz") is { } tsz && double.TryParse(tsz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tz) && tz > 0 ? tz / 100 : Child(space, "txPr") is null ? fontSize0 : Math.Round(fontSize0 * 1.2, 1); // Word without a chart-level txPr: a plain title has the text size
                 band = titleFont * 1.15 + 9;
             }
             var legendElement0 = Child(chart, "legend");
@@ -701,6 +701,11 @@ internal static class DmlCharts
 
         // Text formatting: the chart's base style (color, font, weight; its size is the base size) under each part's own.
         var baseStyle = TextStyleOf(Child(space, "txPr"), theme);
+        // Word, a chart with no chart-level txPr: its text uses the document theme's minor latin font (what DrawingML specifies; INFERRED from one sample where the
+        // theme font and the document default were both Arial). Without a theme font the shared default stays.
+        bool wordNoBase = context.WordChartFrame && Child(space, "txPr") is null;
+        var statedBase = baseStyle;
+        if (wordNoBase && theme.MinorLatin is { } minorFont) baseStyle = new ChartTextStyle(Family: minorFont);
         var baseWithoutSize = baseStyle is null ? null : baseStyle with { Size = null };
         ChartTextStyle? Part(XElement? holder) => MergeStyles(baseWithoutSize, TextStyleOf(holder, theme));
         var labelProperties = group.Descendants().Where(e => e.Name.LocalName == "dLbls").Select(d => Child(d, "txPr")).FirstOrDefault(x => x is not null);
@@ -708,8 +713,11 @@ internal static class DmlCharts
         // A title whose rich text states no size, bold or typeface (in its runs or defaults, nor the chart's own text properties) is 18 pt regular Arial (measured in Office 2016, Excel and PowerPoint).
         bool plainRichTitle = titleElement is not null && Path(titleElement, "tx", "rich") is { } richTitle && title is not null
             && !richTitle.Descendants().Where(e => e.Name.LocalName is "rPr" or "defRPr").Any(e => e.Attribute("sz") is not null || e.Attribute("b") is not null || Child(e, "latin") is not null)
-            && baseStyle is not { Bold: not null } && baseStyle is not { Family: not null };
-        if (plainRichTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: false, Family: "Arial"), titleStyle);
+            && statedBase is not { Bold: not null } && statedBase is not { Family: not null };
+        // Word, no chart-level txPr: such a title is bold at the chart's text size (10 pt when none is stated) in the chart font. One sample (Word 2016).
+        bool wordPlainTitle = plainRichTitle && wordNoBase;
+        if (wordPlainTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
+        else if (plainRichTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: false, Family: "Arial"), titleStyle);
         else if (context.PresentationTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
         var textStyles = new ChartTextStyles
         {
@@ -745,6 +753,11 @@ internal static class DmlCharts
             var ln = Child(chartProperties, "ln");
             if (ln is not null && ln.Elements().Any(e => e.Name.LocalName is "noFill" or "solidFill")) border = SolidFill(ln, theme);
         }
+        // Word draws outside tick marks only on the measured charts: no secondary axis, no reversed axis, and (column, bar, line) no crossBetween midCat.
+        bool wordTicks = context.WordChartFrame && kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter;
+        wordTicks = wordTicks && context.WordChartFrame && secondaryStyleAxis is null && !reverseValues && !reverseX
+            && (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") != "maxMin"
+            && (kind == ChartKind.Scatter || (string?)Child(valueAxis, "crossBetween")?.Attribute("val") != "midCat");
         double fontSize = Descendant(Child(space, "txPr"), "defRPr")?.Attribute("sz") is { } baseSize && double.TryParse(baseSize.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s0) && s0 > 0 ? s0 / 100 : 10;
 
         double gap = Child(group, "gapWidth") is { } g ? Number(g, "val", 150) : 150;
@@ -752,7 +765,7 @@ internal static class DmlCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (plainRichTitle ? 18 : context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (wordPlainTitle ? fontSize : plainRichTitle ? 18 : context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),
@@ -761,6 +774,8 @@ internal static class DmlCharts
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
+            ValueAxisTickOut = wordTicks && (string?)Child(valueAxis, "majorTickMark")?.Attribute("val") == "out",
+            CategoryAxisTickOut = wordTicks && (string?)Child(categoryAxis, "majorTickMark")?.Attribute("val") == "out",
             WordLayout = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") != "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,

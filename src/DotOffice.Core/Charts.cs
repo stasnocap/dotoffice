@@ -325,6 +325,12 @@ public sealed record SheetChart : SheetObject
     /// </summary>
     public bool WordLayout { get; init; }
 
+    /// <summary>Whether the value axis has outside major tick marks (Word charts only; <c>majorTickMark</c> "out").</summary>
+    public bool ValueAxisTickOut { get; init; }
+
+    /// <summary>Whether the category axis (the horizontal axis of a scatter chart) has outside major tick marks (Word charts only).</summary>
+    public bool CategoryAxisTickOut { get; init; }
+
     /// <summary>The chart area's fill; null means transparent.</summary>
     public Color? Background { get; init; } = Color.White;
 

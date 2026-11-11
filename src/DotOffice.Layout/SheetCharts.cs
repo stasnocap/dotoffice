@@ -704,6 +704,24 @@ public sealed partial class SheetLayoutEngine
         items.AddRange(trendLabels);
 
         // ---- category axis line and labels
+        // Word's outside major tick marks, 3.02 pt long, in the axis line's width (measured; the color and width following the axis line are INFERRED).
+        const double TickLength = 3.02;
+        if (chart.ValueAxisTickOut && chart.ShowValueAxis)
+            foreach (var tick in chart.Ticks)
+            {
+                if (horizontalBars) { double tx = ValueX(primary, tick.Value); items.Add(new LineItem(tx, plotBottom, tx, plotBottom + TickLength, chart.AxisLineWidth, Color.Black)); }
+                else { double ty = ValueY(primary, tick.Value); items.Add(new LineItem(plotLeft - TickLength, ty, plotLeft, ty, chart.AxisLineWidth, Color.Black)); }
+            }
+        if (chart.CategoryAxisTickOut && chart.ShowCategoryAxis)
+        {
+            // One mark at every slot boundary, on the axis line (where the axis crosses is INFERRED from the line's position).
+            double crossAt = Baseline(primary);
+            for (int k = 0; k <= categories; k++)
+            {
+                if (horizontalBars) { double ty = plotTop + k * plotHeight / categories, ax = ValueX(primary, crossAt); items.Add(new LineItem(ax - TickLength, ty, ax, ty, chart.AxisLineWidth, Color.Black)); }
+                else { double tx = plotLeft + k * plotWidth / categories, ay = ValueY(primary, crossAt); items.Add(new LineItem(tx, ay, tx, ay + TickLength, chart.AxisLineWidth, Color.Black)); }
+            }
+        }
         if (chart.ShowValueAxis)
         {
             if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, chart.AxisLineWidth, Color.Black));

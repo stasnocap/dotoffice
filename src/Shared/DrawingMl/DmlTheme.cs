@@ -25,6 +25,9 @@ internal sealed class DmlTheme
         ReadFormats(XElement.Parse(DefaultFormats));
     }
 
+    /// <summary>The latin typeface of the theme's minor (body) font; null when the package has no theme part or it names none.</summary>
+    public string? MinorLatin { get; private set; }
+
     public Color? this[int index] => index >= 0 && index < _colors.Length ? _colors[index] : null;
 
     // Office 2013+ format scheme: the fills and effects that a shape's style references (fillRef/effectRef idx 1-3) stand for.
@@ -63,6 +66,7 @@ internal sealed class DmlTheme
         var theme = new DmlTheme();
         var doc = XDocument.Load(reader);
         var scheme = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "clrScheme");
+        if (doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "minorFont")?.Elements().FirstOrDefault(e => e.Name.LocalName == "latin")?.Attribute("typeface")?.Value is { Length: > 0 } minor) theme.MinorLatin = minor;
         if (doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "fmtScheme") is { } formats) theme.ReadFormats(formats);
         if (scheme is null) return theme;
         for (int i = 0; i < SchemeOrder.Length; i++)

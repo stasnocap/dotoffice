@@ -96,6 +96,26 @@ public class ChartTests
     }
 
     [Fact]
+    public void A_Word_chart_draws_outside_tick_marks_only_where_the_file_asks_for_them()
+    {
+        var withTicks = ChartXml().Replace("<c:crossAx val=\"2\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"2\"/>").Replace("<c:crossAx val=\"1\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"1\"/>");
+        int Short(string xml) => Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page.Items.OfType<LineItem>().Count(l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6);
+        Assert.Equal(4 + 6, Short(withTicks)); // 3 categories: 4 slot boundaries; value axis 0..25 by 5: 6 ticks
+        Assert.Equal(0, Short(ChartXml().Replace("<c:crossAx val=\"2\"/>", "<c:majorTickMark val=\"in\"/><c:crossAx val=\"2\"/>")));
+        Assert.Equal(0, Short(ChartXml()));
+    }
+
+    [Fact]
+    public void A_Word_chart_without_chart_text_properties_has_a_bold_title_at_the_text_size_in_the_theme_font()
+    {
+        var xml = ChartXml().Replace("<c:autoTitleDeleted val=\"1\"/>", "<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title><c:autoTitleDeleted val=\"0\"/>");
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216)));
+        var title = page.Items.OfType<TextItem>().First(t => t.Text == "Sales");
+        Assert.Equal(10, title.FontSize, 3);
+        Assert.True(title.SyntheticBold); // the test font has no bold face
+    }
+
+    [Fact]
     public void Anchored_chart_is_placed_at_its_position()
     {
         var (page, warnings, _) = Run(b => P(Anchor(b.AddPart("charts/chart1.xml", ChartType, ChartXml()), 200, 150, Position("page", "254000", "page", "508000"))));

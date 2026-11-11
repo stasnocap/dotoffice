@@ -71,6 +71,11 @@ public sealed partial class SheetLayoutEngine
             if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
             if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + LabelDrop(xFont), styles.CategoryAxis?.Rotation ?? 0, items);
         }
+        // Word's outside major tick marks at every tick value (3.02 pt; the axis line's width and color are INFERRED).
+        if (chart.ValueAxisTickOut && chart.ShowValueAxis)
+            foreach (var tick in chart.Ticks) items.Add(new LineItem(X(0) - 3.02, Y(tick.Value), X(0), Y(tick.Value), chart.AxisLineWidth, Color.Black));
+        if (chart.CategoryAxisTickOut && chart.ShowCategoryAxis)
+            foreach (var tick in chart.XTicks) items.Add(new LineItem(X(tick.Value), Y(0), X(tick.Value), Y(0) + 3.02, chart.AxisLineWidth, Color.Black));
         if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), chart.AxisLineWidth, Color.Black));
         if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, chart.AxisLineWidth, Color.Black));
 

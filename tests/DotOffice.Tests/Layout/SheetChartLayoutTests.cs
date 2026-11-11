@@ -38,6 +38,16 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_Word_chart_with_outside_ticks_draws_3_pt_marks_at_the_value_ticks_and_slot_boundaries()
+    {
+        var chart = WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 5, 10, 20)) with { ValueAxisTickOut = true, CategoryAxisTickOut = true };
+        var ticks = Page(chart).Items.OfType<LineItem>().Where(l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6).ToList();
+        Assert.Equal(chart.Ticks.Count, ticks.Count(l => l.Y1 == l.Y2));
+        Assert.Equal(4, ticks.Count(l => l.X1 == l.X2));
+        Assert.DoesNotContain(Page(chart with { ValueAxisTickOut = false, CategoryAxisTickOut = false }).Items.OfType<LineItem>(), l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6);
+    }
+
+    [Fact]
     public void A_Word_chart_without_title_or_legend_has_Words_margins()
     {
         // Measured in Word 2016: the plot ends 11 pt from the right and starts 11 pt from the top; the bottom labels take 23.7 pt at 10 pt text.
