@@ -60,11 +60,22 @@ public sealed partial class SheetLayoutEngine
         double left = x + ChartPad, top = y + ChartPad, right = x + w - ChartPad, bottom = y + h - ChartPad;
 
         // ---- title
+        double wordBand = 0;
         if (!string.IsNullOrEmpty(chart.Title))
         {
             var titleFont = Styled(font with { FontSize = chart.TitleSize }, chart.TextStyles.Title);
             if (chart.TitlePosition is { } at) PlaceText(chart.Title, titleFont, x + at.X * w, y + at.Y * h, Anchor.Start, false, 0, items);
-            else top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
+            else
+            {
+                top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
+                wordBand = WordLineHeight(titleFont) + 9;
+            }
+        }
+        if (UseWordLayout(chart) && EmitWordChart(chart, x, y, w, h, wordBand, font, items))
+        {
+            items.Add(new PopItem());
+            items.Add(new PopItem());
+            return;
         }
 
         // ---- legend
@@ -422,16 +433,20 @@ public sealed partial class SheetLayoutEngine
             plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0);
             plotRight = right - 4 - secondaryWidth;
             plotTop = top + labelHeight / 2;
+            if (_wordPlot is { } wp) (plotLeft, plotTop, plotRight) = (wp.X, wp.Y, wp.X + wp.Width);
             double bandWidth = (plotRight - plotLeft) / (chart.CategoriesBetween ? categories : Math.Max(categories - 1, 1));
             // The labels turn by the angle the axis asks for, or by 45° when they would overlap.
             if (styles.CategoryAxis?.Rotation is { } asked) labelAngle = Math.Clamp(asked, -90, 90);
-            rotateLabels = chart.ShowCategoryAxis && (labelAngle != 0 || styles.CategoryAxis?.Rotation is null && categoryWidth > bandWidth * 0.95 - 2);
+            // Word keeps the labels upright as long as the widest one is no wider than its slot (measured: 26.06 in 31.68).
+            rotateLabels = chart.ShowCategoryAxis && (labelAngle != 0 || styles.CategoryAxis?.Rotation is null && categoryWidth > (_wordPlot is null ? bandWidth * 0.95 - 2 : bandWidth));
             if (rotateLabels && labelAngle == 0) labelAngle = 45;
             double sine = Math.Abs(Math.Sin(labelAngle * Math.PI / 180)), cosine = Math.Abs(Math.Cos(labelAngle * Math.PI / 180));
             double below = !chart.ShowCategoryAxis ? 0 : rotateLabels ? categoryWidth * sine + labelHeight * cosine + 6 : labelHeight + 5;
             if (labelsAtFar) { plotTop = top + below; plotBottom = bottom - labelHeight / 2; }
+            else if (_wordPlot is { } wordPlot) plotBottom = wordPlot.Y + wordPlot.Height - (rotateLabels ? below - (labelHeight + 5) : 0);
             else plotBottom = bottom - below;
             stride = !chart.ShowCategoryAxis ? 1 : Math.Max(1, Math.Ceiling((rotateLabels ? labelHeight * 1.1 / Math.Max(sine, 0.25) : categoryWidth + 6) / Math.Max(bandWidth, 1)));
+            if (_wordPlot is not null && !rotateLabels && categoryWidth <= bandWidth) stride = 1; // Word shows every label unless neighbours would overlap
         }
         else
         {
@@ -439,6 +454,7 @@ public sealed partial class SheetLayoutEngine
             plotRight = right - (labelsAtFar ? categoryWidth + 12 : 8);
             plotTop = top + 4;
             plotBottom = bottom - (chart.ShowValueAxis ? labelHeight + 5 : 0);
+            if (_wordPlot is { } wp) (plotLeft, plotTop, plotRight, plotBottom) = (wp.X, wp.Y, wp.X + wp.Width, wp.Y + wp.Height);
         }
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
@@ -468,14 +484,14 @@ public sealed partial class SheetLayoutEngine
             {
                 double tx = ValueX(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
-                if (chart.ShowValueAxis) PlaceTurnedBelow(tick.Label, valueFont, tx, plotBottom + 4, valueAngle, items);
+                if (chart.ShowValueAxis) PlaceTurnedBelow(tick.Label, valueFont, tx, plotBottom + LabelDrop(valueFont), valueAngle, items);
             }
             else
             {
                 double ty = ValueY(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
                 if (!chart.ShowValueAxis) { }
-                else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
+                else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - AxisLabelGap, ty + CenterShift(valueFont), Anchor.End, true, 0, items);
                 else
                 {
                     // A turned label is centered in the box it fills, which ends 5 pt left of the axis.
@@ -708,7 +724,7 @@ public sealed partial class SheetLayoutEngine
                     if (barCategoryAngle != 0)
                         PlaceText(chart.Categories[i], categoryFont, labelsAtFar ? plotRight + 5 + across / 2 : plotLeft - 5 - across / 2, y, Anchor.Middle, true, barCategoryAngle, items);
                     else if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, plotRight + 5, y, Anchor.Start, true, 0, items);
-                    else PlaceText(chart.Categories[i], categoryFont, plotLeft - 5, y, Anchor.End, true, 0, items);
+                    else PlaceText(chart.Categories[i], categoryFont, plotLeft - AxisLabelGap, y + CenterShift(categoryFont), Anchor.End, true, 0, items);
                 }
             }
             else
@@ -733,7 +749,7 @@ public sealed partial class SheetLayoutEngine
                         if (labelAngle > 0) PlaceText(chart.Categories[i], categoryFont, cx + 3 - turn, plotBottom + 5, Anchor.End, false, labelAngle, items);
                         else PlaceText(chart.Categories[i], categoryFont, cx - 3 + turn, plotBottom + 5, Anchor.Start, false, labelAngle, items);
                     }
-                    else PlaceText(chart.Categories[i], categoryFont, cx, plotBottom + 4, Anchor.Middle, false, 0, items);
+                    else PlaceText(chart.Categories[i], categoryFont, cx, plotBottom + LabelDrop(categoryFont), Anchor.Middle, false, 0, items);
                 }
             }
         }
@@ -871,7 +887,7 @@ public sealed partial class SheetLayoutEngine
         if (chart.Series.Count == 0) return;
         // Labels outside the pie (and best-fit ones, which may end up there) need room around it.
         bool outside = chart.Kind == ChartKind.Pie && chart.Series[0].LabelPlacements is { } places && places.Any(p => p is ChartLabelPlacement.OutsideEnd or ChartLabelPlacement.BestFit);
-        double radius = Math.Min(right - left, bottom - top) / 2 - 4 - (outside ? font.FontSize * 2 : 0);
+        double radius = Math.Min(right - left, bottom - top) / 2 - (_wordPlot is not null && !outside ? 0 : 4) - (outside ? font.FontSize * 2 : 0);
         if (radius < 5) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
         var labels = new List<PieLabel>();
@@ -943,7 +959,7 @@ public sealed partial class SheetLayoutEngine
                     points.Add((cx + inner * Math.Cos(angle), cy + inner * Math.Sin(angle)));
                 }
             items.Add(new PolygonItem(points, color));
-            if (values.Count > 1)
+            if (values.Count > 1 && !chart.WordLayout) // Word 2016 draws no outline between the slices of a default pie
             {
                 double a0 = start * Math.PI / 180, a1 = (start + sweep) * Math.PI / 180;
                 items.Add(new LineItem(cx + inner * Math.Cos(a0), cy + inner * Math.Sin(a0), cx + outer * Math.Cos(a0), cy + outer * Math.Sin(a0), 0.75, Color.White));

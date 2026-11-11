@@ -319,6 +319,12 @@ public sealed record SheetChart : SheetObject
     /// <summary>Whether pie slices are labeled with their share (<see cref="ChartSeries.Labels"/> carry the text).</summary>
     public bool ShowPercent { get; init; }
 
+    /// <summary>
+    /// Whether the chart is laid out as Word 2016 does (a chart of a text document): fixed margins, a plot area that gives way to the legend by the legend's
+    /// width, Word's legend keys and order. Only set for Word charts; the layout falls back to the shared one for cases it was not measured for.
+    /// </summary>
+    public bool WordLayout { get; init; }
+
     /// <summary>The chart area's fill; null means transparent.</summary>
     public Color? Background { get; init; } = Color.White;
 

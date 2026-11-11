@@ -50,6 +50,7 @@ public sealed partial class SheetLayoutEngine
         double xLabelSpace = chart.ShowCategoryAxis ? lastWidth * Math.Abs(Math.Sin(xAngle)) + labelHeight * Math.Abs(Math.Cos(xAngle)) + 5 : 0;
         double plotLeft = left + (chart.ShowValueAxis ? tickWidth + 6 : 0) + 2, plotRight = right - Math.Max(4, lastWidth / 2);
         double plotTop = top + labelHeight / 2, plotBottom = bottom - xLabelSpace;
+        if (_wordPlot is { } wp) (plotLeft, plotTop, plotRight, plotBottom) = (wp.X, wp.Y, wp.X + wp.Width, wp.Y + wp.Height);
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         if (chart.PlotBackground is { } plotFill && plotWidth > 0 && plotHeight > 0) items.Add(new RectItem(plotLeft, plotTop, plotWidth, plotHeight, plotFill));
@@ -62,13 +63,13 @@ public sealed partial class SheetLayoutEngine
         {
             double ty = Y(tick.Value);
             if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
-            if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - 5, ty, Anchor.End, true, 0, items);
+            if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - AxisLabelGap, ty + CenterShift(yFont), Anchor.End, true, 0, items);
         }
         foreach (var tick in chart.XTicks)
         {
             double tx = X(tick.Value);
             if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
-            if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + 4, styles.CategoryAxis?.Rotation ?? 0, items);
+            if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + LabelDrop(xFont), styles.CategoryAxis?.Rotation ?? 0, items);
         }
         if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), chart.AxisLineWidth, Color.Black));
         if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, chart.AxisLineWidth, Color.Black));

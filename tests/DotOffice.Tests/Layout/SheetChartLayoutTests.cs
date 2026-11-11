@@ -28,6 +28,86 @@ public class SheetChartLayoutTests
 
     private static string Text(LayoutPage page) => string.Concat(page.Items.OfType<TextItem>().Select(t => t.Text));
 
+    private static SheetChart WordChart(ChartKind kind, LegendPosition legend, params ChartSeries[] series) =>
+        Chart(kind, series) with { WordLayout = true, Legend = legend, MajorGridlines = true, Width = 360, Height = 216 };
+
+    private static (double Left, double Right, double Top, double Bottom) PlotOf(LayoutPage page)
+    {
+        var rows = page.Items.OfType<LineItem>().Where(l => l.Y1 == l.Y2 && l.X2 - l.X1 > 50).ToList();
+        return (rows.Min(l => l.X1), rows.Max(l => l.X2), rows.Min(l => l.Y1), rows.Max(l => l.Y1));
+    }
+
+    [Fact]
+    public void A_Word_chart_without_title_or_legend_has_Words_margins()
+    {
+        // Measured in Word 2016: the plot ends 11 pt from the right and starts 11 pt from the top; the bottom labels take 23.7 pt at 10 pt text.
+        var (left, right, top, bottom) = PlotOf(Page(WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 5, 10, 20))));
+        Assert.Equal(OriginX + 360 - 11, right, 2);
+        Assert.Equal(OriginY + 11, top, 2);
+        Assert.InRange(OriginY + 216 - bottom, 18, 30);
+        Assert.InRange(left - OriginX, 15, 40);
+    }
+
+    [Fact]
+    public void A_Word_charts_right_legend_has_square_keys_17_pt_apart_and_the_plot_gives_way_by_its_width()
+    {
+        var chart = WordChart(ChartKind.Column, LegendPosition.Right, Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20));
+        var page = Page(chart);
+        var keys = page.Items.OfType<RectItem>().Where(r => Math.Abs(r.Width - 5.03) < 1e-6 && Math.Abs(r.Height - 5.03) < 1e-6).OrderBy(r => r.Y).ToList();
+        Assert.Equal([Red, Blue], keys.Select(k => k.Fill));
+        var text = page.Items.OfType<TextItem>().Where(t => t.Text == "S").OrderBy(t => t.Baseline).ToList();
+        Assert.Equal(2, text.Count);
+        Assert.InRange(keys[1].Y - keys[0].Y, 17.07, 21); // 5.57 more than the line height, which is 11.5 pt for Arial but larger for the font used here
+        Assert.Equal(keys[0].X + 7.23, text[0].X, 2);
+        Assert.Equal(keys[0].X - 15.76, PlotOf(page).Right, 1); // the plot ends 15.76 left of the keys: 11 + (text width + 22.04) from the edge
+        // The block of keys is centered on the chart's middle.
+        Assert.Equal(OriginY + 108, (keys[0].Y + keys[1].Y + 5.03) / 2, 1);
+    }
+
+    [Fact]
+    public void A_Word_charts_right_legend_lists_stacked_columns_and_clustered_bars_backwards()
+    {
+        ChartSeries a = new("A", [1, 2, 3], Red), b = new("B", [1, 2, 3], Blue);
+        static List<Color> Order(LayoutPage page, bool alongX = false) => page.Items.OfType<RectItem>().Where(r => Math.Abs(r.Width - 5.03) < 1e-6).OrderBy(r => alongX ? r.X : r.Y).Select(r => r.Fill).ToList();
+        Assert.Equal([Red, Blue], Order(Page(WordChart(ChartKind.Column, LegendPosition.Right, a, b))));
+        Assert.Equal([Blue, Red], Order(Page(WordChart(ChartKind.Column, LegendPosition.Right, a, b) with { Grouping = ChartGrouping.Stacked })));
+        Assert.Equal([Blue, Red], Order(Page(WordChart(ChartKind.Bar, LegendPosition.Right, a, b))));
+        // Only the vertical legends are reversed.
+        Assert.Equal([Red, Blue], Order(Page(WordChart(ChartKind.Column, LegendPosition.Bottom, a, b) with { Grouping = ChartGrouping.Stacked }), true));
+    }
+
+    [Fact]
+    public void A_Word_charts_bottom_legend_is_one_row_that_takes_23_pt_off_the_plot()
+    {
+        var plain = PlotOf(Page(WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 5, 10, 20))));
+        var page = Page(WordChart(ChartKind.Column, LegendPosition.Bottom, Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20)));
+        double row = plain.Bottom - PlotOf(page).Bottom; // the entry pitch (line height + 5.57; 17.07 for Arial 10) + 6
+        Assert.InRange(row, 23.07, 27);
+        var keys = page.Items.OfType<RectItem>().Where(r => Math.Abs(r.Width - 5.03) < 1e-6).OrderBy(r => r.X).ToList();
+        Assert.Equal(2, keys.Count);
+        Assert.Equal(keys[0].Y, keys[1].Y, 3);
+        Assert.Equal(OriginY + 216 - 6 - (row - 6) / 2 - 2.515, keys[0].Y, 1); // centered in the row, which ends 6 pt above the edge (17.05 above it for Arial 10)
+    }
+
+    [Fact]
+    public void A_Word_pie_is_the_largest_circle_in_the_space_the_legend_leaves_and_has_no_white_outlines()
+    {
+        var page = Page(WordChart(ChartKind.Pie, LegendPosition.Right, Series(Red, 5, 10, 20)));
+        var slices = page.Items.OfType<PolygonItem>().ToList();
+        Assert.NotEmpty(slices);
+        Assert.Equal(OriginY + 11, slices.SelectMany(s => s.Points).Min(p => p.Y), 1);
+        Assert.Equal((216 - 22) / 2.0, (slices.SelectMany(s => s.Points).Max(p => p.Y) - slices.SelectMany(s => s.Points).Min(p => p.Y)) / 2, 1);
+        Assert.DoesNotContain(page.Items.OfType<LineItem>(), l => l.Color == Color.White);
+    }
+
+    [Fact]
+    public void Without_the_Word_flag_the_shared_layout_is_unchanged()
+    {
+        var page = Page(Chart(ChartKind.Column, Series(Red, 5, 10, 20)) with { Legend = LegendPosition.Right, MajorGridlines = true });
+        Assert.NotEqual(OriginX + 300 - 11, PlotOf(page).Right, 1);
+        Assert.DoesNotContain(page.Items.OfType<RectItem>(), r => Math.Abs(r.Width - 5.03) < 1e-6);
+    }
+
     [Fact]
     public void Candlestick_bodies_are_white_when_the_close_rises_and_black_when_it_falls()
     {

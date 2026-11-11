@@ -83,6 +83,18 @@ public class ChartTests
         Assert.Contains(page.Items, i => i is RectItem r && r.Fill == new Color(0x89, 0x89, 0x89) || i is LineItem l && l.Color == new Color(0x89, 0x89, 0x89) && Math.Abs(l.Width - 0.5) < 1e-6);
     }
 
+    [Theory]
+    [InlineData(216, "0,1,2,3,4,5,6")]
+    [InlineData(118, "0,2,4,6")]
+    public void A_Word_charts_value_axis_takes_the_finest_step_whose_ticks_are_14_pt_apart(double height, string expected)
+    {
+        // Data maximum 5: 0 to 6; the plot is 216 - 11 - 23.7 = 181 pt high (step 1 at 30 pt) or 83 pt (step 1 would put the ticks 13.9 pt apart).
+        var xml = ChartXml().Replace("<c:v>20</c:v>", "<c:v>5</c:v>").Replace("<c:v>10</c:v>", "<c:v>3</c:v>");
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, height)));
+        var labels = page.Items.OfType<TextItem>().Where(t => t.Text.Length == 1 && char.IsDigit(t.Text[0]) && t.X < 72 + 30).OrderBy(t => t.Text).Select(t => t.Text);
+        Assert.Equal(expected, string.Join(",", labels));
+    }
+
     [Fact]
     public void Anchored_chart_is_placed_at_its_position()
     {

@@ -473,9 +473,35 @@ internal static class DmlCharts
             valueAxis = valueAxes.FirstOrDefault(a => a != categoryAxis);
         }
         string? TextOf(XElement? holder) => holder is null ? null : string.Join(" ", holder.Descendants().Where(e => e.Name.LocalName == "p").Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(t => t.Value))).Where(s => s.Length > 0)) is { Length: > 0 } text ? text : null;
+        // The length in points of the plot area along a value axis as Word 2016 lays it out (see SheetChart.WordLayout), estimated from the chart's
+        // text because the scale is read before the labels are measured: the frame's margins, title band, axis labels and legend.
+        double WordPlotLength(bool horizontal)
+        {
+            double k = fontSize0 / 10, glyph = 0.53 * fontSize0, lineHeight = 1.15 * fontSize0;
+            var titleElement0 = Child(chart, "title");
+            double band = 0;
+            if (titleElement0 is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1")
+            {
+                double titleFont = Descendant(Path(titleElement0, "tx", "rich"), "rPr", "defRPr")?.Attribute("sz") is { } tsz && double.TryParse(tsz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tz) && tz > 0 ? tz / 100 : Math.Round(fontSize0 * 1.2, 1);
+                band = titleFont * 1.15 + 9;
+            }
+            var legendElement0 = Child(chart, "legend");
+            string? legendPos = legendElement0 is null ? null : (string?)Child(legendElement0, "legendPos")?.Attribute("val") ?? "r";
+            double row = lineHeight + 5.57 + 6, entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * glyph;
+            if (kind is ChartKind.Pie or ChartKind.Doughnut) entryWidth = categories.Count == 0 ? 0 : categories.Max(c => c.Length) * glyph;
+            if (!horizontal)
+            {
+                double length = template.Height - 11 - band - (6.5 + 1.117 * fontSize0 + 6.04 * k);
+                return legendPos is "t" or "b" ? length - row : length;
+            }
+            double axisLabels = xy ? 3 * 0.556 * fontSize0 : categories.Count == 0 ? 0 : categories.Max(c => c.Length) * glyph;
+            double width = template.Width - (6.5 + axisLabels + 8.63) - 11;
+            return legendPos is "l" or "r" or "tr" ? width - (entryWidth + 22.04) : width;
+        }
+
         // A value axis' scale: the data range's automatic scale, or the fixed limits, units, logarithmic base and direction of the axis.
         string? AxisId(XElement? e) => (string?)Child(e, "axId")?.Attribute("val");
-        (double Min, double Max, List<ChartTick> Ticks, double LogBase, bool Reversed) ValueScale(XElement? axis, double lo, double hi, double loPositive, ChartGrouping grouping, string? fallbackCode)
+        (double Min, double Max, List<ChartTick> Ticks, double LogBase, bool Reversed) ValueScale(XElement? axis, double lo, double hi, double loPositive, ChartGrouping grouping, string? fallbackCode, bool horizontal = false)
         {
             var scaling = Child(axis, "scaling");
             double? fixedMin = Child(scaling, "min") is { } mn ? Number(mn, "val") : null, fixedMax = Child(scaling, "max") is { } mx ? Number(mx, "val") : null;
@@ -506,7 +532,14 @@ internal static class DmlCharts
                 return (pMin, pMax, Ticks(pMin, pMax, fixedMajor ?? 0.1, v => Format(v, code)), 0, reversed);
             }
             int maxIntervals = 10;
-            if (context.FitAxisToHeight && template.Height > 0)
+            if (context.WordChartFrame && template.Height > 0 && template.Width > 0)
+            {
+                // Word 2016: as many intervals as keep the tick pitch at or above 14.4 pt (vertical axis) or 34 pt (horizontal axis) at 10 pt text,
+                // never more than ten; the pitch limits scale with the text size (inferred) and the horizontal one is the midpoint of the 27..41 pt bracket measured.
+                double pitchLimit = (horizontal ? 34 : 14.4) * fontSize0 / 10;
+                maxIntervals = Math.Clamp((int)Math.Floor(WordPlotLength(horizontal) / pitchLimit + 1e-9), 1, 10);
+            }
+            else if (context.FitAxisToHeight && template.Height > 0)
             {
                 // The plot is about three quarters of the chart's height (less with a title); a label needs about two lines of room.
                 double room = template.Height * (Child(chart, "title") is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1" ? 0.55 : 0.75);
@@ -579,7 +612,7 @@ internal static class DmlCharts
             }
             var primaryX = series.Concat(extraSeries.Where(e => !OnSecondaryPair(e.Group)).SelectMany(e => e.Series));
             (xlo, xhi, xPositive) = XRange(primaryX);
-            (xMin, xMax, xTicks, xLog, reverseX) = ValueScale(categoryAxis, xlo, xhi, xPositive, ChartGrouping.Clustered, xFallback);
+            (xMin, xMax, xTicks, xLog, reverseX) = ValueScale(categoryAxis, xlo, xhi, xPositive, ChartGrouping.Clustered, xFallback, horizontal: true);
             var secondaryXSeries = extraSeries.Where(e => OnSecondaryPair(e.Group)).SelectMany(e => e.Series).ToList();
             if (secondaryXSeries.Count > 0)
             {
@@ -590,7 +623,7 @@ internal static class DmlCharts
                 if (secondaryXAxis is not null && secondaryYAxis is not null)
                 {
                     var (slo, shi, sp) = XRange(secondaryXSeries);
-                    (secondaryXMin, secondaryXMax, secondaryXTicks, secondaryXLog, reverseSecondaryX) = ValueScale(secondaryXAxis, slo, shi, sp, ChartGrouping.Clustered, null);
+                    (secondaryXMin, secondaryXMax, secondaryXTicks, secondaryXLog, reverseSecondaryX) = ValueScale(secondaryXAxis, slo, shi, sp, ChartGrouping.Clustered, null, horizontal: true);
                     secondaryXShown = !Flag(Child(secondaryXAxis, "delete"), "val");
                     secondaryXTitle = TextOf(Path(secondaryXAxis, "title", "tx", "rich"));
                 }
@@ -616,12 +649,12 @@ internal static class DmlCharts
             }
             var (lo, hi, loPositive) = Range(primary);
             var primaryGrouping = primary.Any(g => g.Item1 == ChartGrouping.PercentStacked) ? ChartGrouping.PercentStacked : ChartGrouping.Clustered;
-            (min, max, ticks, logBase, reverseValues) = ValueScale(valueAxis, lo, hi, loPositive, primaryGrouping, sourceFormat);
+            (min, max, ticks, logBase, reverseValues) = ValueScale(valueAxis, lo, hi, loPositive, primaryGrouping, sourceFormat, kind == ChartKind.Bar);
             if (secondaryAxis is not null)
             {
                 var (slo, shi, sPositive) = Range(secondary);
                 var secondaryGrouping = secondary.Any(g => g.Item1 == ChartGrouping.PercentStacked) ? ChartGrouping.PercentStacked : ChartGrouping.Clustered;
-                (secondaryMin, secondaryMax, secondaryTicks, secondaryLog, reverseSecondary) = ValueScale(secondaryAxis, slo, shi, sPositive, secondaryGrouping, sourceFormat);
+                (secondaryMin, secondaryMax, secondaryTicks, secondaryLog, reverseSecondary) = ValueScale(secondaryAxis, slo, shi, sPositive, secondaryGrouping, sourceFormat, kind == ChartKind.Bar);
                 secondaryShown = !Flag(Child(secondaryAxis, "delete"), "val");
                 secondaryStyleAxis = secondaryAxis;
                 secondaryTitle = TextOf(Path(secondaryAxis, "title", "tx", "rich"));
@@ -728,7 +761,7 @@ internal static class DmlCharts
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
-            Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
+            WordLayout = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") != "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,
