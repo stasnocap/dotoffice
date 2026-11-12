@@ -325,11 +325,29 @@ public sealed record SheetChart : SheetObject
     /// </summary>
     public bool WordLayout { get; init; }
 
-    /// <summary>Whether the value axis has outside major tick marks (Word charts only; <c>majorTickMark</c> "out").</summary>
-    public bool ValueAxisTickOut { get; init; }
+    /// <summary>The value axis' major tick marks (Word charts only; the others draw none).</summary>
+    public ChartTickMark ValueAxisTicks { get; init; }
 
-    /// <summary>Whether the category axis (the horizontal axis of a scatter chart) has outside major tick marks (Word charts only).</summary>
-    public bool CategoryAxisTickOut { get; init; }
+    /// <summary>The category axis' (the horizontal axis of a scatter chart) major tick marks (Word charts only).</summary>
+    public ChartTickMark CategoryAxisTicks { get; init; }
+
+    /// <summary>The value axis' minor tick marks (Word charts only; only <see cref="ChartTickMark.Out"/> is drawn).</summary>
+    public ChartTickMark ValueAxisMinorTicks { get; init; }
+
+    /// <summary>The category axis' minor tick marks (Word charts only; only <see cref="ChartTickMark.Out"/> is drawn).</summary>
+    public ChartTickMark CategoryAxisMinorTicks { get; init; }
+
+    /// <summary>The color of the value axis line and its tick marks (Word: the stated line, else the default line color).</summary>
+    public Color ValueAxisColor { get; init; } = Color.Black;
+
+    /// <summary>The color of the category axis line and its tick marks.</summary>
+    public Color CategoryAxisColor { get; init; } = Color.Black;
+
+    /// <summary>The stated width of the value axis line and its tick marks; null takes <see cref="AxisLineWidth"/>.</summary>
+    public double? ValueAxisWidth { get; init; }
+
+    /// <summary>The stated width of the category axis line and its tick marks; null takes <see cref="AxisLineWidth"/>.</summary>
+    public double? CategoryAxisWidth { get; init; }
 
     /// <summary>The chart area's fill; null means transparent.</summary>
     public Color? Background { get; init; } = Color.White;
@@ -363,3 +381,6 @@ public sealed record SheetChart : SheetObject
     /// <summary>The size of the text of axes, legend and labels.</summary>
     public double FontSize { get; init; } = 9;
 }
+
+/// <summary>Where an axis' tick marks are drawn relative to the axis line (<c>majorTickMark</c> / <c>minorTickMark</c>).</summary>
+public enum ChartTickMark { None, Out, In, Cross }

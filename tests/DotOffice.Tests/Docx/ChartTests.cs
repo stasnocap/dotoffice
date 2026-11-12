@@ -85,24 +85,78 @@ public class ChartTests
 
     [Theory]
     [InlineData(216, "0,1,2,3,4,5,6")]
-    [InlineData(118, "0,2,4,6")]
-    public void A_Word_charts_value_axis_takes_the_finest_step_whose_ticks_are_14_pt_apart(double height, string expected)
+    [InlineData(115, "0,1,2,3,4,5,6")]
+    [InlineData(113, "0,2,4,6")]
+    public void A_Word_charts_value_axis_takes_the_finest_step_whose_label_lines_fit_the_plot(double height, string expected)
     {
-        // Data maximum 5: 0 to 6; the plot is 216 - 11 - 23.7 = 181 pt high (step 1 at 30 pt) or 83 pt (step 1 would put the ticks 13.9 pt apart).
+        // Data maximum 5: 0 to 6. The plot is the height - 11 - 23.71; six intervals need 6 x 11.5 + 10.25 = 79.25 pt of it.
+        // Measured in Word 2016: a 78.99 pt plot has step 2, a 79.99 pt plot step 1.
         var xml = ChartXml().Replace("<c:v>20</c:v>", "<c:v>5</c:v>").Replace("<c:v>10</c:v>", "<c:v>3</c:v>");
         var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, height)));
         var labels = page.Items.OfType<TextItem>().Where(t => t.Text.Length == 1 && char.IsDigit(t.Text[0]) && t.X < 72 + 30).OrderBy(t => t.Text).Select(t => t.Text);
         Assert.Equal(expected, string.Join(",", labels));
     }
 
-    [Fact]
-    public void A_Word_chart_draws_outside_tick_marks_only_where_the_file_asks_for_them()
+    private static List<LineItem> ChartLines(string xml) => Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page.Items.OfType<LineItem>().ToList();
+
+    private static List<LineItem> OfLength(IEnumerable<LineItem> lines, double length) => lines.Where(l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - length) < 1e-6).ToList();
+
+    private static string WithTicks(string major, string? minor = null)
     {
-        var withTicks = ChartXml().Replace("<c:crossAx val=\"2\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"2\"/>").Replace("<c:crossAx val=\"1\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"1\"/>");
-        int Short(string xml) => Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page.Items.OfType<LineItem>().Count(l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6);
-        Assert.Equal(4 + 6, Short(withTicks)); // 3 categories: 4 slot boundaries; value axis 0..25 by 5: 6 ticks
-        Assert.Equal(0, Short(ChartXml().Replace("<c:crossAx val=\"2\"/>", "<c:majorTickMark val=\"in\"/><c:crossAx val=\"2\"/>")));
-        Assert.Equal(0, Short(ChartXml()));
+        string Marks(string axis) => (major.Length > 0 ? $"<c:majorTickMark val=\"{major}\"/>" : "") + (minor is null ? "" : $"<c:minorTickMark val=\"{minor}\"/>") + axis;
+        return ChartXml().Replace("<c:crossAx val=\"2\"/>", Marks("<c:crossAx val=\"2\"/>")).Replace("<c:crossAx val=\"1\"/>", Marks("<c:crossAx val=\"1\"/>"));
+    }
+
+    [Fact]
+    public void A_Word_chart_draws_tick_marks_as_the_file_asks_for_them()
+    {
+        // Measured in Word 2016: out and in are 3.02 pt, cross (and a missing majorTickMark) 6.04 pt centered on the axis, none draws nothing.
+        // 3 categories: 4 slot boundaries; value axis 0..25 by 5: 6 ticks.
+        var outside = OfLength(ChartLines(WithTicks("out")), 3.02);
+        Assert.Equal(4 + 6, outside.Count);
+        var inside = OfLength(ChartLines(WithTicks("in")), 3.02);
+        Assert.Equal(4 + 6, inside.Count);
+        var axisY = outside.Where(l => l.X1 == l.X2).Select(l => l.Y1).Min();
+        Assert.All(inside.Where(l => l.X1 == l.X2), l => Assert.Equal(axisY, l.Y2, 3)); // from the plot down to the axis line
+        Assert.All(outside.Where(l => l.X1 == l.X2), l => Assert.True(l.Y2 > l.Y1 && l.Y1 == axisY)); // out: down from the axis line
+        Assert.Equal(4 + 6, OfLength(ChartLines(WithTicks("cross")), 6.04).Count);
+        Assert.Equal(4 + 6, OfLength(ChartLines(ChartXml()), 6.04).Count);
+        Assert.Empty(OfLength(ChartLines(WithTicks("none")), 3.02));
+        Assert.Empty(OfLength(ChartLines(WithTicks("none")), 6.04));
+    }
+
+    [Fact]
+    public void A_Word_chart_draws_outside_minor_tick_marks_a_fifth_of_a_step_apart()
+    {
+        var lines = ChartLines(WithTicks("out", "out"));
+        Assert.Equal(5 * 5 + 1, OfLength(lines, 2.31).Count); // the value axis: five per step, and one at the end
+        Assert.Equal(3 + 1, OfLength(lines, 2.23).Count); // the category axis: slot centers and the last boundary
+        Assert.Empty(OfLength(ChartLines(WithTicks("out", "in")), 2.31));
+    }
+
+    private static readonly Color Grey = new(0x89, 0x89, 0x89);
+
+    private static string WithC14Style(string xml) => xml.Replace("<c:chart>", "<mc:AlternateContent xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" xmlns:c14=\"http://schemas.microsoft.com/office/drawing/2007/8/2/chart\"><mc:Choice Requires=\"c14\"><c14:style val=\"102\"/></mc:Choice><mc:Fallback><c:style val=\"2\"/></mc:Fallback></mc:AlternateContent><c:chart>");
+
+    private static LineItem LongLine(IEnumerable<LineItem> lines, bool horizontal) => lines.Where(l => (l.Y1 == l.Y2) == horizontal && Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1)) > 100).OrderByDescending(l => horizontal ? l.Y1 : l.X2).First();
+
+    [Fact]
+    public void A_Word_chart_draws_axis_lines_and_ticks_black_unless_it_has_a_c14_style_or_states_the_line()
+    {
+        var plain = ChartLines(WithTicks("out"));
+        Assert.Equal(Color.Black, LongLine(plain, true).Color);
+        Assert.All(OfLength(plain, 3.02), l => Assert.Equal(Color.Black, l.Color));
+        var c14 = ChartLines(WithC14Style(WithTicks("out")));
+        Assert.Equal(Grey, LongLine(c14, true).Color); // measured: 898989 for c14:style 102 and 118
+        Assert.Equal(Grey, LongLine(c14, false).Color);
+        Assert.All(OfLength(c14, 3.02), l => Assert.Equal(Grey, l.Color));
+        var stated = ChartXml().Replace("<c:crossAx val=\"2\"/>", "<c:spPr><a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln></c:spPr><c:crossAx val=\"2\"/>");
+        var lines = ChartLines(stated.Replace("<c:crossAx val=\"2\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"2\"/>").Replace("<c:crossAx val=\"1\"/>", "<c:majorTickMark val=\"out\"/><c:crossAx val=\"1\"/>"));
+        var categoryAxis = LongLine(lines, true);
+        Assert.Equal((new Color(255, 0, 0), 2.0), (categoryAxis.Color, categoryAxis.Width)); // the stated category axis line
+        Assert.Equal(Color.Black, LongLine(lines, false).Color); // the value axis states none
+        Assert.Equal(4, OfLength(lines, 3.02).Count(l => l.X1 == l.X2 && l.Color == new Color(255, 0, 0) && l.Width == 2.0)); // its ticks follow it
+        Assert.All(OfLength(lines, 3.02).Where(l => l.Y1 == l.Y2), l => Assert.Equal(Color.Black, l.Color));
     }
 
     [Fact]

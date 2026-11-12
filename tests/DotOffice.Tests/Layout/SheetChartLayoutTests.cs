@@ -29,7 +29,7 @@ public class SheetChartLayoutTests
     private static string Text(LayoutPage page) => string.Concat(page.Items.OfType<TextItem>().Select(t => t.Text));
 
     private static SheetChart WordChart(ChartKind kind, LegendPosition legend, params ChartSeries[] series) =>
-        Chart(kind, series) with { WordLayout = true, Legend = legend, MajorGridlines = true, Width = 360, Height = 216 };
+        Chart(kind, series) with { WordLayout = true, FontSize = 10, Legend = legend, MajorGridlines = true, Width = 360, Height = 216 };
 
     private static (double Left, double Right, double Top, double Bottom) PlotOf(LayoutPage page)
     {
@@ -40,11 +40,11 @@ public class SheetChartLayoutTests
     [Fact]
     public void A_Word_chart_with_outside_ticks_draws_3_pt_marks_at_the_value_ticks_and_slot_boundaries()
     {
-        var chart = WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 5, 10, 20)) with { ValueAxisTickOut = true, CategoryAxisTickOut = true };
+        var chart = WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 5, 10, 20)) with { ValueAxisTicks = ChartTickMark.Out, CategoryAxisTicks = ChartTickMark.Out };
         var ticks = Page(chart).Items.OfType<LineItem>().Where(l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6).ToList();
         Assert.Equal(chart.Ticks.Count, ticks.Count(l => l.Y1 == l.Y2));
         Assert.Equal(4, ticks.Count(l => l.X1 == l.X2));
-        Assert.DoesNotContain(Page(chart with { ValueAxisTickOut = false, CategoryAxisTickOut = false }).Items.OfType<LineItem>(), l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6);
+        Assert.DoesNotContain(Page(chart with { ValueAxisTicks = ChartTickMark.None, CategoryAxisTicks = ChartTickMark.None }).Items.OfType<LineItem>(), l => Math.Abs(Math.Max(l.X2 - l.X1, l.Y2 - l.Y1) - 3.02) < 1e-6);
     }
 
     [Fact]
@@ -72,6 +72,18 @@ public class SheetChartLayoutTests
         Assert.Equal(keys[0].X - 15.76, PlotOf(page).Right, 1); // the plot ends 15.76 left of the keys: 11 + (text width + 22.04) from the edge
         // The block of keys is centered on the chart's middle.
         Assert.Equal(OriginY + 108, (keys[0].Y + keys[1].Y + 5.03) / 2, 1);
+    }
+
+    [Theory]
+    [InlineData(8, 4.02, 14.85)]
+    [InlineData(14, 7.04, 21.49)]
+    public void A_Word_charts_legend_keys_and_entry_pitch_scale_with_the_text_size(double size, double key, double pitch)
+    {
+        // Measured in Word 2016 at 8 and 14 pt (Arial): square keys 0.503 em, entries 14.85 / 21.49 pt apart.
+        var chart = WordChart(ChartKind.Column, LegendPosition.Right, Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20)) with { FontSize = size };
+        var keys = Page(chart).Items.OfType<RectItem>().Where(r => Math.Abs(r.Width - key) < 0.01).OrderBy(r => r.Y).ToList();
+        Assert.Equal(2, keys.Count);
+        Assert.InRange(keys[1].Y - keys[0].Y, pitch - 0.5, pitch + 6); // the test font's line height differs from Arial's
     }
 
     [Fact]

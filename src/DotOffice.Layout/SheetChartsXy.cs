@@ -63,7 +63,7 @@ public sealed partial class SheetLayoutEngine
         {
             double ty = Y(tick.Value);
             if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
-            if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - AxisLabelGap, ty + CenterShift(yFont), Anchor.End, true, 0, items);
+            if (chart.ShowValueAxis) PlaceText(tick.Label, yFont, plotLeft - AxisLabelGap(yFont), ty + CenterShift(yFont), Anchor.End, true, 0, items);
         }
         foreach (var tick in chart.XTicks)
         {
@@ -71,13 +71,20 @@ public sealed partial class SheetLayoutEngine
             if (chart.XGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
             if (chart.ShowCategoryAxis) PlaceXLabel(tick.Label, xFont, tx, plotBottom + LabelDrop(xFont), styles.CategoryAxis?.Rotation ?? 0, items);
         }
-        // Word's outside major tick marks at every tick value (3.02 pt; the axis line's width and color are INFERRED).
-        if (chart.ValueAxisTickOut && chart.ShowValueAxis)
-            foreach (var tick in chart.Ticks) items.Add(new LineItem(X(0) - 3.02, Y(tick.Value), X(0), Y(tick.Value), chart.AxisLineWidth, Color.Black));
-        if (chart.CategoryAxisTickOut && chart.ShowCategoryAxis)
-            foreach (var tick in chart.XTicks) items.Add(new LineItem(X(tick.Value), Y(0), X(tick.Value), Y(0) + 3.02, chart.AxisLineWidth, Color.Black));
-        if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), chart.AxisLineWidth, Color.Black));
-        if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, chart.AxisLineWidth, Color.Black));
+        // Word's tick marks at every tick value (3.02 pt; out, in, cross measured), in the axis line's color and width. Minor marks are not drawn for scatter charts.
+        double valueWidth = chart.ValueAxisWidth ?? chart.AxisLineWidth, categoryWidth = chart.CategoryAxisWidth ?? chart.AxisLineWidth;
+        if (chart.ShowValueAxis && chart.ValueAxisTicks != ChartTickMark.None)
+        {
+            var (inward, outward) = TickSpan(chart.ValueAxisTicks, 0.302 * chart.FontSize);
+            foreach (var tick in chart.Ticks) items.Add(new LineItem(X(0) - outward, Y(tick.Value), X(0) + inward, Y(tick.Value), valueWidth, chart.ValueAxisColor));
+        }
+        if (chart.ShowCategoryAxis && chart.CategoryAxisTicks != ChartTickMark.None)
+        {
+            var (inward, outward) = TickSpan(chart.CategoryAxisTicks, 0.302 * chart.FontSize);
+            foreach (var tick in chart.XTicks) items.Add(new LineItem(X(tick.Value), Y(0) - inward, X(tick.Value), Y(0) + outward, categoryWidth, chart.CategoryAxisColor));
+        }
+        if (chart.ShowCategoryAxis) items.Add(new LineItem(plotLeft, Y(0), plotRight, Y(0), categoryWidth, chart.CategoryAxisColor));
+        if (chart.ShowValueAxis) items.Add(new LineItem(X(0), plotTop, X(0), plotBottom, valueWidth, chart.ValueAxisColor));
 
         var labels = new List<(string Text, double X, double Y, Color? Fill, ChartTextStyle? Style, LabelSide Side)>();
         var trendLabels = new List<LayoutItem>();

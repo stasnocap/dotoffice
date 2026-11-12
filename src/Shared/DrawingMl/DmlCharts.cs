@@ -475,9 +475,12 @@ internal static class DmlCharts
         string? TextOf(XElement? holder) => holder is null ? null : string.Join(" ", holder.Descendants().Where(e => e.Name.LocalName == "p").Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(t => t.Value))).Where(s => s.Length > 0)) is { Length: > 0 } text ? text : null;
         // The length in points of the plot area along a value axis as Word 2016 lays it out (see SheetChart.WordLayout), estimated from the chart's
         // text because the scale is read before the labels are measured: the frame's margins, title band, axis labels and legend.
-        double WordPlotLength(bool horizontal)
+        // The length Word 2016 weighs a value axis' step against (measured, see ValueScale): the plot's height for a vertical axis; for a horizontal one the
+        // distance from the 11 pt left margin to the plot's right edge, which gives way to a side legend and to half of the axis' last label.
+        // The legend's width is estimated (0.53 em a character), since text is not measured here.
+        double WordAxisLength(bool horizontal, string lastLabel)
         {
-            double k = fontSize0 / 10, glyph = 0.53 * fontSize0, lineHeight = 1.15 * fontSize0;
+            double lineHeight = 1.15 * fontSize0;
             var titleElement0 = Child(chart, "title");
             double band = 0;
             if (titleElement0 is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1")
@@ -487,16 +490,16 @@ internal static class DmlCharts
             }
             var legendElement0 = Child(chart, "legend");
             string? legendPos = legendElement0 is null ? null : (string?)Child(legendElement0, "legendPos")?.Attribute("val") ?? "r";
-            double row = lineHeight + 5.57 + 6, entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * glyph;
-            if (kind is ChartKind.Pie or ChartKind.Doughnut) entryWidth = categories.Count == 0 ? 0 : categories.Max(c => c.Length) * glyph;
             if (!horizontal)
             {
-                double length = template.Height - 11 - band - (6.5 + 1.117 * fontSize0 + 6.04 * k);
-                return legendPos is "t" or "b" ? length - row : length;
+                double length = template.Height - Math.Max(11, 0.9157 * fontSize0) - band - (6.5 + lineHeight + 0.571 * fontSize0);
+                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : length;
             }
-            double axisLabels = xy ? 3 * 0.556 * fontSize0 : categories.Count == 0 ? 0 : categories.Max(c => c.Length) * glyph;
-            double width = template.Width - (6.5 + axisLabels + 8.63) - 11;
-            return legendPos is "l" or "r" or "tr" ? width - (entryWidth + 22.04) : width;
+            double entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * 0.53 * fontSize0;
+            double width = template.Width - 22;
+            if (legendPos is "l" or "r" or "tr") width -= entryWidth + 12.04 + fontSize0;
+            if (!xy || legendPos == "r") width -= lastLabel.Length * 0.556 * fontSize0 / 2;
+            return width;
         }
 
         // A value axis' scale: the data range's automatic scale, or the fixed limits, units, logarithmic base and direction of the axis.
@@ -534,10 +537,20 @@ internal static class DmlCharts
             int maxIntervals = 10;
             if (context.WordChartFrame && template.Height > 0 && template.Width > 0)
             {
-                // Word 2016: as many intervals as keep the tick pitch at or above 14.4 pt (vertical axis) or 34 pt (horizontal axis) at 10 pt text,
-                // never more than ten; the pitch limits scale with the text size (inferred) and the horizontal one is the midpoint of the 27..41 pt bracket measured.
-                double pitchLimit = (horizontal ? 34 : 14.4) * fontSize0 / 10;
-                maxIntervals = Math.Clamp((int)Math.Floor(WordPlotLength(horizontal) / pitchLimit + 1e-9), 1, 10);
+                // Word 2016 (measured at 4, 5, 6, 8 and 10 intervals with Arial 10 pt, and at 8 and 14 pt): a vertical axis takes the finest step whose n intervals
+                // leave the plot at least n label lines (1.15 em) + 10.25 pt high (the 10.25 does not scale; bracketed 10.0..10.5); a horizontal axis the finest
+                // with at least 4.122 em (bracketed 4.118..4.126) an interval over the length from the left margin to the plot's right edge. Never more than ten
+                // intervals (INFERRED: a 181 pt plot keeps 6 intervals where 11 would fit). A left legend counting against the length is INFERRED.
+                int Intervals(string lastLabel) => Math.Clamp((int)Math.Floor(horizontal
+                    ? WordAxisLength(true, lastLabel) / (4.122 * fontSize0) + 1e-9
+                    : (WordAxisLength(false, lastLabel) - 10.25) / (1.15 * fontSize0) + 1e-9), 1, 10);
+                maxIntervals = Intervals("");
+                if (horizontal)
+                {
+                    // The last label's width depends on the step: one more pass with the first result's label.
+                    var first = AutoScale(lo, hi, fixedMin, fixedMax, fixedMajor, maxIntervals);
+                    maxIntervals = Intervals(Format(first.Max, code));
+                }
             }
             else if (context.FitAxisToHeight && template.Height > 0)
             {
@@ -753,11 +766,29 @@ internal static class DmlCharts
             var ln = Child(chartProperties, "ln");
             if (ln is not null && ln.Elements().Any(e => e.Name.LocalName is "noFill" or "solidFill")) border = SolidFill(ln, theme);
         }
-        // Word draws outside tick marks only on the measured charts: no secondary axis, no reversed axis, and (column, bar, line) no crossBetween midCat.
+        // Word draws tick marks only on the measured charts: no secondary axis, no reversed axis, and (column, bar, line) no crossBetween midCat.
         bool wordTicks = context.WordChartFrame && kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter;
         wordTicks = wordTicks && context.WordChartFrame && secondaryStyleAxis is null && !reverseValues && !reverseX
             && (string?)Child(Child(categoryAxis, "scaling"), "orientation")?.Attribute("val") != "maxMin"
             && (kind == ChartKind.Scatter || (string?)Child(valueAxis, "crossBetween")?.Attribute("val") != "midCat");
+        // Word 2016 (measured): gridlines, axis lines and ticks are black without a style or with a plain c:style, 898989 when the chart has a c14:style
+        // (inside mc:AlternateContent); a stated axis line (spPr/ln) colors that axis and its ticks, and sets their width.
+        bool word = context.WordChartFrame;
+        bool c14Style = word && space.Elements().Where(e => e.Name.LocalName == "AlternateContent").Descendants().Any(e => e.Name.LocalName == "style" && e.Name.NamespaceName != space.Name.NamespaceName);
+        Color lineDefault = c14Style ? new Color(0x89, 0x89, 0x89) : Color.Black;
+        (double? Width, Color Color) AxisLine(XElement? axis)
+        {
+            var ln = word ? Path(axis, "spPr", "ln") : null;
+            double? width = ln?.Attribute("w") is { } lw && double.TryParse(lw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lemu) && lemu > 0 && lemu < 2e9 ? lemu / 12700 : null;
+            return (width, ln is not null && Child(ln, "noFill") is null && SolidFill(ln, theme) is { } lc ? lc : lineDefault);
+        }
+        var valueLine = AxisLine(valueAxis);
+        var categoryLine = AxisLine(categoryAxis);
+        // A missing majorTickMark is "cross" (measured in Word); a missing minorTickMark is none.
+        ChartTickMark Tick(XElement? axis, string name, ChartTickMark whenAbsent) => !wordTicks ? ChartTickMark.None : (string?)Child(axis, name)?.Attribute("val") switch
+        {
+            "out" => ChartTickMark.Out, "in" => ChartTickMark.In, "cross" => ChartTickMark.Cross, "none" => ChartTickMark.None, _ => whenAbsent,
+        };
         double fontSize = Descendant(Child(space, "txPr"), "defRPr")?.Attribute("sz") is { } baseSize && double.TryParse(baseSize.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s0) && s0 > 0 ? s0 / 100 : 10;
 
         double gap = Child(group, "gapWidth") is { } g ? Number(g, "val", 150) : 150;
@@ -770,12 +801,13 @@ internal static class DmlCharts
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),
             MajorGridlines = Child(valueAxis, "majorGridlines") is not null && !gridStyle.Hidden,
-            AxisLineWidth = context.GridlineWidth, GridlineWidth = gridStyle.Width ?? context.GridlineWidth, GridlineColor = gridStyle.Color ?? Color.Black,
+            AxisLineWidth = context.GridlineWidth, GridlineWidth = gridStyle.Width ?? context.GridlineWidth, GridlineColor = gridStyle.Color ?? lineDefault,
             ValueAxisTitle = TextOf(Path(valueAxis, "title", "tx", "rich")), CategoryAxisTitle = TextOf(Path(categoryAxis, "title", "tx", "rich")),
             GapWidth = gap, Overlap = Math.Clamp(overlap, -100, 100),
             ShowPercent = series.Any(s => s.Labels is not null) && slices,
-            ValueAxisTickOut = wordTicks && (string?)Child(valueAxis, "majorTickMark")?.Attribute("val") == "out",
-            CategoryAxisTickOut = wordTicks && (string?)Child(categoryAxis, "majorTickMark")?.Attribute("val") == "out",
+            ValueAxisTicks = Tick(valueAxis, "majorTickMark", ChartTickMark.Cross), CategoryAxisTicks = Tick(categoryAxis, "majorTickMark", ChartTickMark.Cross),
+            ValueAxisMinorTicks = Tick(valueAxis, "minorTickMark", ChartTickMark.None), CategoryAxisMinorTicks = Tick(categoryAxis, "minorTickMark", ChartTickMark.None),
+            ValueAxisColor = valueLine.Color, CategoryAxisColor = categoryLine.Color, ValueAxisWidth = valueLine.Width, CategoryAxisWidth = categoryLine.Width,
             WordLayout = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") != "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,

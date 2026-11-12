@@ -491,7 +491,7 @@ public sealed partial class SheetLayoutEngine
                 double ty = ValueY(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
                 if (!chart.ShowValueAxis) { }
-                else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - AxisLabelGap, ty + CenterShift(valueFont), Anchor.End, true, 0, items);
+                else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - AxisLabelGap(valueFont), ty + CenterShift(valueFont), Anchor.End, true, 0, items);
                 else
                 {
                     // A turned label is centered in the box it fills, which ends 5 pt left of the axis.
@@ -704,28 +704,49 @@ public sealed partial class SheetLayoutEngine
         items.AddRange(trendLabels);
 
         // ---- category axis line and labels
-        // Word's outside major tick marks, 3.02 pt long, in the axis line's width (measured; the color and width following the axis line are INFERRED).
-        const double TickLength = 3.02;
-        if (chart.ValueAxisTickOut && chart.ShowValueAxis)
-            foreach (var tick in chart.Ticks)
-            {
-                if (horizontalBars) { double tx = ValueX(primary, tick.Value); items.Add(new LineItem(tx, plotBottom, tx, plotBottom + TickLength, chart.AxisLineWidth, Color.Black)); }
-                else { double ty = ValueY(primary, tick.Value); items.Add(new LineItem(plotLeft - TickLength, ty, plotLeft, ty, chart.AxisLineWidth, Color.Black)); }
-            }
-        if (chart.CategoryAxisTickOut && chart.ShowCategoryAxis)
+        // Word's tick marks: 3.02 pt major, 2.31 pt minor on the value axis (a fifth of the major step) and 2.23 pt on the category axis (at 10 pt text, 2.41 major at 8 pt: 0.302 em; the scaling of the minor ones is INFERRED) (the slot centers and the
+        // last boundary), in their axis line's color and width. Measured (out, in, cross; minor out only); the place on a mid-plot axis is INFERRED.
+        double tickScale = chart.FontSize;
+        double valueWidth = chart.ValueAxisWidth ?? chart.AxisLineWidth, categoryWidth2 = chart.CategoryAxisWidth ?? chart.AxisLineWidth;
+        void ValueTick(double at, double length, ChartTickMark mark)
+        {
+            var (inward, outward) = TickSpan(mark, length);
+            if (horizontalBars) items.Add(new LineItem(at, plotBottom - inward, at, plotBottom + outward, valueWidth, chart.ValueAxisColor));
+            else items.Add(new LineItem(plotLeft - outward, at, plotLeft + inward, at, valueWidth, chart.ValueAxisColor));
+        }
+        if (chart.ShowValueAxis && (chart.ValueAxisTicks != ChartTickMark.None || chart.ValueAxisMinorTicks == ChartTickMark.Out))
+        {
+            if (chart.ValueAxisMinorTicks == ChartTickMark.Out && chart.Ticks.Count > 1 && chart.LogBase == 0)
+                for (int t = 0; t < chart.Ticks.Count - 1; t++)
+                    for (int m = 0; m < 5; m++)
+                    {
+                        double v = chart.Ticks[t].Value + (chart.Ticks[t + 1].Value - chart.Ticks[t].Value) * m / 5;
+                        ValueTick(horizontalBars ? ValueX(primary, v) : ValueY(primary, v), 0.231 * tickScale, ChartTickMark.Out);
+                    }
+            if (chart.ValueAxisMinorTicks == ChartTickMark.Out && chart.Ticks.Count > 1 && chart.LogBase == 0) ValueTick(horizontalBars ? ValueX(primary, chart.Ticks[^1].Value) : ValueY(primary, chart.Ticks[^1].Value), 0.231 * tickScale, ChartTickMark.Out);
+            foreach (var tick in chart.Ticks) ValueTick(horizontalBars ? ValueX(primary, tick.Value) : ValueY(primary, tick.Value), 0.302 * tickScale, chart.ValueAxisTicks);
+        }
+        if (chart.ShowCategoryAxis && (chart.CategoryAxisTicks != ChartTickMark.None || chart.CategoryAxisMinorTicks == ChartTickMark.Out))
         {
             // One mark at every slot boundary, on the axis line (where the axis crosses is INFERRED from the line's position).
             double crossAt = Baseline(primary);
-            for (int k = 0; k <= categories; k++)
+            void CategoryTick(double k, double length, ChartTickMark mark)
             {
-                if (horizontalBars) { double ty = plotTop + k * plotHeight / categories, ax = ValueX(primary, crossAt); items.Add(new LineItem(ax - TickLength, ty, ax, ty, chart.AxisLineWidth, Color.Black)); }
-                else { double tx = plotLeft + k * plotWidth / categories, ay = ValueY(primary, crossAt); items.Add(new LineItem(tx, ay, tx, ay + TickLength, chart.AxisLineWidth, Color.Black)); }
+                var (inward, outward) = TickSpan(mark, length);
+                if (horizontalBars) { double ty = plotTop + k * plotHeight / categories, ax = ValueX(primary, crossAt); items.Add(new LineItem(ax - outward, ty, ax + inward, ty, categoryWidth2, chart.CategoryAxisColor)); }
+                else { double tx = plotLeft + k * plotWidth / categories, ay = ValueY(primary, crossAt); items.Add(new LineItem(tx, ay - inward, tx, ay + outward, categoryWidth2, chart.CategoryAxisColor)); }
             }
+            if (chart.CategoryAxisMinorTicks == ChartTickMark.Out)
+            {
+                for (int k = 0; k < categories; k++) CategoryTick(k + 0.5, 0.223 * tickScale, ChartTickMark.Out);
+                CategoryTick(categories, 0.223 * tickScale, ChartTickMark.Out);
+            }
+            for (int k = 0; k <= categories; k++) CategoryTick(k, 0.302 * tickScale, chart.CategoryAxisTicks);
         }
         if (chart.ShowValueAxis)
         {
-            if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, chart.AxisLineWidth, Color.Black));
-            else items.Add(new LineItem(plotLeft, plotTop, plotLeft, plotBottom, chart.AxisLineWidth, Color.Black));
+            if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, valueWidth, chart.ValueAxisColor));
+            else items.Add(new LineItem(plotLeft, plotTop, plotLeft, plotBottom, valueWidth, chart.ValueAxisColor));
         }
         if (chart.ShowCategoryAxis)
         {
@@ -733,7 +754,7 @@ public sealed partial class SheetLayoutEngine
             if (horizontalBars)
             {
                 double ax = ValueX(primary, crossing);
-                items.Add(new LineItem(ax, plotTop, ax, plotBottom, chart.AxisLineWidth, Color.Black));
+                items.Add(new LineItem(ax, plotTop, ax, plotBottom, categoryWidth2, chart.CategoryAxisColor));
                 double band = plotHeight / categories;
                 for (int i = 0; i < categories && i < chart.Categories.Count; i++)
                 {
@@ -742,13 +763,13 @@ public sealed partial class SheetLayoutEngine
                     if (barCategoryAngle != 0)
                         PlaceText(chart.Categories[i], categoryFont, labelsAtFar ? plotRight + 5 + across / 2 : plotLeft - 5 - across / 2, y, Anchor.Middle, true, barCategoryAngle, items);
                     else if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, plotRight + 5, y, Anchor.Start, true, 0, items);
-                    else PlaceText(chart.Categories[i], categoryFont, plotLeft - AxisLabelGap, y + CenterShift(categoryFont), Anchor.End, true, 0, items);
+                    else PlaceText(chart.Categories[i], categoryFont, plotLeft - AxisLabelGap(categoryFont), y + CenterShift(categoryFont), Anchor.End, true, 0, items);
                 }
             }
             else
             {
                 double ay = ValueY(primary, crossing);
-                items.Add(new LineItem(plotLeft, ay, plotRight, ay, chart.AxisLineWidth, Color.Black));
+                items.Add(new LineItem(plotLeft, ay, plotRight, ay, categoryWidth2, chart.CategoryAxisColor));
                 for (int i = 0; i < categories && i < chart.Categories.Count; i += (int)stride)
                 {
                     double cx = CategoryX(i);
