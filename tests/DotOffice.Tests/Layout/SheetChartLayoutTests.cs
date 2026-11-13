@@ -174,6 +174,37 @@ public class SheetChartLayoutTests
         Assert.Equal(OriginY + 216 - 6 - (row - 6) / 2 - 2.515, keys[0].Y, 1); // centered in the row, which ends 6 pt above the edge (17.05 above it for Arial 10)
     }
 
+    [Theory]
+    [InlineData(144, 6, 64.44, 12)]
+    [InlineData(216, 6, 102.18, 19)]
+    [InlineData(288, 6, 137.54, 26)]
+    public void A_Word_charts_45_degree_labels_are_cut_with_an_ellipsis_by_the_chart_height(double h, int n, double gap, int kept)
+    {
+        // Measured in Word 2021 (10 pt, W 360, six 48-character labels): the label and its "..." may take the bottom gap up to (H - band) / 2 + 1.7 pt; the plot gives way for the kept text only.
+        var labels = Enumerable.Range(0, n).Select(i => (char)('A' + i) + "Quarterlyrevenuenorthernwesternregionalaverage").ToArray();
+        var chart = WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 3, 3, 3, 3, 3, 3)) with { Categories = labels, Height = h };
+        var page = ArialPage(chart);
+        Assert.Equal(h - gap, PlotOf(page).Bottom - OriginY, 0.6);
+        var cut = page.Items.OfType<TextItem>().First(t => t.Text.EndsWith('\u2026'));
+        Assert.StartsWith("AQuarterly", cut.Text);
+        Assert.InRange(cut.Text.Length, kept, kept + 12); // the characters that fit in (H - band) / 2 - 20 pt, one more wide glyph at most
+    }
+
+    [Fact]
+    public void A_Word_charts_turned_multi_word_labels_are_cut_after_the_last_whole_word_that_fits()
+    {
+        // Measured in Word 2021 (14 pt, H 216): "Quarterly revenue north" -> "Quarterly...", "Annual total west" stays whole.
+        var chart = WordChart(ChartKind.Column, LegendPosition.None, Series(Red, 3, 5, 4, 6, 2, 7)) with
+        {
+            FontSize = 14, Width = 300, Categories = ["Quarterly revenue north", "Quarterly revenue south", "Quarterly revenue east", "Annual total west", "Monthly spend central", "Weekly yield"],
+        };
+        var texts = ArialPage(chart).Items.OfType<TextItem>().Select(t => t.Text).ToList();
+        Assert.Contains("Quarterly\u2026", texts);
+        var all = string.Concat(texts).Replace(" ", "");
+        Assert.Contains("Monthlyspend\u2026", all);
+        Assert.Contains("Annualtotalwest", all);
+    }
+
     [Fact]
     public void A_Word_pie_is_the_largest_circle_in_the_space_the_legend_leaves_and_has_no_white_outlines()
     {
