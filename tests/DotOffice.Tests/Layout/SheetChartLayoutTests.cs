@@ -26,6 +26,18 @@ public class SheetChartLayoutTests
         return SheetLayoutTests.Layout(sheet).Pages[0];
     }
 
+    private static readonly DotOffice.Fonts.TrueTypeFont Liberation = DotOffice.Fonts.TrueTypeFont.Load(TestAssets.Path("LiberationSans-Regular.ttf"));
+
+    /// <summary>The chart laid out in Liberation Sans, which has Arial's metrics, so Word's measured numbers hold as they are.</summary>
+    private static LayoutPage ArialPage(SheetChart chart)
+    {
+        var sheet = SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("x")));
+        sheet.Charts.Add(chart);
+        var workbook = new Workbook();
+        workbook.Sheets.Add(sheet);
+        return new SheetLayoutEngine(new LayoutOptions { Fonts = new DotOffice.Fonts.FontResolver(new DotOffice.Fonts.FontCollection().Add(Liberation)) }).Layout(workbook).Pages[0];
+    }
+
     private static string Text(LayoutPage page) => string.Concat(page.Items.OfType<TextItem>().Select(t => t.Text));
 
     private static SheetChart WordChart(ChartKind kind, LegendPosition legend, params ChartSeries[] series) =>
@@ -82,13 +94,13 @@ public class SheetChartLayoutTests
         // Measured in Word 2016 (1 sample, 12 series at H 216 with a title: 10 shown): the shown keys are centered on (H + band) / 2, entries floor((0.9 (H - band) + 2.76) / 17.07).
         var series = Enumerable.Range(0, 12).Select(_ => Series(Red, 5, 10, 20)).ToArray();
         var titled = WordChart(ChartKind.Column, LegendPosition.Right, series) with { Title = "T" };
-        double band = PlotOf(Page(titled with { Legend = LegendPosition.None })).Top - OriginY - 11;
+        double band = PlotOf(ArialPage(titled with { Legend = LegendPosition.None })).Top - OriginY - 11;
         int shown = (int)Math.Floor((0.9 * (216 - band) + 2.76) / EntryPitch);
-        var keys = Keys(Page(titled));
+        var keys = Keys(ArialPage(titled));
         Assert.Equal(shown, keys.Count);
-        Assert.InRange(shown, 2, 11);
+        Assert.Equal(10, shown);
         Assert.Equal(OriginY + (216 + band) / 2, (keys[0].Y + keys[^1].Y + 5.03) / 2, 0.2);
-            }
+    }
 
     [Fact]
     public void A_Word_charts_overlaid_right_legend_leaves_the_plot_at_full_width_and_is_drawn_after_it()
@@ -1432,25 +1444,14 @@ public class SheetChartLayoutTests
         page.Items.OfType<TextItem>().Where(t => t.Text.Length > 0 && t.Text[0] == prefix).GroupBy(t => Math.Round(t.Baseline, 2)).OrderBy(g => g.Key)
             .Select(g => g.Max(t => t.X + Width(t)) - g.Min(t => t.X)).ToList();
 
-    /// <summary>
-    /// The single-line entry pitch in the test font: 17.07 pt for Arial (line height 11.5 + 5.57), but the test font (Noto Sans) is taller, so the base is read from
-    /// two entries and checked to be at least Arial's; every other number below is Word's, absolute.
-    /// </summary>
-    private static double EntryPitch
-    {
-        get
-        {
-            var k = Keys(Page(NamedLegendChart(LegendPosition.Right, 360, 216, "A", "B")));
-            Assert.InRange(k[1].Y - k[0].Y, 17.07, 21);
-            return k[1].Y - k[0].Y;
-        }
-    }
+    /// <summary>Word's single-line legend entry pitch for Arial 10 pt: line height 11.5 + 5.57.</summary>
+    private const double EntryPitch = 17.07;
 
     [Fact]
     public void A_Word_charts_right_legend_wraps_long_names_and_every_entry_takes_the_tallest_ones_height()
     {
         // Measured in Word 2016 (40+ samples): names wrap at W / 3 - 11.5 = 108.5 at W 360, lines 1.15 em apart, pitch 17.07 + 1.106 em per extra line, box min(widest + 22.04, W / 3 + 9.0).
-        var page = Page(NamedLegendChart(LegendPosition.Right, 360, 216, "Short", "nnnn nnnn nnnn nnnn nnnn nnnn", "Mid"));
+        var page = ArialPage(NamedLegendChart(LegendPosition.Right, 360, 216, "Short", "nnnn nnnn nnnn nnnn nnnn nnnn", "Mid"));
         var keys = Keys(page);
         Assert.Equal(3, keys.Count);
         double pitch = EntryPitch + 1.106 * Em; // two lines: the long name is 29 n-chars wide, over 108.5, under 2 x 108.5
@@ -1472,7 +1473,7 @@ public class SheetChartLayoutTests
     public void A_Word_charts_right_legend_box_is_capped_at_a_third_of_the_width_plus_9_and_long_words_break_by_character()
     {
         // Measured in Word 2016: a single word wider than W / 3 - 11.5 breaks by character; the box is then min(widest + 22.04, W / 3 + 9.0) = 129 at W 360.
-        var page = Page(NamedLegendChart(LegendPosition.Right, 360, 216, new string('n', 40)));
+        var page = ArialPage(NamedLegendChart(LegendPosition.Right, 360, 216, new string('n', 40)));
         var texts = page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('n')).ToList();
         Assert.True(texts.Count >= 2);
         Assert.All(texts, t => Assert.True(Width(t) <= 360 / 3.0 - 11.5));
@@ -1487,8 +1488,8 @@ public class SheetChartLayoutTests
         foreach (int k in new[] { 4, 7, 9 })
         {
             double edge = (k * EntryPitch - 2.76) / 0.9;
-            Assert.Equal(k - 1, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge - 0.5, names))).Count);
-            Assert.Equal(k, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge + 0.5, names))).Count);
+            Assert.Equal(k - 1, Keys(ArialPage(NamedLegendChart(LegendPosition.Right, 360, edge - 0.5, names))).Count);
+            Assert.Equal(k, Keys(ArialPage(NamedLegendChart(LegendPosition.Right, 360, edge + 0.5, names))).Count);
         }
             }
 
@@ -1499,7 +1500,7 @@ public class SheetChartLayoutTests
         // otherwise a grid: column pitch = widest entry + 0.283 em, rows = ceil(n / maxCols), cols = ceil(n / rows), rows 17.06 apart, the last 1.50 lower, the plot gives way by (rows - 1) x 17.06 - 1.50.
         const double lmax = 326.85, keyAdvance = 5.03 + 2.2;
         var names3 = new[] { "Series 1", "Series 2", "Series 3" };
-        var page1 = Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, names3));
+        var page1 = ArialPage(NamedLegendChart(LegendPosition.Bottom, 360, 216, names3));
         var one = Keys(page1);
         var w3 = names3.Select(n => NameWidth(page1, n)).ToList();
         double sw = w3.Sum(), total = sw + 3 * keyAdvance;
@@ -1511,7 +1512,7 @@ public class SheetChartLayoutTests
         double plotBottom1 = PlotOf(page1).Bottom;
 
         var names = Enumerable.Range(1, 12).Select(i => "Series " + i).ToArray();
-        var pageG = Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, names));
+        var pageG = ArialPage(NamedLegendChart(LegendPosition.Bottom, 360, 216, names));
         var grid = Keys(pageG);
         var wg = names.Select(n => NameWidth(pageG, n)).ToList();
         double colPitch = wg.Max() + keyAdvance + 0.283 * Em;
