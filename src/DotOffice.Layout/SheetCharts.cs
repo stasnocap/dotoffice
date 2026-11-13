@@ -455,10 +455,11 @@ public sealed partial class SheetLayoutEngine
             double sine = Math.Abs(Math.Sin(labelAngle * Math.PI / 180)), cosine = Math.Abs(Math.Cos(labelAngle * Math.PI / 180));
             double below = !chart.ShowCategoryAxis ? 0 : rotateLabels ? categoryWidth * sine + labelHeight * cosine + 6 : labelHeight + 5;
             if (labelsAtFar) { plotTop = top + below; plotBottom = bottom - labelHeight / 2; }
-            else if (_wordPlot is { } wordPlot) plotBottom = wordPlot.Y + wordPlot.Height - (rotateLabels ? below - (labelHeight + 5) : 0);
+            else if (_wordPlot is { } wordPlot) plotBottom = wordPlot.Y + wordPlot.Height - (rotateLabels && _wordCategories is null ? below - (labelHeight + 5) : 0);
             else plotBottom = bottom - below;
             stride = !chart.ShowCategoryAxis ? 1 : Math.Max(1, Math.Ceiling((rotateLabels ? labelHeight * 1.1 / Math.Max(sine, 0.25) : categoryWidth + 6) / Math.Max(bandWidth, 1)));
             if (_wordPlot is not null && !rotateLabels && categoryWidth <= bandWidth) stride = 1; // Word shows every label unless neighbours would overlap
+            if (_wordCategories is { } wordLabels && chart.ShowCategoryAxis) (rotateLabels, labelAngle, stride) = (wordLabels.Angle != 0, wordLabels.Angle, wordLabels.Stride);
         }
         else
         {
@@ -793,6 +794,7 @@ public sealed partial class SheetLayoutEngine
                         else PlaceText(chart.Categories[i], categoryFont, cx + slant, plotTop - 6, Anchor.End, true, labelAngle, items);
                     }
                     else if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, cx, plotTop - 4 - labelHeight, Anchor.Middle, false, 0, items);
+                    else if (_wordCategories is { } wordLabels) PlaceWordCategory(wordLabels, i, categoryFont, cx, plotBottom, items);
                     else if (rotateLabels)
                     {
                         // Turned counter-clockwise (positive) the text ends at its tick; clockwise it starts there. A upright column of text is centered on the tick.

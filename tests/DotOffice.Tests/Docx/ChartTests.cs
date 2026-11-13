@@ -209,6 +209,79 @@ public class ChartTests
         Assert.Equal(["0", "2", "4", "6"], ValueAxisLabels(TopRightLegendXml(true), 144, 4));
     }
 
+    private static LayoutPage CategoryLabelPage(string label, int n, double width)
+    {
+        var xml = ChartXml()
+            .Replace("<c:ptCount val=\"3\"/><c:pt idx=\"0\"><c:v>a</c:v></c:pt><c:pt idx=\"1\"><c:v>b</c:v></c:pt><c:pt idx=\"2\"><c:v>c</c:v></c:pt>",
+                $"<c:ptCount val=\"{n}\"/>" + string.Concat(Enumerable.Range(0, n).Select(i => $"<c:pt idx=\"{i}\"><c:v>{label}</c:v></c:pt>")))
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        return Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), width, 216))).Page;
+    }
+
+    /// <summary>How far the plot's bottom stands above the chart's bottom (the plot's top is 11 below the chart's top).</summary>
+    private static double PlotBottomOffset(LayoutPage page)
+    {
+        var axis = page.Items.OfType<LineItem>().Where(l => l.X1 == l.X2 && Math.Abs(l.Y2 - l.Y1) > 100).OrderBy(l => l.X1).First();
+        return Math.Min(axis.Y1, axis.Y2) + 205 - Math.Max(axis.Y1, axis.Y2);
+    }
+
+    private static List<TextItem> Labels(LayoutPage page, string text) => page.Items.OfType<TextItem>().Where(t => t.Text == text).ToList();
+
+    [Fact]
+    public void Word_category_labels_stay_upright_until_the_widest_no_longer_fits_its_slot_as_measured_in_Word_2021_at_10_pt()
+    {
+        var wide = CategoryLabelPage("North", 10, 400);
+        Assert.Equal(10, Labels(wide, "North").Count);
+        Assert.DoesNotContain(wide.Items, i => i is PushItem { Rotation: not 0 });
+        var narrow = CategoryLabelPage("North", 10, 200); // slot about 16 pt, label about 26: Word turns them rather than letting them touch
+        Assert.All(narrow.Items.OfType<PushItem>().Where(p => p.Rotation != 0), p => Assert.Equal(45, p.Rotation));
+        Assert.Equal(10, narrow.Items.OfType<PushItem>().Count(p => p.Rotation == 45));
+    }
+
+    [Fact]
+    public void Word_wraps_category_labels_at_spaces_when_the_longest_word_fits_the_slot_and_keeps_the_last_baseline()
+    {
+        var upright = CategoryLabelPage("Northern", 3, 200);
+        var page = CategoryLabelPage("Northern Region", 3, 200); // slot 53 pt: "Northern" fits, the whole label does not
+        var first = Labels(page, "Northern"); var second = Labels(page, "Region");
+        Assert.Equal(3, first.Count);
+        Assert.Equal(3, second.Count);
+        Assert.Equal(11.5, second[0].Baseline - first[0].Baseline, 3); // lines 1.15 em apart
+        Assert.Equal(Labels(upright, "Northern")[0].Baseline, second[0].Baseline, 1); // the last baseline stays
+        Assert.Equal(PlotBottomOffset(upright) + 11.5, PlotBottomOffset(page), 1); // the plot gives way by one line
+        Assert.DoesNotContain(page.Items, i => i is PushItem { Rotation: not 0 });
+    }
+
+    [Fact]
+    public void Word_turns_category_labels_by_45_degrees_when_the_slot_is_at_least_15_7_pt_and_sizes_the_plot_by_their_width()
+    {
+        var page = CategoryLabelPage("NorthernRegion", 6, 200); // slot 28 pt: a single word too wide to fit, wide enough to turn by 45
+        var labels = page.Items.OfType<TextItem>().Where(t => t.Text == "NorthernRegion").ToList();
+        Assert.Equal(6, labels.Count);
+        Assert.Equal(6, page.Items.OfType<PushItem>().Count(p => p.Rotation == 45));
+        double w = labels[0].Font.MeasureText("NorthernRegion", labels[0].FontSize);
+        Assert.Equal(20.5 + 0.7071 * w, PlotBottomOffset(page), 0); // measured: 20.5 + 0.7071 W above the chart's bottom
+    }
+
+    [Fact]
+    public void Word_turns_category_labels_by_90_degrees_when_the_slot_is_between_11_1_and_15_7_pt()
+    {
+        var page = CategoryLabelPage("NorthernRegion", 24, 360); // slot 13.5 pt
+        var labels = page.Items.OfType<TextItem>().Where(t => t.Text == "NorthernRegion").ToList();
+        Assert.Equal(24, labels.Count);
+        Assert.Equal(24, page.Items.OfType<PushItem>().Count(p => p.Rotation == 90));
+        double w = labels[0].Font.MeasureText("NorthernRegion", labels[0].FontSize);
+        Assert.Equal(12.6 + w, PlotBottomOffset(page), 0); // measured: 12.6 + W above the chart's bottom
+    }
+
+    [Fact]
+    public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
+    {
+        var page = CategoryLabelPage("A", 80, 360); // slot 4 pt: every 2nd label upright (40) beats every 3rd turned (27)
+        Assert.Equal(40, Labels(page, "A").Count);
+        Assert.DoesNotContain(page.Items, i => i is PushItem { Rotation: not 0 });
+    }
+
     [Fact]
     public void Anchored_chart_is_placed_at_its_position()
     {

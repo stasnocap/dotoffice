@@ -97,6 +97,70 @@ public sealed partial class SheetLayoutEngine
         return result;
     }
 
+    /// <summary>How Word 2021 sets the category labels under a column or line chart's horizontal axis (<see cref="PlanWordCategoryLabels"/>).</summary>
+    private sealed record WordCategoryPlan(double Angle, int Stride, List<List<string>> Lines, double Width)
+    {
+        public int MaxLines => Lines.Select(l => l.Count).DefaultIfEmpty(1).Max();
+    }
+
+    /// <summary>Set by <see cref="EmitWordChart"/> for the axis layout that draws the labels; null when the labels keep the shared layout.</summary>
+    private WordCategoryPlan? _wordCategories;
+
+    // Word 2021's category labels (measured at Arial 10 pt, bar and line charts of 3 to 80 categories, 200 to 430 pt wide; every size below is therefore stated per
+    // pt of font size and INFERRED for other sizes). The slot is the plot's width over the category count, taken before the labels narrow the plot.
+    private const double WordTurnLine = 1.11;          // em: a turned label needs this much slot for its line; 11.1 at 10 pt
+    private const double WordTurnBottom = 2.05;        // em: the plot's bottom is this + 0.7071 W above the chart's bottom when turned by 45 degrees (20.5 at 10 pt)
+    private const double WordUprightBottom = 1.26;     // em: ... this + W when turned by 90 degrees (12.6 at 10 pt)
+    private const double WordTurnLeft = 1.09;          // em: a 45 degree label's start keeps the plot's left edge at 0.7071 W + this - R / 2n (10.9 at 10 pt)
+
+    /// <summary>
+    /// Chooses how the category labels are drawn, from these rules (measured in Word 2021 at 10 pt): the labels stay upright when the widest fits its slot; else
+    /// a label of several words wraps at its spaces when its longest word fits the slot (lines 1.15 em apart); else the labels turn by 45 degrees when the slot is
+    /// at least 1.11 em / sin 45 (reading upward to the right), by 90 degrees when it is at least 1.11 em, and by 45 degrees showing every Nth label below that, with
+    /// N = ceil(1.11 em / slot). Showing every Nth label upright (N = ceil(W / slot)) wins when it shows at least as many labels as turning would (ties: upright, 45, 90).
+    /// </summary>
+    private WordCategoryPlan PlanWordCategoryLabels(IReadOnlyList<string> categories, RunProperties font, double slot)
+    {
+        int n = Math.Max(categories.Count, 1);
+        var plain = categories.Select(c => new List<string> { c.Replace('\n', ' ') }).ToList();
+        double widest = categories.Select(c => MeasureChartText(c.Replace('\n', ' '), font)).DefaultIfEmpty(0).Max();
+        if (widest <= slot) return new WordCategoryPlan(0, 1, plain, widest);
+        var words = categories.SelectMany(c => c.Replace('\n', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToList();
+        if (words.Count > categories.Count && words.All(w => MeasureChartText(w, font) <= slot))
+            return new WordCategoryPlan(0, 1, categories.Select(c => WrapLegendName(c.Replace('\n', ' '), font, slot)).ToList(), widest);
+        double turnLine = WordTurnLine * font.FontSize;
+        int uprightStride = (int)Math.Ceiling(widest / slot), uprightShown = (n + uprightStride - 1) / uprightStride;
+        (double Angle, int Stride) turn = slot >= turnLine / Math.Sin(Math.PI / 4) ? (45, 1) : slot >= turnLine ? (90, 1) : (45, (int)Math.Ceiling(turnLine / slot));
+        int turnShown = (n + turn.Stride - 1) / turn.Stride;
+        return uprightShown >= turnShown ? new WordCategoryPlan(0, uprightStride, plain, widest) : new WordCategoryPlan(turn.Angle, turn.Stride, plain, widest);
+    }
+
+    /// <summary>Draws category label <paramref name="i"/> under the axis at <paramref name="cx"/> as <paramref name="plan"/> says; <paramref name="plotBottom"/> is the axis.</summary>
+    private void PlaceWordCategory(WordCategoryPlan plan, int i, RunProperties font, double cx, double plotBottom, List<LayoutItem> items)
+    {
+        double fs = font.FontSize;
+        if (plan.Angle == 0)
+        {
+            // Every line is centered; the last baseline stays where an upright single line has it, the others stand 1.15 em above it.
+            var lines = plan.Lines[i];
+            double step = 1.15 * fs, top = plotBottom + LabelDrop(font) + (plan.MaxLines - 1) * step - (lines.Count - 1) * step;
+            for (int k = 0; k < lines.Count; k++) PlaceText(lines[k], font, cx, top + k * step, Anchor.Middle, false, 0, items);
+        }
+        else if (plan.Angle == 45)
+        {
+            // The text's end (its ink, measured) stands 2.4 right of the slot (1.9 to the baseline's corner)'s centre; the anchor is the line box's top, so the baseline's end lies (to the baseline) x sin 45 further right.
+            var (pitch, ascent, descent) = LineMetrics(font);
+            double toBaseline = (pitch - (ascent + descent)) / 2 + ascent;
+            PlaceText(plan.Lines[i][0], font, cx + 2.4 * fs / 10 - toBaseline * 0.7071, plotBottom + 5.3 * fs / 10, Anchor.End, false, 45, items);
+        }
+        else
+        {
+            // Reading bottom-up: the baseline stands 3.45 right of the slot's centre and the text ends 6.0 below the axis (measured).
+            var (pitch, ascent, descent) = LineMetrics(font);
+            PlaceText(plan.Lines[i][0], font, cx + 3.45 * fs / 10 - ((pitch - (ascent + descent)) / 2 + ascent), plotBottom + 6.0 * fs / 10, Anchor.End, false, 90, items);
+        }
+    }
+
     /// <summary>
     /// Lays out and draws a Word chart below its title (already drawn; <paramref name="band"/> is the title's height plus 9 pt, 0 without a title):
     /// the legend, then the plot area, from these measured rules (W and H are the chart's size). The plot's right edge is W - 11 and its top
@@ -208,6 +272,30 @@ public sealed partial class SheetLayoutEngine
         if (bar && chart.Ticks.Count > 0) right -= MeasureChartText(chart.Ticks[^1].Label, valueFont) / 2;
         if (right - left < 20 || bottom - top < 20) return false;
 
+        // ---- the category labels (columns and lines): they may wrap, turn or be skipped, which moves the plot's bottom, left and, when skipping, right edge
+        _wordCategories = null;
+        if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null)
+        {
+            double fs = categoryFont.FontSize, scale = fs / 10;
+            int slots = chart.CategoriesBetween ? chart.Categories.Count : Math.Max(chart.Categories.Count - 1, 1);
+            double slot = (right - left) / slots, restBottom = 6.5 + WordLineHeight(categoryFont) + 5.71 * scale;
+            var plan = PlanWordCategoryLabels(chart.Categories, categoryFont, slot);
+            _wordCategories = plan;
+            if (plan.MaxLines > 1) bottom -= (plan.MaxLines - 1) * 1.15 * fs;
+            else if (plan.Angle == 45) bottom += restBottom - (WordTurnBottom * fs + 0.7071 * plan.Width);
+            else if (plan.Angle == 90) bottom += restBottom - (WordUprightBottom * fs + plan.Width);
+            // Upright labels shown every Nth also take a little off the right: 0.41 and 1.14 pt at slots of 5.4 and 4.0 for 6.7 wide labels, none at 6.5 (fitted as half
+            // of what the label's width exceeds its slot less 0.55 pt, the dependence on the width is INFERRED).
+            if (plan.Angle == 0 && plan.Stride > 1) right -= Math.Max(0, 0.5 * (plan.Width - 0.55 * scale - slot));
+            if (plan.Angle == 45)
+            {
+                // Skipped 45 degree labels also take a little off the right (2.0 to 3.5 pt measured at 8 to 16 skipped labels; fitted, INFERRED elsewhere).
+                if (plan.Stride > 1) right -= Math.Max(0, 7.23 * scale - 0.5 * slot + 0.02 * (chart.Categories.Count - 20));
+                left = Math.Max(left, 0.7071 * plan.Width + WordTurnLeft * fs - right / (2 * slots));
+            }
+            if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
+        }
+
         // ---- the legend's entries: (key left, centre y, text left)
         var placed = new List<(int Index, double KeyLeft, double Cy, double TextLeft)>();
         if (verticalLegend)
@@ -286,7 +374,7 @@ public sealed partial class SheetLayoutEngine
             else if (scatter) EmitScatter(chart, pl, pt, pr, pb, font, items);
             else EmitAxisChart(chart, pl, pt, pr, pb, font, items);
         }
-        finally { _wordPlot = null; }
+        finally { _wordPlot = null; _wordCategories = null; }
         if (overlay) DrawLegend();
         return true;
     }
