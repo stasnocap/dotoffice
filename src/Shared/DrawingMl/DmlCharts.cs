@@ -494,14 +494,26 @@ internal static class DmlCharts
             double TopRightLength(double length)
             {
                 double pitch = lineHeight + 6 - 0.043 * fontSize0;
-                bool stacked = 11 + band + 6 + (series.Count - 1) * pitch + 11.1 <= 0.43 * template.Height;
+                bool stacked = Math.Max(11, 0.555 * fontSize0 + 5.05) + band + series.Count * pitch <= 0.43 * template.Height;
                 return stacked ? length - series.Count * pitch - 6 : length - 6;
+            }
+            // A top or bottom legend of several rows takes (rows - 1) x pitch - 1.5 more (measured in Word 2021 at 10 pt; the same at 8 and 14 pt, rows estimated here from names of 0.53 em a character).
+            double ExtraLegendRows(double pitch)
+            {
+                int n = series.Count;
+                if (n == 0) return 0;
+                double lmax = 0.9 * template.Width + 2.85, advance = 0.753 * fontSize0 - 0.3;
+                double total = series.Sum(sr => advance + sr.Name.Length * 0.53 * fontSize0);
+                if (total + 0.283 * fontSize0 * (n + 1) <= lmax) return 0;
+                double gridPitch = advance + series.Max(sr => sr.Name.Length) * 0.53 * fontSize0 + 0.283 * fontSize0;
+                int maxCols = Math.Max(1, (int)Math.Floor((lmax - 2.83) / gridPitch)), rows = (n + maxCols - 1) / maxCols;
+                return rows > 1 ? (rows - 1) * pitch - 1.5 : 0;
             }
             if (!horizontal)
             {
-                double length = template.Height - Math.Max(11, 0.9157 * fontSize0) - band - (6.5 + lineHeight + 0.571 * fontSize0);
+                double length = template.Height - Math.Max(11, 0.555 * fontSize0 + 5.05) - band - (6.5 + lineHeight + 0.571 * fontSize0);
                 // "tr": one entry pitch per entry off the top and 6 pt off the bottom (measured with 3 entries, n x pitch INFERRED)
-                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : legendPos == "tr" ? TopRightLength(length) : length;
+                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) - ExtraLegendRows(lineHeight + 6 - 0.043 * fontSize0) : legendPos == "tr" ? TopRightLength(length) : length;
             }
             double entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * 0.53 * fontSize0;
             double width = template.Width - 22;
@@ -882,8 +894,8 @@ internal static class DmlCharts
     /// by level: a chart of n series has floor(n / 6) + 1 levels c, and level k is shaded or tinted (in linear RGB) by 0.7 (2k - (c - 1)) / (c + 1).
     /// A fit, not a documented rule: within 2 per channel of all 223 series of 13 Word and PowerPoint 2016 charts of 5 to 36 series. More series and gaps in c:idx are untested.
     /// </summary>
-    /// <summary>The shade (negative) or tint (positive) of level k of n: 0.7 (2k - (n - 1)) / (n + 1), but 0.24 for the two levels of 6 to 11 series, where Word 2016 measures 5089BC and D26E2A (0.7 gives 5089BD and D36E2A).</summary>
-    internal static double LevelAmount(int k, int n) => n == 2 ? (k == 0 ? -0.24 : 0.24) : 0.7 * (2 * k - (n - 1)) / (n + 1);
+    /// <summary>The shade (negative) or tint (positive) of level k of n: 0.7 (2k - (n - 1)) / (n + 1), but -0.24 and +0.23 for the two levels of 6 to 11 series, where Word measures 5089BC, D26E2A (shade) and 97B9E0, F1A78A (tint).</summary>
+    internal static double LevelAmount(int k, int n) => n == 2 ? (k == 0 ? -0.24 : 0.23) : 0.7 * (2 * k - (n - 1)) / (n + 1);
 
     internal static Color AutomaticMarkerColor(DmlTheme theme, int index, int cycles)
     {

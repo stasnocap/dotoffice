@@ -209,12 +209,12 @@ public class ChartTests
         Assert.Equal(["0", "2", "4", "6"], ValueAxisLabels(TopRightLegendXml(true), 144, 4));
     }
 
-    private static LayoutPage CategoryLabelPage(string label, int n, double width)
+    private static LayoutPage CategoryLabelPage(string label, int n, double width, int size = 10)
     {
         var xml = ChartXml()
             .Replace("<c:ptCount val=\"3\"/><c:pt idx=\"0\"><c:v>a</c:v></c:pt><c:pt idx=\"1\"><c:v>b</c:v></c:pt><c:pt idx=\"2\"><c:v>c</c:v></c:pt>",
                 $"<c:ptCount val=\"{n}\"/>" + string.Concat(Enumerable.Range(0, n).Select(i => $"<c:pt idx=\"{i}\"><c:v>{label}</c:v></c:pt>")))
-            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+            .Replace("</c:chartSpace>", $"<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"{size * 100}\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
         return Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), width, 216))).Page;
     }
 
@@ -261,6 +261,28 @@ public class ChartTests
         Assert.Equal(6, page.Items.OfType<PushItem>().Count(p => p.Rotation == 45));
         double w = labels[0].Font.MeasureText("NorthernRegion", labels[0].FontSize);
         Assert.Equal(20.5 + 0.7071 * w, PlotBottomOffset(page), 0); // measured: 20.5 + 0.7071 W above the chart's bottom
+    }
+
+    [Fact]
+    public void Word_turns_category_labels_by_45_degrees_at_14_pt_with_a_bottom_of_6_5_plus_1_4_em_plus_the_width()
+    {
+        var page = CategoryLabelPage("NorthernRegion", 6, 300, 14);
+        var labels = page.Items.OfType<TextItem>().Where(t => t.Text == "NorthernRegion").ToList();
+        Assert.Equal(6, page.Items.OfType<PushItem>().Count(p => p.Rotation == 45));
+        double w = labels[0].Font.MeasureText("NorthernRegion", labels[0].FontSize);
+        Assert.Equal(6.5 + 1.4 * 14 + 0.7071 * w + (0.555 * 14 + 5.05 - 11), PlotBottomOffset(page), 0); // PlotBottomOffset takes the plot top as 11; at 14 pt it is 12.82 // Word 2021 measured the gap at 8, 10 and 14 pt
+    }
+
+    [Theory]
+    [InlineData(8, 18, true)]   // the test font sets 18 n at 89.0 pt at 8 pt: it fits the 90.8 pt a right legend allows (W / 3 less one line height, 9.2); a fixed 11.5 pt would break it
+    [InlineData(14, 10, false)] // 86.5 pt at 14 pt does not fit the 83.9 pt (it would fit a fixed 88.5)
+    public void A_Word_right_legend_wraps_a_name_at_a_third_of_the_chart_less_one_line_as_measured_in_Word_2021(int size, int count, bool fits)
+    {
+        string word = new('n', count);
+        var xml = ChartXml().Replace("<c:v>S0</c:v>", $"<c:v>x {word}</c:v>").Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"r\"/></c:legend>")
+            .Replace("</c:chartSpace>", $"<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"{size * 100}\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 300, 216)));
+        Assert.Equal(fits, page.Items.OfType<TextItem>().Any(t => t.Text == word));
     }
 
     [Fact]
@@ -313,6 +335,17 @@ public class ChartTests
         Assert.Contains(Color.TryParseHex("D26E2A")!.Value, fills);
         Assert.DoesNotContain(Color.TryParseHex("5089BD")!.Value, fills);
         Assert.DoesNotContain(Color.TryParseHex("D36E2A")!.Value, fills);
+    }
+
+    [Fact]
+    public void A_Word_chart_of_eleven_series_tints_the_second_level_by_0_23_as_measured_in_Word_2021()
+    {
+        var one = ChartXml();
+        var ser = one[one.IndexOf("<c:ser>", StringComparison.Ordinal)..(one.IndexOf("</c:ser>", StringComparison.Ordinal) + 8)];
+        var xml = one.Replace(ser, string.Concat(Enumerable.Range(0, 11).Select(i => ser.Replace("<c:idx val=\"0\"/><c:order val=\"0\"/>", $"<c:idx val=\"{i}\"/><c:order val=\"{i}\"/>"))));
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 500, 250)));
+        var fills = page.Items.OfType<RectItem>().Where(r => r.Width > 5 && r.Height > 5).Select(r => r.Fill).ToList();
+        foreach (var hex in new[] { "5089BC", "D26E2A", "97B9E0", "F1A78A", "BFBFBF", "FFD184", "8FA2D4" }) Assert.Contains(Color.TryParseHex(hex)!.Value, fills);
     }
 
     [Fact]

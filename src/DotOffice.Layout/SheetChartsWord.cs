@@ -108,10 +108,10 @@ public sealed partial class SheetLayoutEngine
 
     // Word 2021's category labels (measured at Arial 10 pt, bar and line charts of 3 to 80 categories, 200 to 430 pt wide; every size below is therefore stated per
     // pt of font size and INFERRED for other sizes). The slot is the plot's width over the category count, taken before the labels narrow the plot.
-    private const double WordTurnLine = 1.11;          // em: a turned label needs this much slot for its line; 11.1 at 10 pt
-    private const double WordTurnBottom = 2.05;        // em: the plot's bottom is this + 0.7071 W above the chart's bottom when turned by 45 degrees (20.5 at 10 pt)
-    private const double WordUprightBottom = 1.26;     // em: ... this + W when turned by 90 degrees (12.6 at 10 pt)
-    private const double WordTurnLeft = 1.09;          // em: a 45 degree label's start keeps the plot's left edge at 0.7071 W + this - R / 2n (10.9 at 10 pt)
+    private const double WordTurnLine = 1.113;         // em: a turned label needs this much slot for its line; 11.1 at 10 pt; 1.113 fits the thresholds at 8, 10 and 14 pt (every case within 0.1 pt of the limit)
+    private const double WordTurnBottom = 1.40;        // em: the plot's bottom is 6.5 + this + 0.7071 W above the chart's bottom when turned by 45 degrees (20.5 at 10 pt; 17.7 / 26.1 + ... measured at 8 / 14 pt)
+    private const double WordUprightBottom = 0.61;     // em: ... 6.5 + this + W when turned by 90 degrees (12.6 at 10 pt; 11.4 / 15.0 + ... measured at 8 / 14 pt)
+    private const double WordTurnLeft = 10.9;          // pt, not scaling with the font (measured at 8, 10 and 14 pt): a 45 degree label's start keeps the plot's left edge at 0.7071 W + this - R / 2n
 
     /// <summary>
     /// Chooses how the category labels are drawn, from these rules (measured in Word 2021 at 10 pt): the labels stay upright when the widest fits its slot; else
@@ -141,9 +141,9 @@ public sealed partial class SheetLayoutEngine
         double fs = font.FontSize;
         if (plan.Angle == 0)
         {
-            // Every line is centered; the last baseline stays where an upright single line has it, the others stand 1.15 em above it.
+            // Every line is centered and every label starts on the first row (top aligned: a label of fewer lines than the tallest leaves its last rows empty; measured at 8, 10 and 14 pt); with the plot giving way by a line per extra row, the tallest label's last baseline stays where an upright single line has it.
             var lines = plan.Lines[i];
-            double step = 1.15 * fs, top = plotBottom + LabelDrop(font) + (plan.MaxLines - 1) * step - (lines.Count - 1) * step;
+            double step = 1.15 * fs, top = plotBottom + LabelDrop(font);
             for (int k = 0; k < lines.Count; k++) PlaceText(lines[k], font, cx, top + k * step, Anchor.Middle, false, 0, items);
         }
         else if (plan.Angle == 45)
@@ -189,11 +189,11 @@ public sealed partial class SheetLayoutEngine
         double entryPitch = WordLineHeight(legendFont) + 6.0 - 0.043 * legendFont.FontSize; // 14.85 / 17.07 / 21.49 pt measured at 8 / 10 / 14 pt
         double rowHeight = entryPitch + 6.0;
 
-        // Right and left legends wrap a name wider than W / 3 - 11.5 (measured, 40+ samples at W 236..480 and 8 / 10 pt: greedy at spaces, a single word that is too
-        // wide breaks by character; the 11.5 not scaling with the font size is UNMEASURED). The legend's text width is then the widest line, and the legend box is at
+        // Right and left legends wrap a name wider than W / 3 - 1.15 em (measured, 40+ samples at W 236..480 and 10 pt, then at 8, 9, 12 and 14 pt: greedy at spaces, a single word that is too
+        // wide breaks by character; 11.5 pt at 10 pt, but 8 and 14 pt show it scales with the font, as one line height). The legend's text width is then the widest line, and the legend box is at
         // most W / 3 + 9.0 wide (so a line up to 1.5 pt over the limit is not wrapped, it just moves plot and legend less). Top and bottom legends never wrap (measured).
         bool verticalLegend = hasLegend && chart.Legend is LegendPosition.Right or LegendPosition.Left;
-        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, w / 3 - 11.5) : [e.Name]).ToList();
+        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, w / 3 - 1.15 * legendFont.FontSize) : [e.Name]).ToList();
         int maxLines = lines.Select(l => l.Count).DefaultIfEmpty(1).Max();
         double lineStep = 1.15 * legendFont.FontSize; // lines inside an entry: 11.50 / 9.20 pt measured at 10 / 8 pt
         if (verticalLegend)
@@ -233,8 +233,8 @@ public sealed partial class SheetLayoutEngine
             : chart.Ticks.Select(t => MeasureChartText(t.Label, valueFont)).DefaultIfEmpty(0).Max();
         var bottomFont = bar ? valueFont : categoryFont;
         
-        // The first value label is centered on the plot's top, which gives way to it: 12.82 at 14 pt, 11 at 8 and 10 pt (one sample at 14 pt; 0.9157 em is INFERRED).
-        double topMargin = bar || pie ? 11 : Math.Max(11, 0.9157 * valueFont.FontSize);
+        // The first value label is centered on the plot's top, which gives way to it: 12.82 at 14 pt, 11.71 at 12 pt, 11 at 8 and 10 pt (a line through the 12 and 14 pt samples; INFERRED beyond them).
+        double topMargin = bar || pie ? 11 : Math.Max(11, 0.555 * valueFont.FontSize + 5.05);
         double left = pie ? 11 : 6.5 + labelWidth + WordAxisGap(bar ? categoryFont : valueFont), right = w - 11, top = topMargin + band, bottom = pie ? h - 11 : h - (6.5 + WordLineHeight(bottomFont) + 5.71 * bottomFont.FontSize / 10);
         double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
@@ -253,8 +253,9 @@ public sealed partial class SheetLayoutEngine
         // a tr legend's band starts 6.0 below the normal plot top whether it stands beside the plot or above it, and the stacked plot also gives way by 6.0 at the bottom.
         const double legendPad = 6.0;
         bool topRight = hasLegend && chart.WordLegendTopRight;
-        bool trStacked = topRight && top + legendPad + (entries.Count - 1) * entryPitch + 11.1 <= 0.43 * h;
-        double trFirstBaseline = top + legendPad + 0.7 + (trStacked ? 0 : 6.0);
+        // Stacked, the plot top is n x entry pitch below the normal top (55.54 / 77.27 measured at 8 / 14 pt, 3 entries); the first key's centre is the pad plus half a pitch below the band (6.0 beside the plot more).
+        bool trStacked = topRight && top + entries.Count * entryPitch <= 0.43 * h;
+        double trFirstCentre = band + legendPad + entryPitch / 2 + (trStacked ? 0 : 6.0);
         if (hasLegend && !overlay)
             switch (chart.Legend)
             {
@@ -262,7 +263,7 @@ public sealed partial class SheetLayoutEngine
                     right -= legendShift;
                     // The last label of the horizontal value axis is centered on the plot's edge and the plot gives way by half of it (bars and scatter).
                     if (scatter && chart.XTicks.Count > 0) right -= MeasureChartText(chart.XTicks[^1].Label, categoryFont) / 2;
-                    if (topRight) { top += legendPad; if (trStacked) { top += (entries.Count - 1) * entryPitch + 11.1; bottom -= legendPad; } }
+                    if (topRight) { if (trStacked) { top += entries.Count * entryPitch; bottom -= legendPad; } else top += legendPad; }
                     break;
                 case LegendPosition.Left: left += legendShift; break;
                 case LegendPosition.Top: top += rowHeight + extraRows; break;
@@ -282,8 +283,8 @@ public sealed partial class SheetLayoutEngine
             var plan = PlanWordCategoryLabels(chart.Categories, categoryFont, slot);
             _wordCategories = plan;
             if (plan.MaxLines > 1) bottom -= (plan.MaxLines - 1) * 1.15 * fs;
-            else if (plan.Angle == 45) bottom += restBottom - (WordTurnBottom * fs + 0.7071 * plan.Width);
-            else if (plan.Angle == 90) bottom += restBottom - (WordUprightBottom * fs + plan.Width);
+            else if (plan.Angle == 45) bottom += restBottom - (6.5 + WordTurnBottom * fs + 0.7071 * plan.Width);
+            else if (plan.Angle == 90) bottom += restBottom - (6.5 + WordUprightBottom * fs + plan.Width);
             // Upright labels shown every Nth also take a little off the right: 0.41 and 1.14 pt at slots of 5.4 and 4.0 for 6.7 wide labels, none at 6.5 (fitted as half
             // of what the label's width exceeds its slot less 0.55 pt, the dependence on the width is INFERRED).
             if (plan.Angle == 0 && plan.Stride > 1) right -= Math.Max(0, 0.5 * (plan.Width - 0.55 * scale - slot));
@@ -291,7 +292,7 @@ public sealed partial class SheetLayoutEngine
             {
                 // Skipped 45 degree labels also take a little off the right (2.0 to 3.5 pt measured at 8 to 16 skipped labels; fitted, INFERRED elsewhere).
                 if (plan.Stride > 1) right -= Math.Max(0, 7.23 * scale - 0.5 * slot + 0.02 * (chart.Categories.Count - 20));
-                left = Math.Max(left, 0.7071 * plan.Width + WordTurnLeft * fs - right / (2 * slots));
+                left = Math.Max(left, 0.7071 * plan.Width + WordTurnLeft - right / (2 * slots));
             }
             if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
         }
@@ -306,7 +307,7 @@ public sealed partial class SheetLayoutEngine
             double textLeft = chart.Legend == LegendPosition.Right ? w - 10.05 - textWidth : 10.76 + 0.25 * (legendFont.FontSize - 10) + Enumerable.Range(0, entries.Count).Max(Advance);
             // Centered on (H + band) / 2 whether or not entries are cut (measured: 10 of 12 shown; the left legend is INFERRED the same). A tr legend starts at the top.
             // The first key sits beside the first line: its centre is (H + band) / 2 - shown x pitch / 2 + single pitch / 2 (measured with 1, 2 and 3 lines).
-            double first = (h + band) / 2 - shown * stackPitch / 2 + entryPitch / 2, trFirst = trFirstBaseline - 3.15;
+            double first = (h + band) / 2 - shown * stackPitch / 2 + entryPitch / 2, trFirst = trFirstCentre;
             for (int i = 0; i < shown; i++)
                 placed.Add((i, textLeft - Advance(i), topRight ? trFirst + i * entryPitch : first + i * stackPitch, textLeft));
         }
