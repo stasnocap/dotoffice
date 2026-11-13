@@ -79,13 +79,16 @@ public class SheetChartLayoutTests
     [Fact]
     public void A_Word_charts_right_legend_with_more_entries_than_fit_is_centered_like_one_that_fits()
     {
-        // Measured in Word 2016 (1 sample, 12 series at H 216 with a title: 10 shown): the shown keys are centered on (H + band) / 2, not 5.28 pt higher.
+        // Measured in Word 2016 (1 sample, 12 series at H 216 with a title: 10 shown): the shown keys are centered on (H + band) / 2, entries floor((0.9 (H - band) + 2.76) / 17.07).
         var series = Enumerable.Range(0, 12).Select(_ => Series(Red, 5, 10, 20)).ToArray();
-        var keys = Keys(Page(WordChart(ChartKind.Column, LegendPosition.Right, series) with { Title = "T" }));
-        Assert.True(keys.Count is > 1 and < 12);
-        var fits = Keys(Page(WordChart(ChartKind.Column, LegendPosition.Right, series[..3]) with { Title = "T" }));
-        Assert.Equal((fits[0].Y + fits[^1].Y) / 2, (keys[0].Y + keys[^1].Y) / 2, 2);
-    }
+        var titled = WordChart(ChartKind.Column, LegendPosition.Right, series) with { Title = "T" };
+        double band = PlotOf(Page(titled with { Legend = LegendPosition.None })).Top - OriginY - 11;
+        int shown = (int)Math.Floor((0.9 * (216 - band) + 2.76) / EntryPitch);
+        var keys = Keys(Page(titled));
+        Assert.Equal(shown, keys.Count);
+        Assert.InRange(shown, 2, 11);
+        Assert.Equal(OriginY + (216 + band) / 2, (keys[0].Y + keys[^1].Y + 5.03) / 2, 0.2);
+            }
 
     [Fact]
     public void A_Word_charts_overlaid_right_legend_leaves_the_plot_at_full_width_and_is_drawn_after_it()
@@ -94,8 +97,9 @@ public class SheetChartLayoutTests
         var plain = WordChart(ChartKind.Column, LegendPosition.Right, Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20));
         var overlaid = Page(plain with { LegendOverlay = true });
         var none = PlotOf(Page(plain with { Legend = LegendPosition.None }));
-        Assert.Equal(none.Right, PlotOf(overlaid).Right, 2);
-        Assert.Equal(none.Top, PlotOf(overlaid).Top, 2);
+        Assert.Equal(OriginX + 360 - 11, PlotOf(overlaid).Right, 0.2);
+        Assert.Equal(none.Right, PlotOf(overlaid).Right, 0.2);
+        Assert.Equal(none.Top, PlotOf(overlaid).Top, 0.2);
         Assert.Equal(Keys(Page(plain)).Select(k => (k.X, k.Y)), Keys(overlaid).Select(k => (k.X, k.Y)));
         Assert.True(overlaid.Items.IndexOf(Keys(overlaid)[0]) > overlaid.Items.IndexOf(overlaid.Items.OfType<LineItem>().First(l => l.X2 - l.X1 > 50)));
     }
@@ -1417,62 +1421,112 @@ public class SheetChartLayoutTests
     private static SheetChart NamedLegendChart(LegendPosition legend, double width, double height, params string[] names) =>
         WordChart(ChartKind.Column, legend, names.Select(n => new ChartSeries(n, [5, 10, 20], Red)).ToArray()) with { Width = width, Height = height, Title = null };
 
-    /// <summary>The single-line entry pitch in the test font (17.07 pt for Arial).</summary>
-    private static double SinglePitch()
+    private static double Width(TextItem t) => t.Font.MeasureText(t.Text, t.FontSize);
+
+    private const double Em = 10;
+
+    private static double NameWidth(LayoutPage page, string name) { var t = page.Items.OfType<TextItem>().First(); return t.Font.MeasureText(name, t.FontSize); }
+
+    /// <summary>The widths of the text lines drawn for the legend, whose words start with <paramref name="prefix"/> (words of a line share a baseline).</summary>
+    private static List<double> LineWidths(LayoutPage page, char prefix) =>
+        page.Items.OfType<TextItem>().Where(t => t.Text.Length > 0 && t.Text[0] == prefix).GroupBy(t => Math.Round(t.Baseline, 2)).OrderBy(g => g.Key)
+            .Select(g => g.Max(t => t.X + Width(t)) - g.Min(t => t.X)).ToList();
+
+    /// <summary>
+    /// The single-line entry pitch in the test font: 17.07 pt for Arial (line height 11.5 + 5.57), but the test font (Noto Sans) is taller, so the base is read from
+    /// two entries and checked to be at least Arial's; every other number below is Word's, absolute.
+    /// </summary>
+    private static double EntryPitch
     {
-        var k = Keys(Page(NamedLegendChart(LegendPosition.Right, 360, 216, "A", "B")));
-        return k[1].Y - k[0].Y;
+        get
+        {
+            var k = Keys(Page(NamedLegendChart(LegendPosition.Right, 360, 216, "A", "B")));
+            Assert.InRange(k[1].Y - k[0].Y, 17.07, 21);
+            return k[1].Y - k[0].Y;
+        }
     }
 
     [Fact]
     public void A_Word_charts_right_legend_wraps_long_names_and_every_entry_takes_the_tallest_ones_height()
     {
-        // Measured in Word 2016 (40+ samples): names wrap at W / 3 - 11.5, an entry with two lines is 1.106 em (11.06 pt) taller, lines are 11.5 apart, the first key beside the first line.
-        double single = SinglePitch();
+        // Measured in Word 2016 (40+ samples): names wrap at W / 3 - 11.5 = 108.5 at W 360, lines 1.15 em apart, pitch 17.07 + 1.106 em per extra line, box min(widest + 22.04, W / 3 + 9.0).
         var page = Page(NamedLegendChart(LegendPosition.Right, 360, 216, "Short", "nnnn nnnn nnnn nnnn nnnn nnnn", "Mid"));
         var keys = Keys(page);
         Assert.Equal(3, keys.Count);
-        Assert.Equal(single + 11.06, keys[1].Y - keys[0].Y, 1);
-        Assert.Equal(single + 11.06, keys[2].Y - keys[1].Y, 1);
-        var lines = page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('n')).Select(t => Math.Round(t.Baseline, 2)).Distinct().OrderBy(b => b).ToList();
-        Assert.True(lines.Count >= 2);
-        Assert.Equal(11.5, lines[1] - lines[0], 1);
-        double centre = OriginY + 108 - 3 * (single + 11.06) / 2 + single / 2; // (H + band) / 2 - n x pitch / 2 + single pitch / 2
-        Assert.Equal(centre - 2.515, keys[0].Y, 1);
+        double pitch = EntryPitch + 1.106 * Em; // two lines: the long name is 29 n-chars wide, over 108.5, under 2 x 108.5
+        Assert.Equal(pitch, keys[1].Y - keys[0].Y, 0.2);
+        Assert.Equal(pitch, keys[2].Y - keys[1].Y, 0.2);
+        var texts = page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('n')).OrderBy(t => t.Baseline).ToList();
+        Assert.Equal(2, texts.Select(t => Math.Round(t.Baseline, 2)).Distinct().Count());
+        Assert.Equal(1.15 * Em, texts[^1].Baseline - texts[0].Baseline, 0.2);
+        var widths = LineWidths(page, 'n');
+        Assert.All(widths, w => Assert.True(w <= 360 / 3.0 - 11.5));
+        double centre = OriginY + 108 - 3 * pitch / 2 + EntryPitch / 2; // (H + band) / 2 - n x pitch / 2 + single pitch / 2
+        Assert.Equal(centre - 2.515, keys[0].Y, 0.2);
+        double widest = widths.Max();
+        double box = Math.Min(widest + 22.04, 360 / 3.0 + 9.0);
+        Assert.Equal(OriginX + 360 - 11 - box, PlotOf(page).Right, 0.2);
+    }
+
+    [Fact]
+    public void A_Word_charts_right_legend_box_is_capped_at_a_third_of_the_width_plus_9_and_long_words_break_by_character()
+    {
+        // Measured in Word 2016: a single word wider than W / 3 - 11.5 breaks by character; the box is then min(widest + 22.04, W / 3 + 9.0) = 129 at W 360.
+        var page = Page(NamedLegendChart(LegendPosition.Right, 360, 216, new string('n', 40)));
+        var texts = page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('n')).ToList();
+        Assert.True(texts.Count >= 2);
+        Assert.All(texts, t => Assert.True(Width(t) <= 360 / 3.0 - 11.5));
+        Assert.Equal(OriginX + 360 - 11 - Math.Min(texts.Max(Width) + 22.04, 129), PlotOf(page).Right, 0.2);
     }
 
     [Fact]
     public void A_Word_charts_right_legend_shows_floor_of_09_times_the_height_plus_276_over_the_pitch_entries()
     {
         // Measured switch points in Arial (pitch 17.07): without a title 9 entries at H 186 and 10 at H 187.
-        double single = SinglePitch();
         string[] names = Enumerable.Range(1, 12).Select(i => "S" + i).ToArray();
         foreach (int k in new[] { 4, 7, 9 })
         {
-            double edge = (k * single - 2.76) / 0.9;
+            double edge = (k * EntryPitch - 2.76) / 0.9;
             Assert.Equal(k - 1, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge - 0.5, names))).Count);
             Assert.Equal(k, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge + 0.5, names))).Count);
         }
-    }
+            }
 
     [Fact]
     public void A_Word_charts_bottom_legend_is_one_row_with_equal_gaps_and_a_grid_of_equal_rows_when_it_does_not_fit()
     {
-        // Measured in Word 2016: a row has equal gaps (0.2 sum of text widths + 4.82 n + 2.90) / (n + 1); more than fits makes a grid by rows, 17.06 apart, the last 1.50 lower.
-        double single = SinglePitch();
-        var one = Keys(Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, "Series 1", "Series 2", "Series 3")));
+        // Measured in Word 2016: Lmax = 326.85 at W 360. One row when T + 2.83 (n + 1) <= Lmax with equal gaps min(0.2 Sw + 0.482 em n + 1.28 + 0.16 em, Lmax - T) / (n + 1);
+        // otherwise a grid: column pitch = widest entry + 0.283 em, rows = ceil(n / maxCols), cols = ceil(n / rows), rows 17.06 apart, the last 1.50 lower, the plot gives way by (rows - 1) x 17.06 - 1.50.
+        const double lmax = 326.85, keyAdvance = 5.03 + 2.2;
+        var names3 = new[] { "Series 1", "Series 2", "Series 3" };
+        var page1 = Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, names3));
+        var one = Keys(page1);
+        var w3 = names3.Select(n => NameWidth(page1, n)).ToList();
+        double sw = w3.Sum(), total = sw + 3 * keyAdvance;
+        double gap = Math.Min(0.2 * sw + 0.482 * Em * 3 + 1.28 + 0.16 * Em, lmax - total) / 4;
         Assert.Equal(3, one.Count);
-        Assert.Equal(one[1].X - one[0].X, one[2].X - one[1].X, 2);
-        Assert.Equal(one[0].Y, one[2].Y, 2);
-        var grid = Keys(Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, Enumerable.Range(1, 12).Select(i => "Series " + i).ToArray())));
+        Assert.Equal(keyAdvance + w3[0] + gap, one[1].X - one[0].X, 0.2);
+        Assert.Equal(keyAdvance + w3[1] + gap, one[2].X - one[1].X, 0.2);
+        Assert.Equal(one[0].Y, one[2].Y, 0.2);
+        double plotBottom1 = PlotOf(page1).Bottom;
+
+        var names = Enumerable.Range(1, 12).Select(i => "Series " + i).ToArray();
+        var pageG = Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, names));
+        var grid = Keys(pageG);
+        var wg = names.Select(n => NameWidth(pageG, n)).ToList();
+        double colPitch = wg.Max() + keyAdvance + 0.283 * Em;
+        int maxCols = (int)Math.Floor((lmax - 2.83) / colPitch), rowsN = (12 + maxCols - 1) / maxCols, cols = (12 + rowsN - 1) / rowsN;
+        Assert.True(sw + 2.83 * 4 <= lmax && 12 * keyAdvance + wg.Sum() + 2.83 * 13 > lmax);
         Assert.Equal(12, grid.Count);
         var rows = grid.GroupBy(k => Math.Round(k.Y, 1)).OrderBy(g => g.Key).ToList();
-        Assert.Equal(2, rows.Count);
-        Assert.All(rows, r => Assert.Equal(6, r.Count()));
-        Assert.Equal(single, rows[1].Key - rows[0].Key, 1);
-        Assert.Equal(one[0].Y + 1.5, rows[1].Key, 1);
+        Assert.Equal(rowsN, rows.Count);
+        Assert.All(rows, r => Assert.Equal(cols, r.Count()));
+        Assert.Equal(EntryPitch - 0.01, rows[1].Key - rows[0].Key, 0.2); // 17.06 for Arial
+        Assert.Equal(one[0].Y + 1.5, rows[^1].Key, 0.2);
         var first = rows[0].OrderBy(k => k.X).ToList();
-        Assert.Equal(first[1].X - first[0].X, first[5].X - first[4].X, 2); // one column pitch
-        Assert.Equal(first[0].X, rows[1].OrderBy(k => k.X).First().X, 2); // columns line up
+        Assert.Equal(colPitch, first[1].X - first[0].X, 0.2);
+        Assert.Equal(colPitch, first[cols - 1].X - first[cols - 2].X, 0.2);
+        Assert.Equal(first[0].X, rows[1].OrderBy(k => k.X).First().X, 0.2);
+        Assert.Equal(plotBottom1 - ((rowsN - 1) * (EntryPitch - 0.01) - 1.50), PlotOf(pageG).Bottom, 0.2);
     }
 }
