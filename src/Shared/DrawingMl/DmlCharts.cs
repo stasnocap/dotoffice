@@ -485,16 +485,23 @@ internal static class DmlCharts
             double band = 0;
             if (titleElement0 is not null && (string?)Child(chart, "autoTitleDeleted")?.Attribute("val") != "1")
             {
-                double titleFont = Descendant(Path(titleElement0, "tx", "rich"), "rPr", "defRPr")?.Attribute("sz") is { } tsz && double.TryParse(tsz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tz) && tz > 0 ? tz / 100 : Child(space, "txPr") is null ? fontSize0 : Math.Round(fontSize0 * 1.2, 1); // Word without a chart-level txPr: a plain title has the text size
+                double titleFont = Descendant(Path(titleElement0, "tx", "rich"), "rPr", "defRPr")?.Attribute("sz") is { } tsz && double.TryParse(tsz.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tz) && tz > 0 ? tz / 100 : context.WordChartFrame ? 18 : Child(space, "txPr") is null ? fontSize0 : Math.Round(fontSize0 * 1.2, 1); // Word 2021: a plain title is 18 pt
                 band = titleFont * 1.15 + 9;
             }
             var legendElement0 = Child(chart, "legend");
             string? legendPos = legendElement0 is null ? null : (string?)Child(legendElement0, "legendPos")?.Attribute("val") ?? "r";
+            // The top-right legend stacks above the plot only while the plot top stays within 0.43 H (measured, see SheetChartsWord); beside the plot it takes 6 pt off the top only.
+            double TopRightLength(double length)
+            {
+                double pitch = lineHeight + 6 - 0.043 * fontSize0;
+                bool stacked = 11 + band + 6 + (series.Count - 1) * pitch + 11.1 <= 0.43 * template.Height;
+                return stacked ? length - series.Count * pitch - 6 : length - 6;
+            }
             if (!horizontal)
             {
                 double length = template.Height - Math.Max(11, 0.9157 * fontSize0) - band - (6.5 + lineHeight + 0.571 * fontSize0);
                 // "tr": one entry pitch per entry off the top and 6 pt off the bottom (measured with 3 entries, n x pitch INFERRED)
-                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : legendPos == "tr" ? length - series.Count * (lineHeight + 6 - 0.043 * fontSize0) - 6 : length;
+                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : legendPos == "tr" ? TopRightLength(length) : length;
             }
             double entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * 0.53 * fontSize0;
             double width = template.Width - 22;

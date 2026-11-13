@@ -184,6 +184,31 @@ public class ChartTests
         Assert.False(title.SyntheticBold);
     }
 
+    private static string TopRightLegendXml(bool title)
+    {
+        string ser(int i, double a, double b, double c) =>
+            $"<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/><c:tx><c:v>Ser{(char)(65 + i)}</c:v></c:tx>" + Values("val", a, b, c) + "</c:ser>";
+        var xml = ChartXml().Replace("<c:ser>", "<c:SER>").Replace("</c:ser>", "</c:SER>");
+        int s0 = xml.IndexOf("<c:SER>"), s1 = xml.IndexOf("</c:SER>") + "</c:SER>".Length;
+        xml = xml[..s0] + ser(0, 3, 5, 4) + ser(1, 4, 4.5, 4.3) + ser(2, 5, 4, 4.6) + xml[s1..];
+        xml = xml.Replace("<c:plotVisOnly", "<c:legend><c:legendPos val=\"tr\"/></c:legend><c:plotVisOnly");
+        return title ? xml.Replace("<c:autoTitleDeleted val=\"1\"/>", "<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title><c:autoTitleDeleted val=\"0\"/>") : xml;
+    }
+
+    private static List<string> ValueAxisLabels(string xml, double height, int count)
+    {
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, height)));
+        return page.Items.OfType<TextItem>().Where(t => t.Text.Length == 1 && char.IsDigit(t.Text[0])).Select(t => t.Text).Take(count).ToList(); // the legend entries read "1", "2", "3" after the axis labels
+    }
+
+    [Fact]
+    public void A_Word_value_axis_weighs_its_step_against_the_plot_the_top_right_legend_leaves_as_measured_in_Word_2021()
+    {
+        // 144 pt: the three entries do not fit above the plot, so it keeps 103.29 pt and Word shows steps of 1 (7 labels) without a title; with a title it keeps 73.6 pt and shows steps of 2.
+        Assert.Equal(["0", "1", "2", "3", "4", "5", "6"], ValueAxisLabels(TopRightLegendXml(false), 144, 7));
+        Assert.Equal(["0", "2", "4", "6"], ValueAxisLabels(TopRightLegendXml(true), 144, 4));
+    }
+
     [Fact]
     public void Anchored_chart_is_placed_at_its_position()
     {
