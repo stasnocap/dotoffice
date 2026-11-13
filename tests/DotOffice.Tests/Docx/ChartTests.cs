@@ -80,7 +80,11 @@ public class ChartTests
     public void A_chart_has_Words_default_frame()
     {
         var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, ChartXml()), 300, 200)));
-        Assert.Contains(page.Items, i => i is RectItem r && r.Fill == new Color(0x89, 0x89, 0x89) || i is LineItem l && l.Color == new Color(0x89, 0x89, 0x89) && Math.Abs(l.Width - 0.5) < 1e-6);
+        // Stroked 0.5 pt, centred on the frame's edge (measured in Word 2021).
+        var frame = Assert.Single(page.Items.OfType<PathItem>(), p => p.Stroke == new Color(0x89, 0x89, 0x89) && Math.Abs(p.LineWidth - 0.5) < 1e-6);
+        Assert.Equal(4, frame.Points.Count(p => p.Kind != PathPointKind.Close));
+        // Word fills a plot area without a stated fill white.
+        Assert.Contains(page.Items, i => i is RectItem r && r.Fill == Color.White && r.Width < 300 && r.Height < 200 && r.X > 0);
     }
 
     [Theory]

@@ -185,9 +185,12 @@ public sealed partial class SheetLayoutEngine
         // 6.7 below the normal plot top, the plot top 10.4 below the last baseline (so (n - 1) x pitch + 11.1 below the normal top), the bottom 6.0 up. Word does that only while
         // the plot top stays within 0.43 H (stacked up to 0.425, beside from 0.432); otherwise the entries sit beside the plot: the plot keeps its normal top and
         // bottom and the first baseline is 6.0 lower (12.7 below the normal top). Normal tops here are measured 6.0 below this code's top (11 + band).
+        // The 6.0 pt is the legend's own padding above its first entry, the same pad a top legend has above its row and a bottom legend below it (rowHeight = pitch + 6.0):
+        // a tr legend's band starts 6.0 below the normal plot top whether it stands beside the plot or above it, and the stacked plot also gives way by 6.0 at the bottom.
+        const double legendPad = 6.0;
         bool topRight = hasLegend && chart.WordLegendTopRight;
-        bool trStacked = topRight && top + 6.0 + (entries.Count - 1) * entryPitch + 11.1 <= 0.43 * h;
-        double trFirstBaseline = top + 6.0 + 0.7 + (trStacked ? 0 : 6.0);
+        bool trStacked = topRight && top + legendPad + (entries.Count - 1) * entryPitch + 11.1 <= 0.43 * h;
+        double trFirstBaseline = top + legendPad + 0.7 + (trStacked ? 0 : 6.0);
         if (hasLegend && !overlay)
             switch (chart.Legend)
             {
@@ -195,7 +198,7 @@ public sealed partial class SheetLayoutEngine
                     right -= legendShift;
                     // The last label of the horizontal value axis is centered on the plot's edge and the plot gives way by half of it (bars and scatter).
                     if (scatter && chart.XTicks.Count > 0) right -= MeasureChartText(chart.XTicks[^1].Label, categoryFont) / 2;
-                    if (topRight) { top += 6.0; if (trStacked) { top += (entries.Count - 1) * entryPitch + 11.1; bottom -= 6.0; } }
+                    if (topRight) { top += legendPad; if (trStacked) { top += (entries.Count - 1) * entryPitch + 11.1; bottom -= legendPad; } }
                     break;
                 case LegendPosition.Left: left += legendShift; break;
                 case LegendPosition.Top: top += rowHeight + extraRows; break;

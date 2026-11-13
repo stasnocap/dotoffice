@@ -50,10 +50,18 @@ public sealed partial class SheetLayoutEngine
         if (chart.Border is { } border)
         {
             double bw = chart.BorderWidth;
-            items.Add(new RectItem(x, y, w, bw, border));
-            items.Add(new RectItem(x, y + h - bw, w, bw, border));
-            items.Add(new RectItem(x, y, bw, h, border));
-            items.Add(new RectItem(x + w - bw, y, bw, h, border));
+            if (chart.WordLayout)
+            {
+                // Word strokes the frame centred on its edge (measured: 0,0 to W,H at 0.5 pt).
+                items.Add(new PathItem([new(x, y, PathPointKind.Move), new(x + w, y, PathPointKind.Line), new(x + w, y + h, PathPointKind.Line), new(x, y + h, PathPointKind.Line), new(0, 0, PathPointKind.Close)], null, border, bw));
+            }
+            else
+            {
+                items.Add(new RectItem(x, y, w, bw, border));
+                items.Add(new RectItem(x, y + h - bw, w, bw, border));
+                items.Add(new RectItem(x, y, bw, h, border));
+                items.Add(new RectItem(x + w - bw, y, bw, h, border));
+            }
         }
 
         var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = chart.FontSize, Color = chart.DefaultTextColor ?? chart.TextColor ?? ChartText };
@@ -67,7 +75,11 @@ public sealed partial class SheetLayoutEngine
             if (chart.TitlePosition is { } at) PlaceText(chart.Title, titleFont, x + at.X * w, y + at.Y * h, Anchor.Start, false, 0, items);
             else
             {
-                top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
+                // Word sets the title's baseline an ascent plus 0.0633 em (1.14 pt at 18 pt; INFERRED for other sizes) below the 7 pt padding, without the shared line's half-leading
+                // (measured at 18 pt, Word 2021).
+                double lift = 0;
+                if (chart.WordLayout) { var (pitch, ascent, descent) = LineMetrics(titleFont); lift = 0.0633 * titleFont.FontSize - (pitch - (ascent + descent)) / 2; }
+                top += PlaceText(chart.Title, titleFont, (left + right) / 2, top + lift, Anchor.Middle, false, 0, items) + 4;
                 wordBand = WordLineHeight(titleFont) + 9;
             }
         }

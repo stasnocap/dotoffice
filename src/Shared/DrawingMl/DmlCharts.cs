@@ -747,7 +747,8 @@ internal static class DmlCharts
         Color? background = context.FramedChartArea ? Color.White : null, border = context.FramedChartArea ? new Color(0x86, 0x86, 0x86) : null;
         double borderWidth = 0.75;
         if (context.WordChartFrame) (background, border, borderWidth) = (Color.White, new Color(0x89, 0x89, 0x89), 0.5);
-        Color? plotBackground = null, defaultText = null;
+        // Word fills the plot area of a column, bar, line or scatter chart white when no fill is stated (measured, Word 2021).
+        Color? plotBackground = context.WordChartFrame && kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter ? Color.White : null, defaultText = null;
         var (styleP, styleBlock) = StyleParts(chartStyle);
         if (styleBlock == 4)
         {
