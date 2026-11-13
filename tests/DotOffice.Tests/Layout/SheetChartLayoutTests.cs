@@ -116,23 +116,25 @@ public class SheetChartLayoutTests
         Assert.True(overlaid.Items.IndexOf(Keys(overlaid)[0]) > overlaid.Items.IndexOf(overlaid.Items.OfType<LineItem>().First(l => l.X2 - l.X1 > 50)));
     }
 
-    [Fact]
-    public void A_Word_charts_top_right_legend_stacks_at_the_top_and_the_plot_gives_way_above_it_and_6_pt_below()
+    [Theory]
+    [InlineData(288, false, true, 17.7, 62.1)]
+    [InlineData(288, true, true, 47.4, 91.8)]
+    [InlineData(144, false, false, 23.7, 17.0)]
+    [InlineData(144, true, false, 53.4, 46.7)]
+    public void A_Word_charts_top_right_legend_stacks_above_the_plot_when_it_fits_and_otherwise_stands_beside_it(double h, bool title, bool stacked, double baseline, double plotTop)
     {
-        // Measured in Word 2016 (2 samples, 3 entries, 10 pt): keys at the right legend's x, first key top band + 6 + pitch / 2 - 2.5; the plot's right as for a right
-        // legend, its top n x pitch lower and its bottom 6.00 higher. n x pitch for other counts is INFERRED.
+        // Measured in Word 2021 (18 samples, 3 to 5 entries, 10 pt, W 360, frame-relative): legend x 313.3, plot 20.7..290.3. Stacked: the first baseline 17.7 (title baseline + 23.0),
+        // the plot top 10.4 below the last baseline, the bottom at H - 29.7. Beside: the plot keeps its top (17.0, 46.7 with a title) and its bottom H - 23.7, the first baseline 6.0 lower.
         var series = new[] { Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20), Series(Red, 5, 10, 20) };
-        var right = WordChart(ChartKind.Column, LegendPosition.Right, series);
-        var tr = Page(right with { WordLegendTopRight = true });
-        var none = PlotOf(Page(right with { Legend = LegendPosition.None }));
-        var keys = Keys(tr);
-        double pitch = keys[1].Y - keys[0].Y, plotRight = PlotOf(Page(right)).Right;
-        Assert.Equal(Keys(Page(right)).Select(k => k.X), keys.Select(k => k.X));
-        Assert.Equal(OriginY + 6 + pitch / 2 - 5.03 / 2, keys[0].Y, 2);
-        var plot = PlotOf(tr);
-        Assert.Equal(plotRight, plot.Right, 2);
-        Assert.Equal(none.Top + 3 * pitch, plot.Top, 2);
-        Assert.Equal(none.Bottom - 6, plot.Bottom, 2);
+        var chart = WordChart(ChartKind.Column, LegendPosition.Right, series) with { WordLegendTopRight = true, Height = h, Title = title ? "Chart Title" : null, TitleSize = 18 };
+        var page = ArialPage(chart);
+        var keys = Keys(page);
+        Assert.Equal(3, keys.Count);
+        Assert.Equal(OriginY + baseline, keys[0].Y + 2.515 + 3.15, 0.3);
+        Assert.Equal(17.0, keys[1].Y - keys[0].Y, 0.3);
+        var plot = PlotOf(page);
+        Assert.Equal(OriginY + plotTop, plot.Top, 0.3);
+        Assert.Equal(OriginY + h - (stacked ? 29.7 : 23.7), plot.Bottom, 0.3);
     }
 
     [Theory]

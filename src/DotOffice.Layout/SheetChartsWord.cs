@@ -181,7 +181,13 @@ public sealed partial class SheetLayoutEngine
         // legendPos "tr" (measured, 2 samples: 3-entry column charts at 10 pt, with and without a title): the entries stack at the top right at the right legend's x,
         // the plot gives way on the right as for a right legend, on top by one entry pitch per entry and on the bottom by 6.0 pt. That the top offset is n x pitch,
         // other text sizes and other chart kinds are INFERRED; so is a tr legend with more entries than fit (the plot under 20 pt falls back to the shared layout).
+        // The entries stack above the plot (measured in Word 2021, 18 samples at 10 pt, W 360, 3 to 5 entries, H 144 / 216 / 288, with and without a title): the first baseline is
+        // 6.7 below the normal plot top, the plot top 10.4 below the last baseline (so (n - 1) x pitch + 11.1 below the normal top), the bottom 6.0 up. Word does that only while
+        // the plot top stays within 0.43 H (stacked up to 0.425, beside from 0.432); otherwise the entries sit beside the plot: the plot keeps its normal top and
+        // bottom and the first baseline is 6.0 lower (12.7 below the normal top). Normal tops here are measured 6.0 below this code's top (11 + band).
         bool topRight = hasLegend && chart.WordLegendTopRight;
+        bool trStacked = topRight && top + 6.0 + (entries.Count - 1) * entryPitch + 11.1 <= 0.43 * h;
+        double trFirstBaseline = top + 6.0 + 0.7 + (trStacked ? 0 : 6.0);
         if (hasLegend && !overlay)
             switch (chart.Legend)
             {
@@ -189,7 +195,7 @@ public sealed partial class SheetLayoutEngine
                     right -= legendShift;
                     // The last label of the horizontal value axis is centered on the plot's edge and the plot gives way by half of it (bars and scatter).
                     if (scatter && chart.XTicks.Count > 0) right -= MeasureChartText(chart.XTicks[^1].Label, categoryFont) / 2;
-                    if (topRight) { top += entries.Count * entryPitch; bottom -= 6.0; }
+                    if (topRight) { top += 6.0; if (trStacked) { top += (entries.Count - 1) * entryPitch + 11.1; bottom -= 6.0; } }
                     break;
                 case LegendPosition.Left: left += legendShift; break;
                 case LegendPosition.Top: top += rowHeight + extraRows; break;
@@ -209,9 +215,9 @@ public sealed partial class SheetLayoutEngine
             double textLeft = chart.Legend == LegendPosition.Right ? w - 10.05 - textWidth : 10.76 + 0.25 * (legendFont.FontSize - 10) + Enumerable.Range(0, entries.Count).Max(Advance);
             // Centered on (H + band) / 2 whether or not entries are cut (measured: 10 of 12 shown; the left legend is INFERRED the same). A tr legend starts at the top.
             // The first key sits beside the first line: its centre is (H + band) / 2 - shown x pitch / 2 + single pitch / 2 (measured with 1, 2 and 3 lines).
-            double first = (h + band) / 2 - shown * stackPitch / 2 + entryPitch / 2, trCentre = band + 6 + shown * entryPitch / 2;
+            double first = (h + band) / 2 - shown * stackPitch / 2 + entryPitch / 2, trFirst = trFirstBaseline - 3.15;
             for (int i = 0; i < shown; i++)
-                placed.Add((i, textLeft - Advance(i), topRight ? trCentre + (i - (shown - 1) / 2.0) * entryPitch : first + i * stackPitch, textLeft));
+                placed.Add((i, textLeft - Advance(i), topRight ? trFirst + i * entryPitch : first + i * stackPitch, textLeft));
         }
         else if (hasLegend)
         {
