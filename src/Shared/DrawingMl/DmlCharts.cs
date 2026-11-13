@@ -875,12 +875,15 @@ internal static class DmlCharts
     /// by level: a chart of n series has floor(n / 6) + 1 levels c, and level k is shaded or tinted (in linear RGB) by 0.7 (2k - (c - 1)) / (c + 1).
     /// A fit, not a documented rule: within 2 per channel of all 223 series of 13 Word and PowerPoint 2016 charts of 5 to 36 series. More series and gaps in c:idx are untested.
     /// </summary>
+    /// <summary>The shade (negative) or tint (positive) of level k of n: 0.7 (2k - (n - 1)) / (n + 1), but 0.24 for the two levels of 6 to 11 series, where Word 2016 measures 5089BC and D26E2A (0.7 gives 5089BD and D36E2A).</summary>
+    internal static double LevelAmount(int k, int n) => n == 2 ? (k == 0 ? -0.24 : 0.24) : 0.7 * (2 * k - (n - 1)) / (n + 1);
+
     internal static Color AutomaticMarkerColor(DmlTheme theme, int index, int cycles)
     {
         var accent = theme[4 + index % 6] ?? new Color(0x44, 0x72, 0xC4);
         if (cycles < 2) return accent;
         int cycle = index / 6 % cycles;
-        double amount = 0.7 * (2 * cycle - (cycles - 1)) / (cycles + 1);
+        double amount = LevelAmount(cycle, cycles);
         return amount < -1e-9 ? Shade(accent, 1 + amount) : amount > 1e-9 ? Tint(accent, 1 - amount) : accent;
     }
 
@@ -908,7 +911,7 @@ internal static class DmlCharts
         if (index < 0) index = 0;
         Color Vary(Color baseColor, int position, int levels)
         {
-            double amount = levels < 2 ? 0 : 0.7 * (2 * position - (levels - 1)) / (levels + 1);
+            double amount = levels < 2 ? 0 : LevelAmount(position, levels);
             return amount < -1e-9 ? Shade(baseColor, 1 + amount) : amount > 1e-9 ? Tint(baseColor, 1 - amount) : baseColor;
         }
         if (p == 1)

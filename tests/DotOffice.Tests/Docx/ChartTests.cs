@@ -188,6 +188,21 @@ public class ChartTests
     }
 
     [Fact]
+    public void A_Word_chart_of_six_series_shades_the_automatic_colors_as_measured_in_Word_2016()
+    {
+        // Six series make two levels, the first shaded; Word 2016 draws accent 1 as 5089BC (not 5089BD) and accent 2 as D26E2A (not D36E2A).
+        var one = ChartXml();
+        var ser = one[one.IndexOf("<c:ser>", StringComparison.Ordinal)..(one.IndexOf("</c:ser>", StringComparison.Ordinal) + 8)];
+        var six = one.Replace(ser, string.Concat(Enumerable.Range(0, 6).Select(i => ser.Replace("<c:idx val=\"0\"/><c:order val=\"0\"/>", $"<c:idx val=\"{i}\"/><c:order val=\"{i}\"/>"))));
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, six), 400, 250)));
+        var fills = page.Items.OfType<RectItem>().Where(r => r.Width > 5 && r.Height > 5).Select(r => r.Fill).ToList();
+        Assert.Contains(Color.TryParseHex("5089BC")!.Value, fills);
+        Assert.Contains(Color.TryParseHex("D26E2A")!.Value, fills);
+        Assert.DoesNotContain(Color.TryParseHex("5089BD")!.Value, fills);
+        Assert.DoesNotContain(Color.TryParseHex("D36E2A")!.Value, fills);
+    }
+
+    [Fact]
     public void Without_a_theme_part_the_office_2013_accents_are_used()
     {
         var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, ChartXml()), 300, 200)));
