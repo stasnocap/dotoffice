@@ -728,11 +728,10 @@ internal static class DmlCharts
         // A title whose rich text states no size, bold or typeface (in its runs or defaults, nor the chart's own text properties) is 18 pt regular Arial (measured in Office 2016, Excel and PowerPoint).
         bool plainRichTitle = titleElement is not null && Path(titleElement, "tx", "rich") is { } richTitle && title is not null
             && !richTitle.Descendants().Where(e => e.Name.LocalName is "rPr" or "defRPr").Any(e => e.Attribute("sz") is not null || e.Attribute("b") is not null || Child(e, "latin") is not null)
-            && statedBase is not { Bold: not null } && statedBase is not { Family: not null };
-        // Word, no chart-level txPr: such a title is bold at the chart's text size (10 pt when none is stated) in the chart font. One sample (Word 2016).
-        bool wordPlainTitle = plainRichTitle && wordNoBase;
-        if (wordPlainTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
-        else if (plainRichTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: false, Family: "Arial"), titleStyle);
+            && statedBase is not { Bold: not null } && (context.WordChartFrame || statedBase is not { Family: not null });
+        // Word follows this too, and a typeface in the chart's text properties does not stop it (measured in Word 2021: ArialMT with and without a chart-level txPr). Word 2016 drew it bold at the chart's text size in the chart font
+        // (one sample); dotoffice follows 2021.
+        if (plainRichTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: false, Family: "Arial"), titleStyle);
         else if (context.PresentationTitle) titleStyle = MergeStyles(new ChartTextStyle(Bold: true), titleStyle);
         var textStyles = new ChartTextStyles
         {
@@ -798,7 +797,7 @@ internal static class DmlCharts
 
         return template with
         {
-            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (wordPlainTitle ? fontSize : plainRichTitle ? 18 : context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
+            Kind = kind, HiLowLines = group.Name.LocalName == "stockChart" || Child(group, "hiLowLines") is not null, HiLowColor = SolidFill(Path(group, "hiLowLines", "spPr", "ln"), theme), HiLowWidth = Path(group, "hiLowLines", "spPr", "ln")?.Attribute("w") is { } hw && double.TryParse(hw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hwEmu) && hwEmu > 0 && hwEmu < 2e9 ? hwEmu / 12700 : null, UpDownBars = Child(group, "upDownBars") is not null, UpDownGap = (double?)Path(group, "upDownBars", "gapWidth")?.Attribute("val") ?? 150, Grouping = grouping, Title = title, TitleSize = titleSize ?? (plainRichTitle ? 18 : context.PresentationTitle ? Math.Round(fontSize * 1.2, 1) : 14), Categories = categories, Series = series, Legend = legend,
             Ticks = ticks, ValueMin = min, ValueMax = max,
             ShowValueAxis = valueAxis is not null && !Flag(Child(valueAxis, "delete"), "val"),
             ShowCategoryAxis = categoryAxis is not null && !Flag(Child(categoryAxis, "delete"), "val"),

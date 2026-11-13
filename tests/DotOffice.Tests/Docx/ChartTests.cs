@@ -160,13 +160,24 @@ public class ChartTests
     }
 
     [Fact]
-    public void A_Word_chart_without_chart_text_properties_has_a_bold_title_at_the_text_size_in_the_theme_font()
+    public void A_Word_chart_without_chart_text_properties_has_an_18_pt_regular_title_as_measured_in_Word_2021()
     {
         var xml = ChartXml().Replace("<c:autoTitleDeleted val=\"1\"/>", "<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title><c:autoTitleDeleted val=\"0\"/>");
         var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216)));
         var title = page.Items.OfType<TextItem>().First(t => t.Text == "Sales");
-        Assert.Equal(10, title.FontSize, 3);
-        Assert.True(title.SyntheticBold); // the test font has no bold face
+        Assert.Equal(18, title.FontSize, 3);
+        Assert.False(title.SyntheticBold);
+    }
+
+    [Fact]
+    public void A_Word_chart_title_stays_18_pt_regular_when_the_chart_text_properties_state_a_typeface()
+    {
+        var xml = ChartXml().Replace("<c:autoTitleDeleted val=\"1\"/>", "<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title><c:autoTitleDeleted val=\"0\"/>")
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216)));
+        var title = page.Items.OfType<TextItem>().First(t => t.Text == "Sales");
+        Assert.Equal(18, title.FontSize, 3);
+        Assert.False(title.SyntheticBold);
     }
 
     [Fact]
