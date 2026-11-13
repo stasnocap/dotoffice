@@ -493,11 +493,13 @@ internal static class DmlCharts
             if (!horizontal)
             {
                 double length = template.Height - Math.Max(11, 0.9157 * fontSize0) - band - (6.5 + lineHeight + 0.571 * fontSize0);
-                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : length;
+                // "tr": one entry pitch per entry off the top and 6 pt off the bottom (measured with 3 entries, n x pitch INFERRED)
+                return legendPos is "t" or "b" ? length - (lineHeight + 12 - 0.043 * fontSize0) : legendPos == "tr" ? length - series.Count * (lineHeight + 6 - 0.043 * fontSize0) - 6 : length;
             }
             double entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * 0.53 * fontSize0;
             double width = template.Width - 22;
-            if (legendPos is "l" or "r" or "tr") width -= entryWidth + 12.04 + fontSize0;
+            bool overlaid = legendElement0 is not null && Flag(Child(legendElement0, "overlay"), "val") && legendPos == "r"; // an overlaid right legend takes nothing off the plot (measured)
+            if (legendPos is "l" or "r" or "tr" && !overlaid) width -= entryWidth + 12.04 + fontSize0;
             if (!xy || legendPos == "r") width -= lastLabel.Length * 0.556 * fontSize0 / 2;
             return width;
         }
@@ -808,7 +810,7 @@ internal static class DmlCharts
             ValueAxisTicks = Tick(valueAxis, "majorTickMark", ChartTickMark.Cross), CategoryAxisTicks = Tick(categoryAxis, "majorTickMark", ChartTickMark.Cross),
             ValueAxisMinorTicks = Tick(valueAxis, "minorTickMark", ChartTickMark.None), CategoryAxisMinorTicks = Tick(categoryAxis, "minorTickMark", ChartTickMark.None),
             ValueAxisColor = valueLine.Color, CategoryAxisColor = categoryLine.Color, ValueAxisWidth = valueLine.Width, CategoryAxisWidth = categoryLine.Width,
-            WordLayout = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") != "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
+            WordLayout = context.WordChartFrame, WordLegendTopRight = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") == "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,

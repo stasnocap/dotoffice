@@ -325,6 +325,9 @@ public sealed record SheetChart : SheetObject
     /// </summary>
     public bool WordLayout { get; init; }
 
+    /// <summary>A Word chart whose legend is at <c>tr</c> (top right): <see cref="Legend"/> is Right, but Word stacks the entries at the top right and the plot gives way above them. Only set for Word charts.</summary>
+    public bool WordLegendTopRight { get; init; }
+
     /// <summary>The value axis' major tick marks (Word charts only; the others draw none).</summary>
     public ChartTickMark ValueAxisTicks { get; init; }
 

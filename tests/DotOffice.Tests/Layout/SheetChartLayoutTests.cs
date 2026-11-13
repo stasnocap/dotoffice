@@ -74,6 +74,51 @@ public class SheetChartLayoutTests
         Assert.Equal(OriginY + 108, (keys[0].Y + keys[1].Y + 5.03) / 2, 1);
     }
 
+    private static List<RectItem> Keys(LayoutPage page) => page.Items.OfType<RectItem>().Where(r => Math.Abs(r.Width - 5.03) < 1e-6 && Math.Abs(r.Height - 5.03) < 1e-6).OrderBy(r => r.Y).ToList();
+
+    [Fact]
+    public void A_Word_charts_right_legend_with_more_entries_than_fit_is_centered_like_one_that_fits()
+    {
+        // Measured in Word 2016 (1 sample, 12 series at H 216 with a title: 10 shown): the shown keys are centered on (H + band) / 2, not 5.28 pt higher.
+        var series = Enumerable.Range(0, 12).Select(_ => Series(Red, 5, 10, 20)).ToArray();
+        var keys = Keys(Page(WordChart(ChartKind.Column, LegendPosition.Right, series) with { Title = "T" }));
+        Assert.True(keys.Count is > 1 and < 12);
+        var fits = Keys(Page(WordChart(ChartKind.Column, LegendPosition.Right, series[..3]) with { Title = "T" }));
+        Assert.Equal((fits[0].Y + fits[^1].Y) / 2, (keys[0].Y + keys[^1].Y) / 2, 2);
+    }
+
+    [Fact]
+    public void A_Word_charts_overlaid_right_legend_leaves_the_plot_at_full_width_and_is_drawn_after_it()
+    {
+        // Measured in Word 2016 (1 sample): the legend is where a normal right legend is, the plot ends at W - 11 and the legend is drawn on top of it.
+        var plain = WordChart(ChartKind.Column, LegendPosition.Right, Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20));
+        var overlaid = Page(plain with { LegendOverlay = true });
+        var none = PlotOf(Page(plain with { Legend = LegendPosition.None }));
+        Assert.Equal(none.Right, PlotOf(overlaid).Right, 2);
+        Assert.Equal(none.Top, PlotOf(overlaid).Top, 2);
+        Assert.Equal(Keys(Page(plain)).Select(k => (k.X, k.Y)), Keys(overlaid).Select(k => (k.X, k.Y)));
+        Assert.True(overlaid.Items.IndexOf(Keys(overlaid)[0]) > overlaid.Items.IndexOf(overlaid.Items.OfType<LineItem>().First(l => l.X2 - l.X1 > 50)));
+    }
+
+    [Fact]
+    public void A_Word_charts_top_right_legend_stacks_at_the_top_and_the_plot_gives_way_above_it_and_6_pt_below()
+    {
+        // Measured in Word 2016 (2 samples, 3 entries, 10 pt): keys at the right legend's x, first key top band + 6 + pitch / 2 - 2.5; the plot's right as for a right
+        // legend, its top n x pitch lower and its bottom 6.00 higher. n x pitch for other counts is INFERRED.
+        var series = new[] { Series(Red, 5, 10, 20), Series(Blue, 5, 10, 20), Series(Red, 5, 10, 20) };
+        var right = WordChart(ChartKind.Column, LegendPosition.Right, series);
+        var tr = Page(right with { WordLegendTopRight = true });
+        var none = PlotOf(Page(right with { Legend = LegendPosition.None }));
+        var keys = Keys(tr);
+        double pitch = keys[1].Y - keys[0].Y, plotRight = PlotOf(Page(right)).Right;
+        Assert.Equal(Keys(Page(right)).Select(k => k.X), keys.Select(k => k.X));
+        Assert.Equal(OriginY + 6 + pitch / 2 - 5.03 / 2, keys[0].Y, 2);
+        var plot = PlotOf(tr);
+        Assert.Equal(plotRight, plot.Right, 2);
+        Assert.Equal(none.Top + 3 * pitch, plot.Top, 2);
+        Assert.Equal(none.Bottom - 6, plot.Bottom, 2);
+    }
+
     [Theory]
     [InlineData(8, 4.02, 14.85)]
     [InlineData(14, 7.04, 21.49)]
@@ -1367,5 +1412,67 @@ public class SheetChartLayoutTests
         Assert.All(lines, l => Assert.Equal(1.5, l.Width));
         Assert.Contains(lines, l => l.Y1 == l.Y2); // legend key
         Assert.DoesNotContain(Page(chart).Items, i => i is LineItem l && l.Color == Red && l.Width >= 1.5);
+    }
+
+    private static SheetChart NamedLegendChart(LegendPosition legend, double width, double height, params string[] names) =>
+        WordChart(ChartKind.Column, legend, names.Select(n => new ChartSeries(n, [5, 10, 20], Red)).ToArray()) with { Width = width, Height = height, Title = null };
+
+    /// <summary>The single-line entry pitch in the test font (17.07 pt for Arial).</summary>
+    private static double SinglePitch()
+    {
+        var k = Keys(Page(NamedLegendChart(LegendPosition.Right, 360, 216, "A", "B")));
+        return k[1].Y - k[0].Y;
+    }
+
+    [Fact]
+    public void A_Word_charts_right_legend_wraps_long_names_and_every_entry_takes_the_tallest_ones_height()
+    {
+        // Measured in Word 2016 (40+ samples): names wrap at W / 3 - 11.5, an entry with two lines is 1.106 em (11.06 pt) taller, lines are 11.5 apart, the first key beside the first line.
+        double single = SinglePitch();
+        var page = Page(NamedLegendChart(LegendPosition.Right, 360, 216, "Short", "nnnn nnnn nnnn nnnn nnnn nnnn", "Mid"));
+        var keys = Keys(page);
+        Assert.Equal(3, keys.Count);
+        Assert.Equal(single + 11.06, keys[1].Y - keys[0].Y, 1);
+        Assert.Equal(single + 11.06, keys[2].Y - keys[1].Y, 1);
+        var lines = page.Items.OfType<TextItem>().Where(t => t.Text.StartsWith('n')).Select(t => Math.Round(t.Baseline, 2)).Distinct().OrderBy(b => b).ToList();
+        Assert.True(lines.Count >= 2);
+        Assert.Equal(11.5, lines[1] - lines[0], 1);
+        double centre = OriginY + 108 - 3 * (single + 11.06) / 2 + single / 2; // (H + band) / 2 - n x pitch / 2 + single pitch / 2
+        Assert.Equal(centre - 2.515, keys[0].Y, 1);
+    }
+
+    [Fact]
+    public void A_Word_charts_right_legend_shows_floor_of_09_times_the_height_plus_276_over_the_pitch_entries()
+    {
+        // Measured switch points in Arial (pitch 17.07): without a title 9 entries at H 186 and 10 at H 187.
+        double single = SinglePitch();
+        string[] names = Enumerable.Range(1, 12).Select(i => "S" + i).ToArray();
+        foreach (int k in new[] { 4, 7, 9 })
+        {
+            double edge = (k * single - 2.76) / 0.9;
+            Assert.Equal(k - 1, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge - 0.5, names))).Count);
+            Assert.Equal(k, Keys(Page(NamedLegendChart(LegendPosition.Right, 360, edge + 0.5, names))).Count);
+        }
+    }
+
+    [Fact]
+    public void A_Word_charts_bottom_legend_is_one_row_with_equal_gaps_and_a_grid_of_equal_rows_when_it_does_not_fit()
+    {
+        // Measured in Word 2016: a row has equal gaps (0.2 sum of text widths + 4.82 n + 2.90) / (n + 1); more than fits makes a grid by rows, 17.06 apart, the last 1.50 lower.
+        double single = SinglePitch();
+        var one = Keys(Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, "Series 1", "Series 2", "Series 3")));
+        Assert.Equal(3, one.Count);
+        Assert.Equal(one[1].X - one[0].X, one[2].X - one[1].X, 2);
+        Assert.Equal(one[0].Y, one[2].Y, 2);
+        var grid = Keys(Page(NamedLegendChart(LegendPosition.Bottom, 360, 216, Enumerable.Range(1, 12).Select(i => "Series " + i).ToArray())));
+        Assert.Equal(12, grid.Count);
+        var rows = grid.GroupBy(k => Math.Round(k.Y, 1)).OrderBy(g => g.Key).ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(6, r.Count()));
+        Assert.Equal(single, rows[1].Key - rows[0].Key, 1);
+        Assert.Equal(one[0].Y + 1.5, rows[1].Key, 1);
+        var first = rows[0].OrderBy(k => k.X).ToList();
+        Assert.Equal(first[1].X - first[0].X, first[5].X - first[4].X, 2); // one column pitch
+        Assert.Equal(first[0].X, rows[1].OrderBy(k => k.X).First().X, 2); // columns line up
     }
 }
