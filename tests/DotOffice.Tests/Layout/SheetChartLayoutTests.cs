@@ -161,6 +161,17 @@ public class SheetChartLayoutTests
         Assert.Equal([Red, Blue], Order(Page(WordChart(ChartKind.Column, LegendPosition.Bottom, a, b) with { Grouping = ChartGrouping.Stacked }), true));
     }
 
+    [Theory]
+    [InlineData(5, 4)] [InlineData(6, 5)] [InlineData(9, 4)] [InlineData(10, 5)]
+    public void A_cut_Word_legend_counts_the_last_series_own_lines(int series, int shown)
+    {
+        // Measured in Word 2021 (10 pt, W 360, H 144): k entries fit when (k - 1) x the 2-line pitch + the last series' own pitch fits, so a 1-line last series lets one more in.
+        string[] names = ["Northern region total sales", "West", "Average output per month", "East office", "Southern branch revenue numbers", "Mid", "Central warehouse", "Q", "Online store and app orders", "Retail"];
+        var all = names.Take(series).Select(n => new ChartSeries(n, [1, 2, 3], Red)).ToArray();
+        var page = ArialPage(WordChart(ChartKind.Column, LegendPosition.Right, all) with { Height = 144 });
+        Assert.Equal(shown, page.Items.OfType<RectItem>().Count(r => Math.Abs(r.Width - 5.03) < 1e-6));
+    }
+
     [Fact]
     public void A_Word_charts_bottom_legend_is_one_row_that_takes_23_pt_off_the_plot()
     {

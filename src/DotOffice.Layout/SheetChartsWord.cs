@@ -495,11 +495,16 @@ public sealed partial class SheetLayoutEngine
         {
             // The count that fits (measured, 26 samples): floor((0.9 (H - band) + 2.76) / pitch), the constant known to lie in 2.40..3.12. With wrapped names the multi-line
             // pitch is used (INFERRED: how wrapping interacts with the cut is UNMEASURED). Right-aligned tr entries are never cut.
-            int shown = topRight ? entries.Count : Math.Clamp((int)Math.Floor((0.9 * (h - band) + 2.76) / stackPitch), 1, entries.Count);
+            // k entries fit when (k - 1) x the pitch + the last series' own pitch (by its lines) <= 0.9 (H - band) + 2.76 (measured in Word 2021 at 10 pt, W 360, 5 to 12 series
+            // of 1 and 2 lines, H 130 to 216: all 32 counts, t52 / t53; the last series counts whether or not it is shown).
+            double lastPitch = entryPitch + (lines[^1].Count - 1) * 1.106 * legendFont.FontSize;
+            int shown = topRight ? entries.Count : Math.Clamp((int)Math.Floor((0.9 * (h - band) + 2.76 - lastPitch) / stackPitch + 1e-9) + 1, 1, entries.Count);
             double textLeft = chart.Legend == LegendPosition.Right ? w - 10.05 - textWidth : 10.76 + 0.25 * (legendFont.FontSize - 10) + Enumerable.Range(0, entries.Count).Max(Advance);
             // Centered on (H + band) / 2 whether or not entries are cut (measured: 10 of 12 shown; the left legend is INFERRED the same). A tr legend starts at the top.
             // The first key sits beside the first line: its centre is (H + band) / 2 - shown x pitch / 2 + single pitch / 2 (measured with 1, 2 and 3 lines).
-            double first = (h + band) / 2 - shown * stackPitch / 2 + entryPitch / 2, trFirst = trFirstCentre;
+            // Centred on shown x pitch, or, when that overflows the room (a short last series let one more in), on (shown - 1) x pitch + the last series' pitch (measured, t53).
+            double block = shown * stackPitch > 0.9 * (h - band) + 2.76 + 1e-9 ? (shown - 1) * stackPitch + lastPitch : shown * stackPitch;
+            double first = (h + band) / 2 - block / 2 + entryPitch / 2, trFirst = trFirstCentre;
             for (int i = 0; i < shown; i++)
                 placed.Add((i, textLeft - Advance(i), topRight ? trFirst + i * entryPitch : first + i * stackPitch, textLeft));
         }
