@@ -784,7 +784,14 @@ public sealed partial class SheetLayoutEngine
                 {
                     double y = plotBottom - (Slot(i) + 0.5) * band;
                     double across = Across(MeasureChartText(chart.Categories[i], categoryFont), categoryFont.FontSize * 1.25, barCategoryAngle);
-                    if (barCategoryAngle != 0)
+                    if (_wordPlot is not null && _wordBarTurned)
+                    {
+                        // Word: the baseline's end stands 0.2 + 1.0 em left of the plot, 0.25 em below the category's centre (fitted to the ink at 8, 10 and 14 pt).
+                        var (pitch, ascent, descent) = LineMetrics(categoryFont);
+                        double toBaseline = (pitch - (ascent + descent)) / 2 + ascent, fs = categoryFont.FontSize;
+                        PlaceText(chart.Categories[i], categoryFont, plotLeft - 0.2 - 1.0 * fs - toBaseline * 0.7071, y + WordBarTurnDrop * fs - toBaseline * 0.7071, Anchor.End, false, 45, items);
+                    }
+                    else if (barCategoryAngle != 0)
                         PlaceText(chart.Categories[i], categoryFont, labelsAtFar ? plotRight + 5 + across / 2 : plotLeft - 5 - across / 2, y, Anchor.Middle, true, barCategoryAngle, items);
                     else if (labelsAtFar) PlaceText(chart.Categories[i], categoryFont, plotRight + 5, y, Anchor.Start, true, 0, items);
                     else if (_wordBarLabels is { } wrapped && i < wrapped.Lines.Count && wrapped.Lines[i].Count > 1)

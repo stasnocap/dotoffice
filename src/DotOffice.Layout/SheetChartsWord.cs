@@ -57,7 +57,8 @@ public sealed partial class SheetLayoutEngine
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
         && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false } && (!chart.ReverseCategories || chart.Kind is ChartKind.Column or ChartKind.Line or ChartKind.Bar))
-        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90 or 45)
+        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90 or 45
+            || chart is { Kind: ChartKind.Bar, ReverseCategories: false } && chart.TextStyles.CategoryAxis?.Rotation is 45)
         && chart.Series.Count > 0;
 
     private static List<(string Name, Color Color, ChartSeries? Series, ChartKind Kind)> WordLegendEntries(SheetChart chart)
@@ -109,6 +110,7 @@ public sealed partial class SheetLayoutEngine
 
     /// <summary>Set by <see cref="EmitWordChart"/> for a bar chart: each category label's lines, wrapped as Word wraps them; null when the labels keep the shared layout.</summary>
     private (List<List<string>> Lines, double Cap)? _wordBarLabels;
+    private bool _wordBarTurned; // a bar chart's category labels turned by 45 degrees (asked)
 
     // Word 2021's category labels (measured at Arial 10 pt, bar and line charts of 3 to 80 categories, 200 to 430 pt wide; every size below is therefore stated per
     // pt of font size and INFERRED for other sizes). The slot is the plot's width over the category count, taken before the labels narrow the plot.
@@ -116,6 +118,7 @@ public sealed partial class SheetLayoutEngine
     private const double WordTurnBottom = 1.40;        // em: the plot's bottom is 6.5 + this + 0.7071 W above the chart's bottom when turned by 45 degrees (20.5 at 10 pt; 17.7 / 26.1 + ... measured at 8 / 14 pt)
     private const double WordUprightBottom = 0.61;     // em: ... 6.5 + this + W when turned by 90 degrees (12.6 at 10 pt; 11.4 / 15.0 + ... measured at 8 / 14 pt)
     private const double WordTurnLeft = 10.9;          // pt, not scaling with the font (measured at 8, 10 and 14 pt): a 45 degree label's start keeps the plot's left edge at 0.7071 W + this - R / 2n
+    private const double WordBarTurnDrop = 0.25;      // em: a turned bar label's baseline end below its category's centre (fitted to the ink at 8, 10 and 14 pt)
 
     /// <summary>
     /// Chooses how the category labels are drawn, from these rules (measured in Word 2021 at 10 pt): the labels stay upright when the widest fits its slot; else
@@ -312,7 +315,11 @@ public sealed partial class SheetLayoutEngine
         // A bar chart's category labels wrap at their spaces to lines of at most 0.484 (W - the side legend's box) - 10.9 (fitted to the brackets of 7 samples in Word 2021
         // at 10 pt, W 200 to 500, with and without a right legend; INFERRED at other sizes); the plot's left edge then follows the widest line.
         _wordBarLabels = null;
-        if (bar && chart.Categories.Count > 0)
+        _wordBarTurned = bar && chart.TextStyles.CategoryAxis?.Rotation == 45 && chart.Categories.Count > 0;
+        // A bar chart's labels asked to turn by 45 degrees (rot -2700000; measured in Word 2021, 25 samples at 8, 10 and 14 pt, H 216 / 288, 4 label sets) never wrap:
+        // the plot's left edge stands 0.7071 x the widest label + 6.5 + 1.65 em in (exact to 0.01 pt in every sample).
+        if (_wordBarTurned) left = 6.5 + 0.7071 * labelWidth + 1.65 * categoryFont.FontSize;
+        else if (bar && chart.Categories.Count > 0)
         {
             double cap = 0.484 * (w - (verticalLegend && !chart.LegendOverlay ? legendShift : 0)) - 10.9 * categoryFont.FontSize / 10;
             var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
@@ -352,6 +359,15 @@ public sealed partial class SheetLayoutEngine
             }
         // Bars: the plot gives way by half of the last value label (measured with a bottom legend at 8 and 14 pt; with a top or left legend or none it is INFERRED).
         if (bar && chart.Ticks.Count > 0) right -= MeasureChartText(chart.Ticks[^1].Label, valueFont) / 2;
+        // The first (bottom) turned label hangs below its category; Word raises the plot's bottom, in one pass from the normal layout, until that hang
+        // (0.7071 W + 10.10 - 0.218 em below the category's centre, fitted at 8, 10 and 14 pt) fits the chart: centre = normal bottom - half a normal band.
+        // An 8-category sample came out 1.55 pt lower than this (UNEXPLAINED, 1 sample).
+        if (_wordBarTurned)
+        {
+            double band0 = (bottom - top) / chart.Categories.Count;
+            double hang = 0.7071 * MeasureChartText(chart.Categories[0], categoryFont) + 10.10 - 0.218 * categoryFont.FontSize;
+            bottom = Math.Min(bottom, h - hang + band0 / 2);
+        }
         if (right - left < 20 || bottom - top < 20) return false;
 
         // ---- the category labels (columns and lines): they may wrap, turn or be skipped, which moves the plot's bottom, left and, when skipping, right edge
@@ -474,7 +490,7 @@ public sealed partial class SheetLayoutEngine
             else if (scatter) EmitScatter(chart, pl, pt, pr, pb, font, items);
             else EmitAxisChart(chart, pl, pt, pr, pb, font, items);
         }
-        finally { _wordPlot = null; _wordCategories = null; _wordBarLabels = null; }
+        finally { _wordPlot = null; _wordCategories = null; _wordBarLabels = null; _wordBarTurned = false; }
         if (overlay) DrawLegend();
         return true;
     }
