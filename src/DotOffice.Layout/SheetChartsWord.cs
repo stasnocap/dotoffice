@@ -181,6 +181,17 @@ public sealed partial class SheetLayoutEngine
         return new WordCategoryPlan(angle, stride, lines, width, overhang, widths);
     }
 
+    /// <summary>The lines of a wrapped bar label that fit its category's band: the last kept line ends in as many whole words as fit the cap with a "…" (measured in Word 2021).</summary>
+    private List<string> FitWordBarLines(List<string> lines, double band, double cap, RunProperties font)
+    {
+        int fit = Math.Max(1, (int)Math.Floor(band / (1.15 * font.FontSize) + 1e-6));
+        if (lines.Count <= fit) return lines;
+        var rest = string.Join(" ", lines.Skip(fit - 1)).Split(' ');
+        string last = rest[0];
+        for (int k = 1; k < rest.Length && MeasureChartText(last + " " + rest[k] + "…", font) <= cap; k++) last += " " + rest[k];
+        return [.. lines.Take(fit - 1), last + "…"];
+    }
+
     /// <summary>Draws category label <paramref name="i"/> under the axis at <paramref name="cx"/> as <paramref name="plan"/> says; <paramref name="plotBottom"/> is the axis.</summary>
     private void PlaceWordCategory(WordCategoryPlan plan, int i, RunProperties font, double cx, double plotBottom, List<LayoutItem> items)
     {
@@ -317,20 +328,23 @@ public sealed partial class SheetLayoutEngine
         double legendShift = hasLegend ? widest + 12.04 + keyShare : 0;
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - keyShare; // the text width the box leaves (the widest line, at most the cap)
-        // A bar chart's category labels wrap at their spaces to lines of at most 0.484 (W - the side legend's box) - 10.9 (fitted to the brackets of 7 samples in Word 2021
-        // at 10 pt, W 200 to 500, with and without a right legend; INFERRED at other sizes); the plot's left edge then follows the widest line.
+        // A bar chart's category labels wrap at their spaces to lines of at most 0.482 W - 0.505 x the side legend's box - 9.25 + 0.3 (size - 10) (fitted to the
+        // brackets of 62 samples in Word 2021 at 8, 10 and 14 pt, W 160 to 500, with and without a right legend, t26 and t31; 2 miss: bw-s8-w280 by 1.3 pt, and
+        // bw-s10-w160-r, whose legend Word also lays out differently); the plot's left edge then follows the widest line shown.
         _wordBarLabels = null;
         _wordBarTurned = bar && chart.TextStyles.CategoryAxis?.Rotation == 45 && chart.Categories.Count > 0;
         // A bar chart's labels asked to turn by 45 degrees (rot -2700000; measured in Word 2021, 25 samples at 8, 10 and 14 pt, H 216 / 288, 4 label sets) never wrap:
         // the plot's left edge stands 0.7071 x the widest label + 6.5 + 1.65 em in (exact to 0.01 pt in every sample).
+        double barWrapped = -1;
         if (_wordBarTurned) left = 6.5 + 0.7071 * labelWidth + 1.65 * categoryFont.FontSize;
         else if (bar && chart.Categories.Count > 0)
         {
-            double cap = 0.484 * (w - (verticalLegend && !chart.LegendOverlay ? legendShift : 0)) - 10.9 * categoryFont.FontSize / 10;
+            double cap = 0.482 * w - 0.505 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 9.25 + 0.3 * (categoryFont.FontSize - 10);
             var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
             _wordBarLabels = (barLines, cap);
             double wrapped = barLines.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += wrapped - labelWidth;
+            barWrapped = wrapped;
         }
         // Overlay (measured in Word 2021, column charts at r, l, t, b and tr): the legend stands where the normal one does but the plot keeps the legend-less
         // layout and the legend is drawn after it.
@@ -379,6 +393,13 @@ public sealed partial class SheetLayoutEngine
             _wordBarTurnStride = Math.Max(1, (int)Math.Ceiling(WordTurnLine * categoryFont.FontSize / slot - 1e-9));
             if (_wordBarTurnStride > 1)
                 left = 6.5 + 0.7071 * chart.Categories.Where((_, i) => i % _wordBarTurnStride == 0).Max(c => MeasureChartText(c, categoryFont)) + 1.65 * categoryFont.FontSize;
+        }
+        // The plot's left edge follows the widest line shown, a line the category's band has no room for not counting (measured in Word 2021 at 8 to 14 pt, t31).
+        if (_wordBarLabels is { } barLabels && barWrapped >= 0)
+        {
+            double barBand = (bottom - top) / chart.Categories.Count;
+            double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
+            left += shown - barWrapped;
         }
         if (right - left < 20 || bottom - top < 20) return false;
 

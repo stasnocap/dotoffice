@@ -799,16 +799,7 @@ public sealed partial class SheetLayoutEngine
                     {
                         // Word (measured, 2021): the lines stand 1.15 em apart as a block centred on the category, right-aligned at the gap, each line centred in the block.
                         // Only the lines that fit the category's band are kept, the last one ending in as many whole words as fit the line with a "…" (1 sample; Word sets that cut line 5 pt further right than centred, UNMEASURED why).
-                        var lines = wrapped.Lines[i];
-                        double step0 = 1.15 * categoryFont.FontSize;
-                        int fit = Math.Max(1, (int)Math.Floor(band / step0 + 1e-6));
-                        if (lines.Count > fit)
-                        {
-                            var rest = string.Join(" ", lines.Skip(fit - 1)).Split(' ');
-                            string last = rest[0];
-                            for (int k = 1; k < rest.Length && MeasureChartText(last + " " + rest[k] + "…", categoryFont) <= wrapped.Cap; k++) last += " " + rest[k];
-                            lines = [.. lines.Take(fit - 1), last + "…"];
-                        }
+                        var lines = FitWordBarLines(wrapped.Lines[i], band, wrapped.Cap, categoryFont);
                         double own = lines.Max(l => MeasureChartText(l, categoryFont)), step = 1.15 * categoryFont.FontSize, mid = plotLeft - AxisLabelGap(categoryFont) - own / 2;
                         for (int k = 0; k < lines.Count; k++)
                             PlaceText(lines[k], categoryFont, mid, y + CenterShift(categoryFont) + (k - (lines.Count - 1) / 2.0) * step, Anchor.Middle, true, 0, items);
