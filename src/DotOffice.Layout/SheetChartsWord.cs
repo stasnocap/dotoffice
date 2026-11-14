@@ -57,7 +57,7 @@ public sealed partial class SheetLayoutEngine
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
         && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false, ReverseCategories: false })
-        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && chart.TextStyles.CategoryAxis?.Rotation is null or 0
+        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90)
         && chart.Series.Count > 0;
 
     private static List<(string Name, Color Color, ChartSeries? Series, ChartKind Kind)> WordLegendEntries(SheetChart chart)
@@ -98,7 +98,7 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>How Word 2021 sets the category labels under a column or line chart's horizontal axis (<see cref="PlanWordCategoryLabels"/>).</summary>
-    private sealed record WordCategoryPlan(double Angle, int Stride, List<List<string>> Lines, double Width, double[]? Overhang = null, double[]? Widths = null)
+    private sealed record WordCategoryPlan(double Angle, int Stride, List<List<string>> Lines, double Width, double[]? Overhang = null, double[]? Widths = null, bool Asked = false)
     {
         public int MaxLines => Lines.Select(l => l.Count).DefaultIfEmpty(1).Max();
     }
@@ -190,6 +190,22 @@ public sealed partial class SheetLayoutEngine
             double toBaseline = (pitch - (ascent + descent)) / 2 + ascent;
             double over = plan.Overhang?[i] ?? 0; // a cut label's "…" runs on past the end its kept text has
             PlaceText(plan.Lines[i][0], font, cx + 2.4 * fs / 10 - toBaseline * 0.7071 + over * 0.7071, plotBottom + 5.3 * fs / 10 - over * 0.7071, Anchor.End, false, 45, items);
+        }
+        else if (plan.Asked)
+        {
+            // An asked turn by 90 degrees either way (measured in Word 2021 at 10 pt, 1 sample each): the lines stand 1.15 em apart, centred on the slot (3.45 right of
+            // its centre for one line reading bottom-up, 3.39 left reading top-down, the first line the leftmost resp. rightmost), each centred along a block as long as
+            // the label's widest line whose near end is 6.05 (bottom-up) or 6.09 (top-down) below the axis.
+            var (pitch, ascent, descent) = LineMetrics(font);
+            double toBaseline = (pitch - (ascent + descent)) / 2 + ascent, step = 1.15 * fs, scale = fs / 10;
+            var lines = plan.Lines[i];
+            double own = lines.Max(l => MeasureChartText(l, font));
+            for (int k = 0; k < lines.Count; k++)
+            {
+                double inset = (own - MeasureChartText(lines[k], font)) / 2, shift = (k - (lines.Count - 1) / 2.0) * step;
+                if (plan.Angle == 90) PlaceText(lines[k], font, cx + 3.45 * scale + shift - toBaseline, plotBottom + 6.05 * scale + inset, Anchor.End, false, 90, items);
+                else PlaceText(lines[k], font, cx - 3.39 * scale - shift + toBaseline, plotBottom + 6.09 * scale + inset, Anchor.Start, false, -90, items);
+            }
         }
         else
         {
@@ -313,7 +329,18 @@ public sealed partial class SheetLayoutEngine
 
         // ---- the category labels (columns and lines): they may wrap, turn or be skipped, which moves the plot's bottom, left and, when skipping, right edge
         _wordCategories = null;
-        if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null)
+        if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is 90 or -90)
+        {
+            // An asked turn by 90 degrees (measured in Word 2021 at 10 pt, H 144 / 216 / 288): the labels wrap at their spaces to lines of at most 0.5 H - 12 (fitted, INFERRED)
+            // and the plot's bottom stands 12.51 + the widest line (as this code measures it) above the chart's bottom.
+            double fs = categoryFont.FontSize, cap = 0.5 * h - 12;
+            var asked = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
+            double askedWidest = asked.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
+            _wordCategories = new WordCategoryPlan(styles.CategoryAxis!.Rotation!.Value, 1, asked, askedWidest, Asked: true);
+            bottom = h - (12.51 * fs / 10 + askedWidest);
+            if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
+        }
+        else if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null or 0)
         {
             double fs = categoryFont.FontSize, scale = fs / 10;
             int slots = chart.CategoriesBetween ? chart.Categories.Count : Math.Max(chart.Categories.Count - 1, 1);

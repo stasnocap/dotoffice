@@ -296,6 +296,26 @@ public class ChartTests
         Assert.Equal(12.6 + w, PlotBottomOffset(page), 0); // measured: 12.6 + W above the chart's bottom
     }
 
+    [Theory]
+    [InlineData("-5400000", 90)]
+    [InlineData("5400000", -90)]
+    public void Word_wraps_category_labels_asked_to_turn_by_90_degrees_at_half_the_height_less_12_as_measured_in_Word_2021(string rot, double angle)
+    {
+        // H 216: lines of at most 96 pt, so the 6 words wrap; the plot's bottom stands 12.51 + the widest line above the chart's bottom.
+        var xml = ChartXml().Replace("<c:v>a</c:v>", "<c:v>Alpha beta gamma delta epsilon zeta</c:v>")
+            .Replace("</c:catAx>", $"<c:txPr><a:bodyPr rot=\"{rot}\" vert=\"horz\"/><a:p><a:pPr><a:defRPr/></a:pPr></a:p></c:txPr></c:catAx>")
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var page = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page;
+        // Drawn a word at a time: the two lines are told apart by their baselines, 1.15 em apart.
+        var words = page.Items.OfType<TextItem>().Where(t => "Alpha beta gamma delta epsilon zeta".Split(' ').Contains(t.Text)).ToList();
+        var lines = words.GroupBy(t => Math.Round(t.Baseline, 1)).Select(g => string.Join(" ", g.OrderBy(t => t.X).Select(t => t.Text))).ToList();
+        Assert.Equal(["Alpha beta gamma", "delta epsilon zeta"], lines.Order().ToList());
+        Assert.Equal(4, page.Items.OfType<PushItem>().Count(p => p.Rotation == angle)); // a turn per line: 2 + "b" + "c"
+        var font = words[0];
+        double widest = lines.Max(l => font.Font.MeasureText(l, font.FontSize));
+        Assert.Equal(12.51 + widest, PlotBottomOffset(page), 0);
+    }
+
     [Fact]
     public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
     {
