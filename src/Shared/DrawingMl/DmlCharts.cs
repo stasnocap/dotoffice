@@ -1001,19 +1001,19 @@ internal static class DmlCharts
 
     /// <summary>
     /// Excel's automatic value axis: the minimum is zero unless the data lies in a narrow band far from it, the maximum leaves 5 % of
-    /// headroom, and the major unit is the smallest 1, 2 or 5 times a power of ten that gives at most ten intervals.
+    /// headroom (all-equal values start at zero: measured in Word 2021), and the major unit is the smallest 1, 2 or 5 times a power of ten that gives at most ten intervals.
     /// </summary>
     internal static (double Min, double Max, double Step) AutoScale(double dataMin, double dataMax, double? fixedMin, double? fixedMax, double? fixedMajor, int maxIntervals = 10)
     {
         double lo = dataMin, hi = dataMax;
         if (lo >= 0)
         {
-            if (hi > 0 && (hi - lo) / hi <= 1.0 / 6) lo -= (hi - lo) / 2; else lo = 0;
+            if (hi > lo && hi > 0 && (hi - lo) / hi <= 1.0 / 6) lo -= (hi - lo) / 2; else lo = 0;
             if (lo < 0 && dataMin >= 0) lo = Math.Max(lo, 0);
         }
         else if (hi <= 0)
         {
-            if (lo < 0 && (hi - lo) / -lo <= 1.0 / 6) hi += (hi - lo) / 2; else hi = 0;
+            if (hi > lo && lo < 0 && (hi - lo) / -lo <= 1.0 / 6) hi += (hi - lo) / 2; else hi = 0;
             if (hi > 0 && dataMax <= 0) hi = Math.Min(hi, 0);
         }
         if (hi > lo && hi > 0) hi += 0.05 * (hi - lo);
