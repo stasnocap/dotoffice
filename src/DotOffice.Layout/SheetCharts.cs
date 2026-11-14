@@ -505,6 +505,7 @@ public sealed partial class SheetLayoutEngine
                 double ty = ValueY(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(plotLeft, ty, plotRight, ty, chart.GridlineWidth, chart.GridlineColor));
                 if (!chart.ShowValueAxis) { }
+                else if (valueAngle == 0 && _wordPlot is not null && chart.ReverseCategories) PlaceText(tick.Label, valueFont, plotRight + 8.67 * valueFont.FontSize / 10, ty + CenterShift(valueFont), Anchor.Start, true, 0, items); // Word: right of the axis, 8.67 pt (measured)
                 else if (valueAngle == 0) PlaceText(tick.Label, valueFont, plotLeft - AxisLabelGap(valueFont), ty + CenterShift(valueFont), Anchor.End, true, 0, items);
                 else
                 {
@@ -586,7 +587,7 @@ public sealed partial class SheetLayoutEngine
                         else
                         {
                             double center = plotLeft + (Slot(i) + 0.5) * band;
-                            double xLeft = center + offset, ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
+                            double xLeft = chart.ReverseCategories ? center - offset - barWidth : center + offset, ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
                             AddFaded(items, s.Alpha, new RectItem(xLeft, ya, barWidth, Math.Max(yb - ya, 0), color));
                             AddBarOutline(items, s, xLeft, ya, barWidth, Math.Max(yb - ya, 0));
                             errorBars.Add((s, i, xLeft + barWidth / 2, stacked ? to : value, scale));
@@ -760,7 +761,11 @@ public sealed partial class SheetLayoutEngine
         if (chart.ShowValueAxis)
         {
             if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, valueWidth, chart.ValueAxisColor));
-            else items.Add(new LineItem(plotLeft, plotTop, plotLeft, plotBottom, valueWidth, chart.ValueAxisColor));
+            else
+            {
+                double vx = _wordPlot is not null && chart.ReverseCategories ? plotRight : plotLeft; // Word moves the value axis to the reversed categories' start
+                items.Add(new LineItem(vx, plotTop, vx, plotBottom, valueWidth, chart.ValueAxisColor));
+            }
         }
         if (chart.ShowCategoryAxis)
         {

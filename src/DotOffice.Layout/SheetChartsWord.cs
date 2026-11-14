@@ -56,7 +56,7 @@ public sealed partial class SheetLayoutEngine
         && chart.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter or ChartKind.Pie
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
-        && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false, ReverseCategories: false })
+        && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false } && (!chart.ReverseCategories || chart.Kind is ChartKind.Column or ChartKind.Line))
         && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90 or 45)
         && chart.Series.Count > 0;
 
@@ -298,6 +298,10 @@ public sealed partial class SheetLayoutEngine
         // The first value label is centered on the plot's top, which gives way to it: 12.82 at 14 pt, 11.71 at 12 pt, 11 at 8 and 10 pt (a line through the 12 and 14 pt samples; INFERRED beyond them).
         double topMargin = bar || pie ? 11 : Math.Max(11, 0.555 * valueFont.FontSize + 5.05);
         double left = pie ? 11 : 6.5 + labelWidth + WordAxisGap(bar ? categoryFont : valueFont), right = w - 11, top = topMargin + band, bottom = pie ? h - 11 : h - (6.5 + WordLineHeight(bottomFont) + 5.71 * bottomFont.FontSize / 10);
+        // Reversed categories (measured in Word 2021, 2 column samples at 10 pt): the value axis and its labels move to the right; the plot starts 11 from the left
+        // and its right edge gives way by the labels' width + the axis gap less 4.52 (INFERRED: one label width).
+        bool reversed = chart.ReverseCategories && !bar;
+        if (reversed) { right -= left - 6.5 - 4.52; left = 11; }
         double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - legendFont.FontSize - (anyLine ? 14 : 0); // the text width the box leaves (the widest line, at most the cap)
