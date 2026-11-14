@@ -473,6 +473,7 @@ public sealed partial class SheetLayoutEngine
         if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         if (chart.PlotBackground is { } plotFill) items.Add(new RectItem(plotLeft, plotTop, plotWidth, plotHeight, plotFill));
+        if (chart.PlotBorder is { } plotLine) StrokeRect(plotLeft, plotTop, plotWidth, plotHeight, plotLine, chart.PlotBorderWidth, items); // centred on the plot's edge (measured, Word 2021)
         var primary = chart.ValueScale;
         var secondaryScale = chart.SecondaryScale;
 
@@ -935,6 +936,9 @@ public sealed partial class SheetLayoutEngine
 
     // ------------------------------------------------------------------ pie
 
+    private static void StrokeRect(double x, double y, double w, double h, Color color, double width, List<LayoutItem> items) =>
+        items.Add(new PathItem([new(x, y, PathPointKind.Move), new(x + w, y, PathPointKind.Line), new(x + w, y + h, PathPointKind.Line), new(x, y + h, PathPointKind.Line), new(0, 0, PathPointKind.Close)], null, color, width));
+
     private void EmitPie(SheetChart chart, double left, double top, double right, double bottom, RunProperties font, List<LayoutItem> items)
     {
         if (chart.Series.Count == 0) return;
@@ -943,6 +947,12 @@ public sealed partial class SheetLayoutEngine
         double radius = Math.Min(right - left, bottom - top) / 2 - (_wordPlot is not null && !outside ? 0 : 4) - (outside ? font.FontSize * 2 : 0);
         if (radius < 5) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
+        // Word fills and strokes a pie's plot area as the square around the pie (measured in Word 2021: 2r a side, centred on the pie).
+        if (_wordPlot is not null)
+        {
+            if (chart.PlotBackground is { } pieFill) items.Add(new RectItem(cx - radius, cy - radius, 2 * radius, 2 * radius, pieFill));
+            if (chart.PlotBorder is { } pieLine) StrokeRect(cx - radius, cy - radius, 2 * radius, 2 * radius, pieLine, chart.PlotBorderWidth, items);
+        }
         var labels = new List<PieLabel>();
         if (chart.Kind == ChartKind.Pie)
             DrawSlices(chart, chart.Series[0], cx, cy, 0, radius, labels, items);

@@ -327,6 +327,17 @@ public class ChartTests
     }
 
     [Fact]
+    public void A_Word_plot_area_line_is_stroked_on_the_plot_edge_as_measured_in_Word_2021()
+    {
+        var xml = ChartXml().Replace("</c:plotArea>", "<c:spPr><a:solidFill><a:srgbClr val=\"FFFF00\"/></a:solidFill><a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln></c:spPr></c:plotArea>");
+        var page = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page;
+        var fill = Assert.Single(page.Items.OfType<RectItem>(), r => r.Fill == Color.TryParseHex("FFFF00"));
+        var line = Assert.Single(page.Items.OfType<PathItem>(), p => p.Stroke == Color.TryParseHex("FF0000"));
+        Assert.Equal(1.5, line.LineWidth);
+        Assert.Equal(fill.X, line.Points[0].X, 3);
+    }
+
+    [Fact]
     public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
     {
         var page = CategoryLabelPage("A", 80, 360); // slot 4 pt: every 2nd label upright (40) beats every 3rd turned (27)

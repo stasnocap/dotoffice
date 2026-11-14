@@ -779,8 +779,17 @@ internal static class DmlCharts
         {
             (background, border, plotBackground, defaultText) = (Color.Black, null, new Color(0x3F, 0x3F, 0x3F), Color.White);
         }
+        Color? plotBorder = null;
+        double plotBorderWidth = 0.75;
         if (Child(plot, "spPr") is { } plotProperties)
+        {
             plotBackground = Child(plotProperties, "noFill") is not null ? null : SolidFill(plotProperties, theme, plotBackground);
+            if (Child(plotProperties, "ln") is { } plotLine && Child(plotLine, "solidFill") is not null)
+            {
+                plotBorder = SolidFill(plotLine, theme);
+                if (plotLine.Attribute("w") is { } pw && double.TryParse(pw.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pemu) && pemu > 0 && pemu < 2e9) plotBorderWidth = pemu / 12700;
+            }
+        }
         if (Child(space, "spPr") is { } chartProperties)
         {
             background = SolidFill(chartProperties, theme, background);
@@ -829,7 +838,7 @@ internal static class DmlCharts
             ValueAxisTicks = Tick(valueAxis, "majorTickMark", ChartTickMark.Cross), CategoryAxisTicks = Tick(categoryAxis, "majorTickMark", ChartTickMark.Cross),
             ValueAxisMinorTicks = Tick(valueAxis, "minorTickMark", ChartTickMark.None), CategoryAxisMinorTicks = Tick(categoryAxis, "minorTickMark", ChartTickMark.None),
             ValueAxisColor = valueLine.Color, CategoryAxisColor = categoryLine.Color, ValueAxisWidth = valueLine.Width, CategoryAxisWidth = categoryLine.Width,
-            WordLayout = context.WordChartFrame, WordLegendTopRight = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") == "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
+            WordLayout = context.WordChartFrame, WordLegendTopRight = context.WordChartFrame && (string?)Child(legendElement, "legendPos")?.Attribute("val") == "tr", Background = background, Border = border, BorderWidth = borderWidth, PlotBackground = plotBackground, PlotBorder = plotBorder, PlotBorderWidth = plotBorderWidth, DefaultTextColor = defaultText, FontSize = fontSize, TextColor = context.TextColor,
             XTicks = xTicks, XMin = xMin, XMax = xMax, XGridlines = xy && Child(categoryAxis, "majorGridlines") is not null && !(GridlineStyle(categoryAxis, theme).Hidden),
             CategoriesBetween = (string?)Child(valueAxis, "crossBetween")?.Attribute("val") is { } crossing ? crossing != "midCat" : kind != ChartKind.Area,
             HoleSize = Child(group, "holeSize") is { } hole ? Math.Clamp(Number(hole, "val", 50), 10, 90) / 100 : 0.5,

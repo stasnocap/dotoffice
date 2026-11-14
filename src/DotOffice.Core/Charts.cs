@@ -364,6 +364,12 @@ public sealed record SheetChart : SheetObject
     /// <summary>The plot area's fill; null means none.</summary>
     public Color? PlotBackground { get; init; }
 
+    /// <summary>The plot area's outline (its <c>spPr</c> line); null means none.</summary>
+    public Color? PlotBorder { get; init; }
+
+    /// <summary>The width in points of <see cref="PlotBorder"/>.</summary>
+    public double PlotBorderWidth { get; init; } = 0.75;
+
     /// <summary>The color of axis, legend and title text that states none (white on the dark chart styles 41 to 48); null leaves <see cref="TextColor"/> or black.</summary>
     public Color? DefaultTextColor { get; init; }
 
