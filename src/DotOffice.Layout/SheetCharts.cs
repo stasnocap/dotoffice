@@ -798,11 +798,12 @@ public sealed partial class SheetLayoutEngine
                     else if (_wordBarLabels is { } wrapped && i < wrapped.Lines.Count && wrapped.Lines[i].Count > 1)
                     {
                         // Word (measured, 2021): the lines stand 1.15 em apart as a block centred on the category, right-aligned at the gap, each line centred in the block.
-                        // Only the lines that fit the category's band are kept, the last one ending in as many whole words as fit the line with a "…" (1 sample; Word sets that cut line 5 pt further right than centred, UNMEASURED why).
+                        // Only the lines that fit the category's band are kept, the last one cut with a "…" (FitWordBarLines) that hangs past the line: the cut line is centred,
+                        // and counts towards the block, by its kept text alone (measured in Word 2021 at 8 to 14 pt, t31 and t32).
                         var lines = FitWordBarLines(wrapped.Lines[i], band, wrapped.Cap, categoryFont);
-                        double own = lines.Max(l => MeasureChartText(l, categoryFont)), step = 1.15 * categoryFont.FontSize, mid = plotLeft - AxisLabelGap(categoryFont) - own / 2;
+                        double own = lines.Max(l => WordBarLineWidth(l, categoryFont)), step = 1.15 * categoryFont.FontSize, mid = plotLeft - AxisLabelGap(categoryFont) - own / 2;
                         for (int k = 0; k < lines.Count; k++)
-                            PlaceText(lines[k], categoryFont, mid, y + CenterShift(categoryFont) + (k - (lines.Count - 1) / 2.0) * step, Anchor.Middle, true, 0, items);
+                            PlaceText(lines[k], categoryFont, mid - WordBarLineWidth(lines[k], categoryFont) / 2, y + CenterShift(categoryFont) + (k - (lines.Count - 1) / 2.0) * step, Anchor.Start, true, 0, items);
                     }
                     else PlaceText(chart.Categories[i], categoryFont, plotLeft - AxisLabelGap(categoryFont), y + CenterShift(categoryFont), Anchor.End, true, 0, items);
                 }

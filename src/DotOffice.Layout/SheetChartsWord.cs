@@ -181,16 +181,32 @@ public sealed partial class SheetLayoutEngine
         return new WordCategoryPlan(angle, stride, lines, width, overhang, widths);
     }
 
-    /// <summary>The lines of a wrapped bar label that fit its category's band: the last kept line ends in as many whole words as fit the cap with a "…" (measured in Word 2021).</summary>
+    /// <summary>
+    /// The lines of a wrapped bar label that fit its category's band: the last kept line ends in as many whole words as fit the cap with a "…", or, when its first word
+    /// does not, in as many of that word's characters (measured in Word 2021, 91 samples at 8, 10, 12 and 14 pt, W 120 to 230, t31 and t32: the cut fits the cap to
+    /// -0.86 .. 0.65 pt at 8 pt, -0.40 .. 0.63 at 10 and -0.62 .. 0.16 at 14; 1 sample at 12 pt cuts 0.61 pt shorter).
+    /// </summary>
     private List<string> FitWordBarLines(List<string> lines, double band, double cap, RunProperties font)
     {
-        int fit = Math.Max(1, (int)Math.Floor(band / (1.15 * font.FontSize) + 1e-6));
+        // n lines fit a band of at least n - 0.06 steps of 1.15 em (measured in Word 2021: 2 lines at 1.977 steps, 8 pt; 2 and not 3 at 2.68 to 2.75; 3 and not 4
+        // at 3.90; so the slack lies in 0.023 .. 0.101; t31, t32).
+        int fit = Math.Max(1, (int)Math.Floor(band / (1.15 * font.FontSize) + 0.06));
         if (lines.Count <= fit) return lines;
         var rest = string.Join(" ", lines.Skip(fit - 1)).Split(' ');
         string last = rest[0];
-        for (int k = 1; k < rest.Length && MeasureChartText(last + " " + rest[k] + "…", font) <= cap; k++) last += " " + rest[k];
+        if (MeasureChartText(last + "…", font) > cap)
+        {
+            int k = 1;
+            while (k < last.Length && MeasureChartText(last[..(k + 1)] + "…", font) <= cap) k++;
+            last = last[..k];
+        }
+        else
+            for (int k = 1; k < rest.Length && MeasureChartText(last + " " + rest[k] + "…", font) <= cap; k++) last += " " + rest[k];
         return [.. lines.Take(fit - 1), last + "…"];
     }
+
+    /// <summary>A bar label line's width as Word sets it: a cut line's "…" hangs past the line's end and is not counted (measured in Word 2021 at 8 to 14 pt, t31 and t32).</summary>
+    private double WordBarLineWidth(string line, RunProperties font) => MeasureChartText(line.EndsWith('…') ? line[..^1] : line, font);
 
     /// <summary>Draws category label <paramref name="i"/> under the axis at <paramref name="cx"/> as <paramref name="plan"/> says; <paramref name="plotBottom"/> is the axis.</summary>
     private void PlaceWordCategory(WordCategoryPlan plan, int i, RunProperties font, double cx, double plotBottom, List<LayoutItem> items)
@@ -328,9 +344,10 @@ public sealed partial class SheetLayoutEngine
         double legendShift = hasLegend ? widest + 12.04 + keyShare : 0;
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - keyShare; // the text width the box leaves (the widest line, at most the cap)
-        // A bar chart's category labels wrap at their spaces to lines of at most 0.482 W - 0.505 x the side legend's box - 9.25 + 0.3 (size - 10) (fitted to the
-        // brackets of 62 samples in Word 2021 at 8, 10 and 14 pt, W 160 to 500, with and without a right legend, t26 and t31; 2 miss: bw-s8-w280 by 1.3 pt, and
-        // bw-s10-w160-r, whose legend Word also lays out differently); the plot's left edge then follows the widest line shown.
+        // A bar chart's category labels wrap at their spaces to lines of at most 0.499 W - 0.49 x the side legend's box - 14.5 - 0.55 (size - 10) (fitted to the
+        // brackets of 156 samples in Word 2021 at 8, 10, 12 and 14 pt, W 120 to 500, H 104 to 288, with and without a right legend, t26, t31 and t32; 6 miss by
+        // 0.09 to 0.93 pt, and bw-s10-w160-r, whose legend Word lays out differently, is left out; the chart's height does not matter); the plot's left edge then
+        // follows the widest line shown.
         _wordBarLabels = null;
         _wordBarTurned = bar && chart.TextStyles.CategoryAxis?.Rotation == 45 && chart.Categories.Count > 0;
         // A bar chart's labels asked to turn by 45 degrees (rot -2700000; measured in Word 2021, 25 samples at 8, 10 and 14 pt, H 216 / 288, 4 label sets) never wrap:
@@ -339,7 +356,7 @@ public sealed partial class SheetLayoutEngine
         if (_wordBarTurned) left = 6.5 + 0.7071 * labelWidth + 1.65 * categoryFont.FontSize;
         else if (bar && chart.Categories.Count > 0)
         {
-            double cap = 0.482 * w - 0.505 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 9.25 + 0.3 * (categoryFont.FontSize - 10);
+            double cap = 0.499 * w - 0.49 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 14.5 - 0.55 * (categoryFont.FontSize - 10);
             var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
             _wordBarLabels = (barLines, cap);
             double wrapped = barLines.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
@@ -398,7 +415,7 @@ public sealed partial class SheetLayoutEngine
         if (_wordBarLabels is { } barLabels && barWrapped >= 0)
         {
             double barBand = (bottom - top) / chart.Categories.Count;
-            double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
+            double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += shown - barWrapped;
         }
         if (right - left < 20 || bottom - top < 20) return false;
