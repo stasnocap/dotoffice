@@ -151,8 +151,9 @@ public sealed partial class SheetLayoutEngine
     private WordCategoryPlan TruncateTurnedLabels(IReadOnlyList<string> categories, RunProperties font, double angle, int stride, double chartHeight, double band)
     {
         double fs = font.FontSize;
-        // The constant fits every sample at 8, 10 and 14 pt (0.38..0.58, 1.60..1.74, 2.24..2.61 pt); between and beyond them it is interpolated and INFERRED.
-        double extra = fs <= 10 ? 0.48 + 0.595 * (fs - 8) : 1.67 + 0.19 * (fs - 10);
+        // The constant fits every sample at 8, 10 and 14 pt (0.38..0.58, 1.60..1.60, 2.24..2.61 pt; at 10 pt a title and a bottom legend sample put Word's cap just
+        // under a 19 resp. 31 character label that 1.67 kept); between and beyond them it is interpolated and INFERRED.
+        double extra = fs <= 10 ? 0.48 + 0.56 * (fs - 8) : 1.60 + 0.20 * (fs - 10);
         double total = 0.5 * (chartHeight - band) + extra;
         double cap = angle == 45 ? (total - 6.5 - WordTurnBottom * fs) / 0.7071 : total - 6.5 - WordUprightBottom * fs;
         double ellipsis = MeasureChartText("…", font);
