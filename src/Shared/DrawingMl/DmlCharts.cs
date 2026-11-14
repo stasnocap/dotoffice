@@ -564,10 +564,10 @@ internal static class DmlCharts
             {
                 // Word 2016 (measured at 4, 5, 6, 8 and 10 intervals with Arial 10 pt, and at 8 and 14 pt): a vertical axis takes the finest step whose n intervals
                 // leave the plot at least n label lines (1.15 em) + 10.25 pt high (the 10.25 does not scale; bracketed 10.0..10.5); a horizontal axis the finest
-                // with at least 4.122 em (bracketed 4.118..4.126) an interval over the length from the left margin to the plot's right edge. Never more than ten
+                // with at least 4.1175 em (bracketed 4.118..4.126 earlier; cx/cw-s8-w156 in t32 need at most 4.1175) an interval over the length from the left margin to the plot's right edge. Never more than ten
                 // intervals (INFERRED: a 181 pt plot keeps 6 intervals where 11 would fit). A left legend counting against the length is INFERRED.
                 int Intervals(string lastLabel) => Math.Clamp((int)Math.Floor(horizontal
-                    ? WordAxisLength(true, lastLabel) / (4.122 * fontSize0) + 1e-9
+                    ? WordAxisLength(true, lastLabel) / (4.1175 * fontSize0) + 1e-9
                     : (WordAxisLength(false, lastLabel) - 10.25) / (1.15 * fontSize0) + 1e-9), 1, 10);
                 maxIntervals = Intervals("");
                 if (horizontal)
