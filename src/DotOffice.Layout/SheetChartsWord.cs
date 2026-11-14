@@ -192,9 +192,9 @@ public sealed partial class SheetLayoutEngine
     /// </summary>
     private List<string> FitWordBarLines(List<string> lines, double band, double cap, RunProperties font)
     {
-        // n lines fit a band of at least n - 0.06 steps of 1.15 em (measured in Word 2021: 2 lines at 1.977 steps, 8 pt; 2 and not 3 at 2.68 to 2.75; 3 and not 4
-        // at 3.90; so the slack lies in 0.023 .. 0.101; t31, t32).
-        int fit = Math.Max(1, (int)Math.Floor(band / (1.15 * font.FontSize) + 0.06));
+        // n lines fit a band of at least n - 0.0045 x size steps of 1.15 em (measured in Word 2021: 2 lines at 1.977 steps, 8 pt; 2 and not 3 at 2.68 to 2.75; 3 and not 4
+        // at 3.90; at 3.941 not 4 at 10 pt but 4 at 14 pt (t46); so the slack grows with the size: 0.0045 em per pt fits every bracket; t31, t32, t46).
+        int fit = Math.Max(1, (int)Math.Floor(band / (1.15 * font.FontSize) + 0.0045 * font.FontSize));
         if (lines.Count <= fit) return lines;
         var rest = string.Join(" ", lines.Skip(fit - 1)).Split(' ');
         string last = rest[0];
