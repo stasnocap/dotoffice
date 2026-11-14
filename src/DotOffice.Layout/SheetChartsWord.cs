@@ -248,12 +248,15 @@ public sealed partial class SheetLayoutEngine
 
         // Right and left legends wrap a name wider than W / 3 - 1.15 em (measured, 40+ samples at W 236..480 and 10 pt, then at 8, 9, 12 and 14 pt: greedy at spaces, a single word that is too
         // wide breaks by character; 11.5 pt at 10 pt, but 8 and 14 pt show it scales with the font, as one line height). The legend's text width is then the widest line, and the legend box is at
-        // most W / 3 + 9.0 wide (so a line up to 1.5 pt over the limit is not wrapped, it just moves plot and legend less). Top and bottom legends never wrap (measured).
+        // most W / 3 + 9.0 wide (so a line up to 1.5 pt over the limit is not wrapped, it just moves plot and legend less). A top or bottom entry wraps when its key, text and two 0.283 em gaps exceed Lmax (below),
+        // at that width less the key (measured in Word 2021 at 10 pt, W 200: "… number 1 here" 175.4 wide wraps, one line from W 220; the cap lies in 152.8..175.4).
         bool verticalLegend = hasLegend && chart.Legend is LegendPosition.Right or LegendPosition.Left;
-        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, w / 3 - 1.15 * legendFont.FontSize) : [e.Name]).ToList();
+        double rowCap = 0.9 * w + 2.85 - 0.566 * legendFont.FontSize;
+        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, w / 3 - 1.15 * legendFont.FontSize)
+            : hasLegend && Advance(i) + widths[i] > rowCap ? WrapLegendName(e.Name, legendFont, rowCap - Advance(i)) : [e.Name]).ToList();
         int maxLines = lines.Select(l => l.Count).DefaultIfEmpty(1).Max();
         double lineStep = 1.15 * legendFont.FontSize; // lines inside an entry: 11.50 / 9.20 pt measured at 10 / 8 pt
-        if (verticalLegend)
+        if (hasLegend)
         {
             widths = lines.Select(l => l.Max(t => MeasureChartText(t, legendFont))).ToList();
             widest = widths.DefaultIfEmpty(0).Max();
@@ -283,7 +286,9 @@ public sealed partial class SheetLayoutEngine
         }
         // The plot gives way by one row plus 17.06 per further row, less 1.50 once there are several rows (10 pt; whether the 1.50 scales with the font is UNMEASURED,
         // the 8 pt sample c-b-s8-n12 is checked against it).
-        double extraRows = gridRows > 1 ? (gridRows - 1) * entryPitch - 1.5 : 0;
+        // Wrapped entries (measured at W 200, 1 and 3 entries of 2 lines): every row takes the tallest entry's pitch; a single row grows by 1.106 em per extra line.
+        double extraLines = (maxLines - 1) * 1.106 * legendFont.FontSize;
+        double extraRows = gridRows > 1 ? (gridRows - 1) * stackPitch - 1.5 : extraLines;
 
         // ---- the plot rectangle (relative to the chart's corner)
         double labelWidth = pie ? 0 : bar ? chart.Categories.Select(c => MeasureChartText(c, categoryFont)).DefaultIfEmpty(0).Max()
@@ -399,8 +404,9 @@ public sealed partial class SheetLayoutEngine
         {
             double fs = legendFont.FontSize, start = w / 2 + 1.84 + 0.12 * (fs - 10);
             double bottomShift = gridRows > 1 && chart.Legend == LegendPosition.Bottom ? 1.5 : 0; // the last row's key top is 1.50 lower than a single row's
+            // A bottom grid of wrapped entries keeps its last row's first line where a single line stands, the rest running past the chart's edge (measured).
             double firstCy = chart.Legend == LegendPosition.Top ? band + 6.0 + entryPitch / 2
-                : h - 6.0 - entryPitch / 2 + bottomShift - (gridRows - 1) * entryPitch;
+                : h - 6.0 - entryPitch / 2 + bottomShift - (gridRows > 1 ? (gridRows - 1) * stackPitch : extraLines);
             if (gridRows == 1)
             {
                 double cx = start - (rowTotal + (entries.Count - 1) * rowGap) / 2;
@@ -418,7 +424,7 @@ public sealed partial class SheetLayoutEngine
                 for (int i = 0; i < entries.Count; i++)
                 {
                     double kx = left0 + i % gridCols * gridPitch;
-                    placed.Add((i, kx, firstCy + i / gridCols * entryPitch, kx + Advance(i)));
+                    placed.Add((i, kx, firstCy + i / gridCols * stackPitch, kx + Advance(i)));
                 }
             }
         }

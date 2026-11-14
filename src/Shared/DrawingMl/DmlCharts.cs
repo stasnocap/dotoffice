@@ -502,12 +502,16 @@ internal static class DmlCharts
             {
                 int n = series.Count;
                 if (n == 0) return 0;
-                double lmax = 0.9 * template.Width + 2.85, advance = 0.753 * fontSize0 - 0.3;
-                double total = series.Sum(sr => advance + sr.Name.Length * 0.53 * fontSize0);
-                if (total + 0.283 * fontSize0 * (n + 1) <= lmax) return 0;
-                double gridPitch = advance + series.Max(sr => sr.Name.Length) * 0.53 * fontSize0 + 0.283 * fontSize0;
+                double lmax = 0.9 * template.Width + 2.85, advance = 0.753 * fontSize0 - 0.3, rowCap = lmax - 0.566 * fontSize0;
+                // A name too long for the row wraps at rowCap less the key (see SheetChartsWord); each extra line adds 1.106 em to every row.
+                double NameWidth(ChartSeries sr) => Math.Min(sr.Name.Length * 0.53 * fontSize0, rowCap - advance);
+                int maxLines = series.Max(sr => advance + sr.Name.Length * 0.53 * fontSize0 > rowCap ? (int)Math.Ceiling(sr.Name.Length * 0.53 * fontSize0 / Math.Max(1, rowCap - advance)) : 1);
+                double extra = (maxLines - 1) * 1.106 * fontSize0;
+                double total = series.Sum(sr => advance + NameWidth(sr));
+                if (total + 0.283 * fontSize0 * (n + 1) <= lmax) return extra;
+                double gridPitch = advance + series.Max(NameWidth) + 0.283 * fontSize0;
                 int maxCols = Math.Max(1, (int)Math.Floor((lmax - 2.83) / gridPitch)), rows = (n + maxCols - 1) / maxCols;
-                return rows > 1 ? (rows - 1) * pitch - 1.5 : 0;
+                return rows > 1 ? (rows - 1) * (pitch + extra) - 1.5 : extra;
             }
             if (!horizontal)
             {

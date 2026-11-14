@@ -348,6 +348,18 @@ public class ChartTests
         Assert.Contains(page.Items.OfType<TextItem>(), t => t.Text == "Alpha"); // the label is drawn, wrapped to lines of at most 0.484 W - 10.9 (163.3 pt)
     }
 
+    [Theory]
+    [InlineData(200, true)]  // Lmax 182.85: the 7.2 pt key, 175 pt of text and two 0.283 em gaps do not fit
+    [InlineData(220, false)]
+    public void A_Word_bottom_legend_wraps_an_entry_longer_than_its_row_as_measured_in_Word_2021(double width, bool wraps)
+    {
+        var xml = ChartXml().Replace("<c:v>S0</c:v>", "<c:v>Long legend entry name number 1 here</c:v>").Replace("</c:plotArea>", "</c:plotArea><c:legend><c:legendPos val=\"b\"/></c:legend>")
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var page = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), width, 216))).Page;
+        var text = page.Items.OfType<TextItem>().ToList();
+        Assert.Equal(wraps, text.Single(t => t.Text == "here").Baseline > text.Single(t => t.Text == "Long").Baseline + 5); // "here" alone on a second line
+    }
+
     [Fact]
     public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
     {
