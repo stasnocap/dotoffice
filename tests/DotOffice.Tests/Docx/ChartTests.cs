@@ -285,6 +285,23 @@ public class ChartTests
         Assert.Equal(fits, page.Items.OfType<TextItem>().Any(t => t.Text == word));
     }
 
+    [Theory]
+    [InlineData("l")] [InlineData("tr")]
+    public void An_overlaid_legend_leaves_a_bar_charts_value_axis_as_without_a_legend(string position)
+    {
+        // Measured in Word 2021 (bars at 10 and 14 pt with left and top-right overlaid legends): the horizontal axis keeps the interval of the full width.
+        List<string> Labels(string legend)
+        {
+            var xml = ChartXml().Replace("<c:barDir val=\"col\"/>", "<c:barDir val=\"bar\"/>").Replace("<c:v>S0</c:v>", "<c:v>A rather long series name</c:v>")
+                .Replace("<c:axPos val=\"b\"/>", "<c:axPos val=\"l\"/>").Replace("<c:axPos val=\"l\"/><c:crossAx val=\"1\"/>", "<c:axPos val=\"b\"/><c:crossAx val=\"1\"/>")
+                .Replace("</c:plotArea>", "</c:plotArea>" + legend);
+            var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216)));
+            return page.Items.OfType<TextItem>().Select(t => t.Text).Where(t => t.All(char.IsDigit)).ToList();
+        }
+        Assert.Equal(Labels(""), Labels($"<c:legend><c:legendPos val=\"{position}\"/><c:overlay val=\"1\"/></c:legend>"));
+        Assert.NotEqual(Labels(""), Labels($"<c:legend><c:legendPos val=\"{position}\"/><c:overlay val=\"0\"/></c:legend>"));
+    }
+
     [Fact]
     public void Word_turns_category_labels_by_90_degrees_when_the_slot_is_between_11_1_and_15_7_pt()
     {

@@ -513,6 +513,8 @@ internal static class DmlCharts
                 int maxCols = Math.Max(1, (int)Math.Floor((lmax - 2.83) / gridPitch)), rows = (n + maxCols - 1) / maxCols;
                 return rows > 1 ? (rows - 1) * (pitch + extra) - 1.5 : extra;
             }
+            // An overlaid legend takes nothing off the plot, wherever it stands (measured in Word 2021: column, bar and line charts, r, l, t, b and tr at 8, 10 and 14 pt, t51).
+            if (legendElement0 is not null && Flag(Child(legendElement0, "overlay"), "val")) legendPos = null;
             if (!horizontal)
             {
                 double length = template.Height - Math.Max(11, 0.555 * fontSize0 + 5.05) - band - (6.5 + lineHeight + 0.571 * fontSize0);
@@ -521,9 +523,8 @@ internal static class DmlCharts
             }
             double entryWidth = series.Count == 0 ? 0 : series.Max(sr => sr.Name.Length) * 0.53 * fontSize0;
             double width = template.Width - 22;
-            bool overlaid = legendElement0 is not null && Flag(Child(legendElement0, "overlay"), "val") && legendPos == "r"; // an overlaid right legend takes nothing off the plot (measured)
-            if (legendPos is "l" or "r" or "tr" && !overlaid) width -= entryWidth + 12.04 + fontSize0;
-            if (!xy || legendPos == "r") width -= lastLabel.Length * 0.556 * fontSize0 / 2;
+            if (legendPos is "l" or "r" or "tr") width -= entryWidth + 12.04 + fontSize0;
+            width -= lastLabel.Length * 0.556 * fontSize0 / 2; // the plot gives way by half the last label, bars and scatter alike (measured, t50)
             return width;
         }
 
