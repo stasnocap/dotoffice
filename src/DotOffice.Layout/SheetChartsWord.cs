@@ -278,7 +278,7 @@ public sealed partial class SheetLayoutEngine
             : entries[i].Kind == ChartKind.Scatter ? WordKey.Marker : WordKey.Square;
         // From the key's left edge to the text: the key and its gap (the square 5.03 + 2.2, the line 19.2 + 2.09, the marker alone 5.04 + 2.3).
         double square = 0.503 * legendFont.FontSize; // the key is 0.503 em square (4.02 / 5.03 / 7.04 pt measured at 8 / 10 / 14 pt)
-        double Advance(int i) => KeyOf(i) switch { WordKey.Line => 21.29, WordKey.Marker => 7.34, _ => square + 0.25 * legendFont.FontSize - 0.3 }; // the gap to the text: 1.72 / 2.2 / 3.22 pt measured; the line and marker keys are only measured at 10 pt
+        double Advance(int i) => KeyOf(i) switch { WordKey.Line => 21.29, _ => square + 0.25 * legendFont.FontSize - 0.3 }; // the gap to the text: 1.72 / 2.2 / 3.22 pt measured; the line key is only measured at 10 pt; a marker key takes a square key's room (measured in Word 2021, scatter at 8, 10 and 14 pt with right and bottom legends, t50)
         bool anyLine = Enumerable.Range(0, entries.Count).Any(i => KeyOf(i) == WordKey.Line);
         double entryPitch = WordLineHeight(legendFont) + 6.0 - 0.043 * legendFont.FontSize; // 14.85 / 17.07 / 21.49 pt measured at 8 / 10 / 14 pt
         double rowHeight = entryPitch + 6.0;
@@ -390,14 +390,15 @@ public sealed partial class SheetLayoutEngine
             {
                 case LegendPosition.Right:
                     right -= legendShift;
-                    // The last label of the horizontal value axis is centered on the plot's edge and the plot gives way by half of it (bars and scatter).
-                    if (scatter && chart.XTicks.Count > 0) right -= MeasureChartText(chart.XTicks[^1].Label, categoryFont) / 2;
                     if (topRight) { if (trStacked) { top += entries.Count * entryPitch; bottom -= legendPad; } else top += legendPad; }
                     break;
                 case LegendPosition.Left: left += legendShift; break;
                 case LegendPosition.Top: top += rowHeight + extraRows; break;
                 default: bottom -= rowHeight + extraRows; break;
             }
+        // Scatter: the last label of the horizontal value axis is centered on the plot's edge and the plot gives way by half of it, whatever the legend (measured in
+        // Word 2021 with right and bottom legends at 8, 10 and 14 pt, t50).
+        if (scatter && chart.XTicks.Count > 0) right -= MeasureChartText(chart.XTicks[^1].Label, categoryFont) / 2;
         // Bars: the plot gives way by half of the last value label (measured with a bottom legend at 8 and 14 pt; with a top or left legend or none it is INFERRED).
         if (bar && chart.Ticks.Count > 0) right -= MeasureChartText(chart.Ticks[^1].Label, valueFont) / 2;
         // The first (bottom) turned label hangs below its category; Word raises the plot's bottom, in one pass from the normal layout, until that hang
@@ -548,7 +549,8 @@ public sealed partial class SheetLayoutEngine
                         break;
                     case WordKey.Marker:
                         if (series is null || series.Marker)
-                            DrawMarker(items, kx + 2.52, ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, series?.MarkerDiameter ?? 5, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
+                            DrawMarker(items, x + textLeft - (0.4717 * legendFont.FontSize + 0.165), ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, 0.5 * legendFont.FontSize), // at most 0.5 em (3.96 at 8 pt), its centre 0.4717 em + 0.165 before the text (3.94 / 4.75 / 6.77 measured)
+                             series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
                         break;
                     default:
                         items.Add(new RectItem(kx, ky - square / 2, square, square, color));

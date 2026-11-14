@@ -1169,6 +1169,16 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_Word_scatter_legends_marker_key_is_at_most_half_an_em()
+    {
+        // Measured in Word 2021: a 5 pt marker-only key is drawn 3.96 across at 8 pt, 5.04 at 10 and 14 pt.
+        var series = Series(Red, 5, 10, 20) with { Line = false, Marker = true, MarkerSymbol = ChartMarkerSymbol.Square, MarkerSize = 5, XValues = new double?[] { 1, 2, 3 } };
+        var page = Page(WordChart(ChartKind.Scatter, LegendPosition.Right, series) with { FontSize = 8, XMin = 0, XMax = 4 });
+        Assert.Equal(3, Filled(page, Red).Count(b => Math.Abs(b.Width - 5) < 0.01));
+        Assert.Single(Filled(page, Red), b => Math.Abs(b.Width - 4) < 0.01);
+    }
+
+    [Fact]
     public void A_scatter_series_with_no_line_and_symbol_none_draws_no_markers()
     {
         var none = Series(Red, 5, 10, 20) with { Line = false, MarkerNone = true, XValues = new double?[] { 1, 2, 3 } };
