@@ -138,7 +138,10 @@ public sealed partial class SheetLayoutEngine
             return new WordCategoryPlan(0, 1, categories.Select(c => WrapLegendName(c.Replace('\n', ' '), font, slot)).ToList(), widest);
         double turnLine = WordTurnLine * font.FontSize;
         int uprightStride = (int)Math.Ceiling(widest / slot), uprightShown = (n + uprightStride - 1) / uprightStride;
-        (double Angle, int Stride) turn = slot >= turnLine / Math.Sin(Math.PI / 4) ? (45, 1) : slot >= turnLine ? (90, 1) : (45, (int)Math.Ceiling(turnLine / slot));
+        // Skipping: every Nth label at 90 degrees needs 1.14 em per label shown (bracketed to 1.136 .. 1.142 by 12 samples, t40 and t41); 45 degrees, needing 1.113 em / sin 45,
+        // wins when it shows as many (t30), else 90 (t40 to t42: 40 and 80 categories at 8, 10 and 14 pt, labels of 1 to 36 characters).
+        int stride90 = (int)Math.Ceiling(1.14 * font.FontSize / slot - 1e-9), stride45 = (int)Math.Ceiling(turnLine / Math.Sin(Math.PI / 4) / slot - 1e-9);
+        (double Angle, int Stride) turn = slot >= turnLine / Math.Sin(Math.PI / 4) ? (45, 1) : slot >= turnLine ? (90, 1) : stride45 <= stride90 ? (45, stride45) : (90, stride90);
         int turnShown = (n + turn.Stride - 1) / turn.Stride;
         if (uprightShown >= turnShown) return new WordCategoryPlan(0, uprightStride, plain, widest);
         return TruncateTurnedLabels(categories, font, turn.Angle, turn.Stride, chartHeight, band);
@@ -245,9 +248,9 @@ public sealed partial class SheetLayoutEngine
         }
         else
         {
-            // Reading bottom-up: the baseline stands 3.45 right of the slot's centre and the text ends 6.0 below the axis (measured).
+            // Reading bottom-up: the baseline stands 3.45 right of the slot's centre and the text ends 0.6 em + 0.14 + 0.01 (size - 10) below the axis (measured at 8, 10 and 14 pt, t41).
             var (pitch, ascent, descent) = LineMetrics(font);
-            PlaceText(plan.Lines[i][0], font, cx + 3.45 * fs / 10 - ((pitch - (ascent + descent)) / 2 + ascent), plotBottom + 6.0 * fs / 10 - (plan.Overhang?[i] ?? 0), Anchor.End, false, 90, items);
+            PlaceText(plan.Lines[i][0], font, cx + 3.45 * fs / 10 - ((pitch - (ascent + descent)) / 2 + ascent), plotBottom + 6.0 * fs / 10 + 0.14 + 0.01 * (fs - 10) - (plan.Overhang?[i] ?? 0), Anchor.End, false, 90, items);
         }
     }
 
@@ -448,9 +451,9 @@ public sealed partial class SheetLayoutEngine
             if (plan.MaxLines > 1) bottom -= (plan.MaxLines - 1) * 1.15 * fs;
             else if (plan.Angle == 45) bottom += restBottom - (6.5 + WordTurnBottom * fs + 0.7071 * plan.Width);
             else if (plan.Angle == 90) bottom += restBottom - (6.5 + WordUprightBottom * fs + plan.Width);
-            // Upright labels shown every Nth also take a little off the right: 0.41 and 1.14 pt at slots of 5.4 and 4.0 for 6.7 wide labels, none at 6.5 (fitted as half
-            // of what the label's width exceeds its slot less 0.55 pt, the dependence on the width is INFERRED).
-            if (plan.Angle == 0 && plan.Stride > 1) right -= Math.Max(0, 0.5 * (plan.Width - 0.55 * scale - slot));
+            // Upright labels shown every Nth also take a little off the right: 0.5 x the label's width - 0.573 x the slot (least squares over 14 samples at 8, 10 and 14 pt,
+            // 1 and 2 digit labels, 20 to 80 categories, t40; within 0.15 pt).
+            if (plan.Angle == 0 && plan.Stride > 1) right -= Math.Max(0, 0.5 * plan.Width - 0.573 * slot);
             if (plan.Angle == 45)
             {
                 // Skipped 45 degree labels also take a little off the right (1.0 to 3.6 pt measured with 8 to 28 categories at 8, 10 and 14 pt; fitted, INFERRED elsewhere).
