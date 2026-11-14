@@ -362,7 +362,8 @@ public sealed partial class SheetLayoutEngine
         {
             double lastTick = chart.Ticks.Count > 0 ? MeasureChartText(chart.Ticks[^1].Label, valueFont) : 0;
             double cap = 0.4975 * w - 0.49 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 11.43 - 0.05 * (categoryFont.FontSize - 10) - 0.3 * lastTick;
-            var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
+            // A word wider than the cap breaks between letters 0.75 pt inside it (bracketed to 0.51 .. 1.00 by 30 samples at 8, 10 and 14 pt, W 110 to 180, t43 to t47).
+            var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap, cap - 0.75)).ToList();
             _wordBarLabels = (barLines, cap);
             double wrapped = barLines.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += wrapped - labelWidth;

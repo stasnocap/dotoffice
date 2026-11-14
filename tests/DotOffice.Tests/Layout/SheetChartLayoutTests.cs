@@ -1090,6 +1090,17 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_Word_bar_label_breaks_a_long_word_0_75_pt_inside_the_wrap_width()
+    {
+        // Measured in Word 2021 (14 pt, W 150, right legend): "Annual" breaks as "Annu" + "al", not "Annua" + "l".
+        string[] cats = ["Quarterly revenue north region total", "Annual sales of the western office", "East", "Average regional output per month"];
+        var chart = WordChart(ChartKind.Bar, LegendPosition.Right, new("A", [3, 5, 4, 6], Red), new("B", [2, 3, 4, 5], Blue)) with { FontSize = 14, Width = 150, Categories = cats };
+        var texts = ArialPage(chart).Items.OfType<TextItem>().Select(t => t.Text).ToList();
+        Assert.Contains("Annu", texts);
+        Assert.DoesNotContain("Annua", texts);
+    }
+
+    [Fact]
     public void A_Word_charts_90_degree_label_breaks_a_long_word_narrower_at_14_pt()
     {
         // Measured in Word 2021 (14 pt, H 120): lines wrap at 47.8 but a word breaks between letters at 0.5 H - 11.0 - 0.425 (size - 10) = 47.3, so "Quarterly"
