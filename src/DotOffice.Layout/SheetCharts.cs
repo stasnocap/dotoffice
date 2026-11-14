@@ -75,12 +75,18 @@ public sealed partial class SheetLayoutEngine
             if (chart.TitlePosition is { } at) PlaceText(chart.Title, titleFont, x + at.X * w, y + at.Y * h, Anchor.Start, false, 0, items);
             else
             {
-                // Word sets the title's baseline an ascent plus 0.0633 em (1.14 pt at 18 pt; INFERRED for other sizes) below the 7 pt padding, without the shared line's half-leading
-                // (measured at 18 pt, Word 2021).
-                double lift = 0;
-                if (chart.WordLayout) { var (pitch, ascent, descent) = LineMetrics(titleFont); lift = 0.0633 * titleFont.FontSize - (pitch - (ascent + descent)) / 2; }
-                top += PlaceText(chart.Title, titleFont, (left + right) / 2, top + lift, Anchor.Middle, false, 0, items) + 4;
-                wordBand = WordLineHeight(titleFont) + 9;
+                // Word sets the title's baseline an ascent plus 0.034 em + 0.48 pt below the 7 pt padding, without the shared line's half-leading (fitted to 10, 14, 18, 24 and 32 pt
+                // within 0.06 pt, Word 2021). It wraps at the spaces to lines of at most 0.8 W - 6.1 (bracketed to 0.3 pt at 18, 24 and 32 pt), each centred, 1.15 em apart.
+                if (chart.WordLayout)
+                {
+                    var (pitch, ascent, descent) = LineMetrics(titleFont);
+                    double lift = 0.034 * titleFont.FontSize + 0.48 - (pitch - (ascent + descent)) / 2, step = 1.15 * titleFont.FontSize;
+                    var lines = chart.Title.Split('\n').SelectMany(part => WrapLegendName(part, titleFont, 0.8 * w - 6.1)).ToList(); // paragraphs: wrapped each (INFERRED)
+                    for (int i = 0; i < lines.Count; i++) PlaceText(lines[i], titleFont, (left + right) / 2, top + lift + i * step, Anchor.Middle, false, 0, items);
+                    top += pitch + (lines.Count - 1) * step + 4;
+                    wordBand = WordLineHeight(titleFont) + (lines.Count - 1) * step + 9;
+                }
+                else top += PlaceText(chart.Title, titleFont, (left + right) / 2, top, Anchor.Middle, false, 0, items) + 4;
             }
         }
         if (UseWordLayout(chart) && EmitWordChart(chart, x, y, w, h, wordBand, font, items))
