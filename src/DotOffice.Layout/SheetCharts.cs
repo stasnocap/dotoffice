@@ -498,7 +498,8 @@ public sealed partial class SheetLayoutEngine
             {
                 double tx = ValueX(primary, tick.Value);
                 if (chart.MajorGridlines) items.Add(new LineItem(tx, plotTop, tx, plotBottom, chart.GridlineWidth, chart.GridlineColor));
-                if (chart.ShowValueAxis) PlaceTurnedBelow(tick.Label, valueFont, tx, plotBottom + LabelDrop(valueFont), valueAngle, items);
+                if (chart.ShowValueAxis && _wordPlot is not null && chart.ReverseCategories && valueAngle == 0) PlaceText(tick.Label, valueFont, tx, plotTop - 18.9 * valueFont.FontSize / 10, Anchor.Middle, false, 0, items); // Word: above the plot, baseline 8.78 pt over it, scaling with the font INFERRED (measured)
+                else if (chart.ShowValueAxis) PlaceTurnedBelow(tick.Label, valueFont, tx, plotBottom + LabelDrop(valueFont), valueAngle, items);
             }
             else
             {
@@ -566,7 +567,7 @@ public sealed partial class SheetLayoutEngine
                             double center = plotBottom - (Slot(i) + 0.5) * band;
                             double ya = Math.Min(p0, p1), yb = Math.Max(p0, p1);
                             // In horizontal bar charts the first series sits lowest in each group.
-                            double slot = stacked ? center + offset : center - offset - barWidth;
+                            double slot = stacked || chart.ReverseCategories ? center + offset : center - offset - barWidth; // reversed: the first series on top (measured in Word 2021)
                             AddFaded(items, s.Alpha, new RectItem(ya, slot, Math.Max(yb - ya, 0), barWidth, color));
                             AddBarOutline(items, s, ya, slot, Math.Max(yb - ya, 0), barWidth);
                             errorBars.Add((s, i, slot + barWidth / 2, stacked ? to : value, scale));
@@ -760,7 +761,11 @@ public sealed partial class SheetLayoutEngine
         }
         if (chart.ShowValueAxis)
         {
-            if (horizontalBars) items.Add(new LineItem(plotLeft, plotBottom, plotRight, plotBottom, valueWidth, chart.ValueAxisColor));
+            if (horizontalBars)
+            {
+                double vy = _wordPlot is not null && chart.ReverseCategories ? plotTop : plotBottom; // Word moves the value axis to the reversed categories' start
+                items.Add(new LineItem(plotLeft, vy, plotRight, vy, valueWidth, chart.ValueAxisColor));
+            }
             else
             {
                 double vx = _wordPlot is not null && chart.ReverseCategories ? plotRight : plotLeft; // Word moves the value axis to the reversed categories' start

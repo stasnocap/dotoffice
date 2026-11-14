@@ -444,4 +444,16 @@ public class ChartTests
         Assert.Contains(warnings, w => w.Code == "docx.chart-no-cache");
         Assert.Empty(page.Items.OfType<RectItem>());
     }
+
+    [Fact]
+    public void A_bar_chart_with_reversed_categories_puts_the_first_bar_on_top_and_the_value_labels_above_the_plot()
+    {
+        var xml = ChartXml().Replace("<c:barDir val=\"col\"/>", "<c:barDir val=\"bar\"/>").Replace("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/>", "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/>");
+        var (page, _, _) = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216)));
+        var bars = Bars(page, Accent1).OrderBy(r => r.Y).ToList();
+        Assert.Equal(3, bars.Count);
+        Assert.True(bars[0].Width < bars[1].Width && bars[1].Width < bars[2].Width); // 5, 10, 20 from the top down
+        double plotTop = bars[0].Y;
+        Assert.All(page.Items.OfType<TextItem>().Where(t => t.Text is "0" or "5" or "10" or "15" or "20"), t => Assert.True(t.Baseline < plotTop));
+    }
 }

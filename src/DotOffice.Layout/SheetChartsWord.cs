@@ -56,7 +56,7 @@ public sealed partial class SheetLayoutEngine
         && chart.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter or ChartKind.Pie
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
-        && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false } && (!chart.ReverseCategories || chart.Kind is ChartKind.Column or ChartKind.Line))
+        && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false } && (!chart.ReverseCategories || chart.Kind is ChartKind.Column or ChartKind.Line or ChartKind.Bar))
         && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90 or 45)
         && chart.Series.Count > 0;
 
@@ -69,7 +69,8 @@ public sealed partial class SheetLayoutEngine
         // the stack's first series the lowest segment). Measured on the right; a bottom legend of clustered bars lists them backwards too (measured at 8 and 14 pt);
         // the top and left legends and percent-stacked columns are INFERRED.
         bool vertical = chart.Legend is LegendPosition.Right or LegendPosition.Left;
-        if (chart.Kind == ChartKind.Bar && chart.Grouping == ChartGrouping.Clustered || vertical && chart.Kind == ChartKind.Column && chart.Grouping != ChartGrouping.Clustered) entries.Reverse();
+        if (chart.Kind == ChartKind.Bar && chart.Grouping == ChartGrouping.Clustered && !chart.ReverseCategories || // reversed bars list the series in order (measured in Word 2021)
+             vertical && chart.Kind == ChartKind.Column && chart.Grouping != ChartGrouping.Clustered) entries.Reverse();
         return entries;
     }
 
@@ -302,6 +303,9 @@ public sealed partial class SheetLayoutEngine
         // and its right edge gives way by the labels' width + the axis gap less 4.52 (INFERRED: one label width).
         bool reversed = chart.ReverseCategories && !bar;
         if (reversed) { right -= left - 6.5 - 4.52; left = 11; }
+        // Reversed bars (measured in Word 2021, 2 samples at 10 pt): the first category is on top, the value axis and its labels move to the top; the plot
+        // runs from 11 + 12.71 to H - 11 (the 12.71 scaling with the value font is INFERRED).
+        if (bar && chart.ReverseCategories) { top = 11 + 1.271 * valueFont.FontSize + band; bottom = h - 11; }
         double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - legendFont.FontSize - (anyLine ? 14 : 0); // the text width the box leaves (the widest line, at most the cap)
