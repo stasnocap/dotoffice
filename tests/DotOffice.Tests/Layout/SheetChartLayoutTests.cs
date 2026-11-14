@@ -1079,6 +1079,21 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
+    public void A_Word_charts_90_degree_label_breaks_a_long_word_narrower_at_14_pt()
+    {
+        // Measured in Word 2021 (14 pt, H 120): lines wrap at 47.8 but a word breaks between letters at 0.5 H - 11.0 - 0.425 (size - 10) = 47.3, so "Quarterly"
+        // becomes "Quarte" + "rly" ("Quarter" is 47.46 wide).
+        var chart = WordChart(ChartKind.Column, LegendPosition.None, new ChartSeries("A", [3, 5, 4, 6], Red)) with
+        {
+            FontSize = 14, Height = 120, Categories = ["Quarterly revenue north region total", "Annual sales of the western office", "East", "Average regional output per month"],
+            TextStyles = new ChartTextStyles { CategoryAxis = new ChartTextStyle(Rotation: 90) },
+        };
+        var texts = ArialPage(chart).Items.OfType<TextItem>().Select(t => t.Text).ToList();
+        Assert.Contains("Quarte", texts);
+        Assert.DoesNotContain("Quarter", texts);
+    }
+
+    [Fact]
     public void Value_axis_labels_and_the_labels_of_horizontal_bars_turn_too()
     {
         static IEnumerable<PushItem> Turned(LayoutPage page) => page.Items.OfType<PushItem>().Where(p => p.Rotation != 0);

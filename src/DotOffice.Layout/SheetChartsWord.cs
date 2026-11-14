@@ -76,8 +76,9 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>Greedy word wrap of a legend name to <paramref name="limit"/>; a word wider than the limit breaks by character.</summary>
-    private List<string> WrapLegendName(string name, RunProperties font, double limit)
+    private List<string> WrapLegendName(string name, RunProperties font, double limit, double? breakLimit = null)
     {
+        double inWord = breakLimit ?? limit; // a word wider than the limit breaks between letters at this width
         var result = new List<string>();
         string current = "";
         foreach (var word in name.Split(' '))
@@ -89,7 +90,7 @@ public sealed partial class SheetLayoutEngine
             while (rest.Length > 0 && MeasureChartText(rest, font) > limit)
             {
                 int k = 1;
-                while (k < rest.Length && MeasureChartText(rest[..(k + 1)], font) <= limit) k++;
+                while (k < rest.Length && MeasureChartText(rest[..(k + 1)], font) <= inWord) k++;
                 result.Add(rest[..k]);
                 rest = rest[k..];
             }
@@ -450,9 +451,11 @@ public sealed partial class SheetLayoutEngine
             // An asked turn by 90 degrees either way (measured in Word 2021 at 8, 10, 12 and 14 pt, H 120 to 300): the labels wrap at their spaces to lines of at most
             // 0.5 H - 11.2 - 0.25 (size - 10) (bracketed by 20 samples; the slope to 0.03) and the plot's bottom stands 0.6025 em + 6.52 + the widest line above the chart's bottom.
             double fs = categoryFont.FontSize, cap = 0.5 * h - 11.2 - 0.25 * (fs - 10);
+            // A word wider than that breaks between letters at 0.5 H - 11.0 - 0.425 (size - 10) (bracketed by 19 samples at 10 and 14 pt, H 110 to 150, t48 and t39).
+            double inWord = 0.5 * h - 11.0 - 0.425 * (fs - 10);
             // The lines stand across the category's slot; those that do not fit it are cut as a bar label's (measured at 12 and 14 pt, H 120 and 160).
             double askedSlot = (right - left) / (chart.CategoriesBetween ? chart.Categories.Count : Math.Max(chart.Categories.Count - 1, 1));
-            var asked = chart.Categories.Select(c => FitWordBarLines(WrapLegendName(c.Replace('\n', ' '), categoryFont, cap), askedSlot, cap, categoryFont)).ToList();
+            var asked = chart.Categories.Select(c => FitWordBarLines(WrapLegendName(c.Replace('\n', ' '), categoryFont, cap, inWord), askedSlot, cap, categoryFont)).ToList();
             double askedWidest = asked.SelectMany(l => l).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             _wordCategories = new WordCategoryPlan(styles.CategoryAxis!.Rotation!.Value, 1, asked, askedWidest, Asked: true);
             bottom = h - (0.6025 * fs + 6.52 + askedWidest);
