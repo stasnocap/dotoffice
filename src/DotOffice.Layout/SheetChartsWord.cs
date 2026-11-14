@@ -387,9 +387,9 @@ public sealed partial class SheetLayoutEngine
             {
                 // Skipped 45 degree labels also take a little off the right (2.0 to 3.5 pt measured at 8 to 16 skipped labels; fitted, INFERRED elsewhere).
                 if (plan.Stride > 1) right -= Math.Max(0, 7.23 * scale - 0.5 * slot + 0.02 * (chart.Categories.Count - 20));
-                // Every shown label's start must stay clear of the left edge, so a short first label lets the plot start further left (measured: "Quarterly…" then "Annual total west").
-                for (int i = 0; i < chart.Categories.Count; i += plan.Stride)
-                    left = Math.Max(left, 0.7071 * (plan.Widths?[i] ?? plan.Width) + WordTurnLeft - (2 * i + 1) * right / (2 * slots));
+                // Only the first label's start keeps the plot's left edge clear (measured in Word 2021: a short first label lets the plot start at its normal left even when
+                // the second is long, um-8-l10-short1; "Quarterly…" then "Annual total west").
+                left = Math.Max(left, 0.7071 * (plan.Widths?[0] ?? plan.Width) + WordTurnLeft - right / (2 * slots));
             }
             if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
         }
