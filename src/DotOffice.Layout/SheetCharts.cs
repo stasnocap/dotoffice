@@ -786,6 +786,7 @@ public sealed partial class SheetLayoutEngine
                     double across = Across(MeasureChartText(chart.Categories[i], categoryFont), categoryFont.FontSize * 1.25, barCategoryAngle);
                     if (_wordPlot is not null && _wordBarTurned)
                     {
+                        if (i % _wordBarTurnStride != 0) continue;
                         // Word: the baseline's end stands 0.2 + 1.0 em left of the plot, 0.25 em below the category's centre (fitted to the ink at 8, 10 and 14 pt).
                         var (pitch, ascent, descent) = LineMetrics(categoryFont);
                         double toBaseline = (pitch - (ascent + descent)) / 2 + ascent, fs = categoryFont.FontSize;

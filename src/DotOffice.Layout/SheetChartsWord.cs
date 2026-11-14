@@ -111,6 +111,7 @@ public sealed partial class SheetLayoutEngine
     /// <summary>Set by <see cref="EmitWordChart"/> for a bar chart: each category label's lines, wrapped as Word wraps them; null when the labels keep the shared layout.</summary>
     private (List<List<string>> Lines, double Cap)? _wordBarLabels;
     private bool _wordBarTurned; // a bar chart's category labels turned by 45 degrees (asked)
+    private int _wordBarTurnStride = 1; // ... showing every Nth of them
 
     // Word 2021's category labels (measured at Arial 10 pt, bar and line charts of 3 to 80 categories, 200 to 430 pt wide; every size below is therefore stated per
     // pt of font size and INFERRED for other sizes). The slot is the plot's width over the category count, taken before the labels narrow the plot.
@@ -372,6 +373,12 @@ public sealed partial class SheetLayoutEngine
             double band0 = (bottom - top + extra) / chart.Categories.Count;
             double hang = 0.7071 * MeasureChartText(chart.Categories[0], categoryFont) + 10.10 - 0.218 * categoryFont.FontSize + extra / 8;
             bottom = Math.Min(bottom, h - hang + band0 / 2);
+            // A category band under 1.11 em shows every Nth label, N = ceil(1.11 em / band) as for columns, and the left edge follows the widest label shown
+            // (measured in Word 2021: 8 categories at 14 pt with a 1.0 em band showed 4; bands of 1.39 em and up showed all, 18 samples at 8, 10 and 14 pt).
+            double slot = (bottom - top) / chart.Categories.Count;
+            _wordBarTurnStride = Math.Max(1, (int)Math.Ceiling(WordTurnLine * categoryFont.FontSize / slot - 1e-9));
+            if (_wordBarTurnStride > 1)
+                left = 6.5 + 0.7071 * chart.Categories.Where((_, i) => i % _wordBarTurnStride == 0).Max(c => MeasureChartText(c, categoryFont)) + 1.65 * categoryFont.FontSize;
         }
         if (right - left < 20 || bottom - top < 20) return false;
 
@@ -495,7 +502,7 @@ public sealed partial class SheetLayoutEngine
             else if (scatter) EmitScatter(chart, pl, pt, pr, pb, font, items);
             else EmitAxisChart(chart, pl, pt, pr, pb, font, items);
         }
-        finally { _wordPlot = null; _wordCategories = null; _wordBarLabels = null; _wordBarTurned = false; }
+        finally { _wordPlot = null; _wordCategories = null; _wordBarLabels = null; _wordBarTurned = false; _wordBarTurnStride = 1; }
         if (overlay) DrawLegend();
         return true;
     }
