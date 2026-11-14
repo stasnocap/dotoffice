@@ -363,12 +363,13 @@ public sealed partial class SheetLayoutEngine
         // Bars: the plot gives way by half of the last value label (measured with a bottom legend at 8 and 14 pt; with a top or left legend or none it is INFERRED).
         if (bar && chart.Ticks.Count > 0) right -= MeasureChartText(chart.Ticks[^1].Label, valueFont) / 2;
         // The first (bottom) turned label hangs below its category; Word raises the plot's bottom, in one pass from the normal layout, until that hang
-        // (0.7071 W + 10.10 - 0.218 em below the category's centre, fitted at 8, 10 and 14 pt) fits the chart: centre = normal bottom - half a normal band.
-        // An 8-category sample came out 1.55 pt lower than this (UNEXPLAINED, 1 sample).
+        // (0.7071 W + 10.10 - 0.218 em below the category's centre, fitted at 8, 10 and 14 pt) fits the chart: centre = normal bottom - half a band, the band
+        // taken over the normal plot height plus 7.55 + 1.713 em (fitted with 3, 4, 6 and 8 categories at 8, 10 and 14 pt; exact at 4, where the old fit was made).
         if (_wordBarTurned)
         {
-            double band0 = (bottom - top) / chart.Categories.Count;
-            double hang = 0.7071 * MeasureChartText(chart.Categories[0], categoryFont) + 10.10 - 0.218 * categoryFont.FontSize;
+            double extra = 7.55 + 1.713 * categoryFont.FontSize;
+            double band0 = (bottom - top + extra) / chart.Categories.Count;
+            double hang = 0.7071 * MeasureChartText(chart.Categories[0], categoryFont) + 10.10 - 0.218 * categoryFont.FontSize + extra / 8;
             bottom = Math.Min(bottom, h - hang + band0 / 2);
         }
         if (right - left < 20 || bottom - top < 20) return false;
