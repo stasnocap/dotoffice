@@ -419,6 +419,18 @@ public sealed partial class SheetLayoutEngine
         if (_wordBarLabels is { } barLabels && barWrapped >= 0)
         {
             double barBand = (bottom - top) / chart.Categories.Count;
+            // The plot's top comes down by (4.6 n s + 9.72 - 0.107 s - (W - the side legend's box)) / 8 when that is positive, n the lines the top category shows
+            // (measured in Word 2021, 54 samples at 8, 10 and 14 pt, W 100 to 200, H 160 to 300, 4 label sets, with and without a right legend: within 0.08 pt;
+            // the chart's height does not matter). The bottom also rises once the bottom category shows 5 lines (UNMEASURED rule, left out); a left legend is INFERRED.
+            if (!chart.ReverseCategories)
+            {
+                double s = categoryFont.FontSize;
+                double box = verticalLegend && !overlay && hasLegend ? legendShift : 0;
+                // n counts whole 1.15 em lines inside the band before it is lowered (Word keeps 5 lines in a 46.2 band at 8 pt, 3 of 4 in a 45.3 band at 10 pt).
+                int n = Math.Min(FitWordBarLines(barLabels.Lines[^1], barBand, barLabels.Cap, categoryFont).Count, (int)Math.Floor(barBand / (1.15 * s) + 1e-9));
+                double drop = (4.6 * n * s + 9.72 - 0.107 * s - (w - box)) / 8;
+                if (drop > 0) { top += drop; barBand = (bottom - top) / chart.Categories.Count; }
+            }
             double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += shown - barWrapped;
         }

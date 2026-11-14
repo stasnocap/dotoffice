@@ -174,6 +174,18 @@ public class SheetChartLayoutTests
         Assert.Equal(OriginY + 216 - 6 - (row - 6) / 2 - 2.515, keys[0].Y, 1); // centered in the row, which ends 6 pt above the edge (17.05 above it for Arial 10)
     }
 
+    [Fact]
+    public void A_narrow_Word_bar_chart_lowers_its_plot_top_by_the_top_labels_lines()
+    {
+        // Measured in Word 2021 (10 pt, H 216, right legend): the top category shows 3 lines; the plot's top is 14.18 at W 150 and 11 at W 200,
+        // (4.6 n s + 9.72 - 0.107 s - (W - legend box)) / 8 = 3.18 pt lower.
+        string[] cats = ["Quarterly revenue north region total", "Annual sales of the western office", "East", "Average regional output per month"];
+        double Top(double w) => Page(WordChart(ChartKind.Bar, LegendPosition.Right, new("A", [3, 5, 4, 6], Red), new("B", [2, 3, 4, 5], Blue))
+                with { Width = w, Categories = cats, MajorGridlines = true })
+            .Items.OfType<LineItem>().Where(l => l.X1 == l.X2 && l.Y2 - l.Y1 > 50).Min(l => Math.Min(l.Y1, l.Y2));
+        Assert.InRange(Top(150) - Top(200), 3.1, 3.25); // the test fonts make the legend box a little wider than Arial's
+    }
+
     [Theory]
     [InlineData(144, 6, 64.44, 12)]
     [InlineData(216, 6, 102.18, 19)]
