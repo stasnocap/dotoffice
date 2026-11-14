@@ -52,7 +52,7 @@ public sealed partial class SheetLayoutEngine
     /// no turned or hidden axes and no secondary axes. Other charts keep the shared layout.
     /// </summary>
     private static bool UseWordLayout(SheetChart chart) =>
-        chart.WordLayout && chart.PlotArea is null && chart.LegendBox is null && chart.TitlePosition is null && (!chart.LegendOverlay || chart.Legend == LegendPosition.Right && !chart.WordLegendTopRight)
+        chart.WordLayout && chart.PlotArea is null && chart.LegendBox is null && chart.TitlePosition is null
         && chart.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter or ChartKind.Pie
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
@@ -277,8 +277,8 @@ public sealed partial class SheetLayoutEngine
         double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - legendFont.FontSize - (anyLine ? 14 : 0); // the text width the box leaves (the widest line, at most the cap)
-        // Overlay (measured, 1 sample: right legend, column chart, with title): the legend stands where a normal right legend does but the plot keeps its full
-        // width and the legend is drawn after it. Overlay with any other legend position is not measured and keeps the shared layout (UseWordLayout).
+        // Overlay (measured in Word 2021, column charts at r, l, t, b and tr): the legend stands where the normal one does but the plot keeps the legend-less
+        // layout and the legend is drawn after it.
         bool overlay = hasLegend && chart.LegendOverlay;
         // legendPos "tr" (measured, 2 samples: 3-entry column charts at 10 pt, with and without a title): the entries stack at the top right at the right legend's x,
         // the plot gives way on the right as for a right legend, on top by one entry pitch per entry and on the bottom by 6.0 pt. That the top offset is n x pitch,
@@ -391,7 +391,8 @@ public sealed partial class SheetLayoutEngine
                     case WordKey.Line:
                         items.Add(new LineItem(kx, ky, kx + 19.2, ky, series?.StrokeWidth ?? 1.5, series?.StrokeColor ?? color));
                         if (series is null || series.Marker)
-                            DrawMarker(items, kx + 9.6, ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, series?.MarkerDiameter ?? 5, series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
+                            // The key's marker is capped at 0.6 em (measured in Word 2021: 7, 9 and 12 drawn 6.0 at 10 pt, 7 kept at 14 pt).
+                            DrawMarker(items, kx + 9.6, ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, 0.6 * legendFont.FontSize), series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
                         break;
                     case WordKey.Marker:
                         if (series is null || series.Marker)
