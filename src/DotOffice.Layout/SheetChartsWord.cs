@@ -106,6 +106,9 @@ public sealed partial class SheetLayoutEngine
     /// <summary>Set by <see cref="EmitWordChart"/> for the axis layout that draws the labels; null when the labels keep the shared layout.</summary>
     private WordCategoryPlan? _wordCategories;
 
+    /// <summary>Set by <see cref="EmitWordChart"/> for a bar chart: each category label's lines, wrapped as Word wraps them; null when the labels keep the shared layout.</summary>
+    private (List<List<string>> Lines, double Cap)? _wordBarLabels;
+
     // Word 2021's category labels (measured at Arial 10 pt, bar and line charts of 3 to 80 categories, 200 to 430 pt wide; every size below is therefore stated per
     // pt of font size and INFERRED for other sizes). The slot is the plot's width over the category count, taken before the labels narrow the plot.
     private const double WordTurnLine = 1.113;         // em: a turned label needs this much slot for its line; 11.1 at 10 pt; 1.113 fits the thresholds at 8, 10 and 14 pt (every case within 0.1 pt of the limit)
@@ -293,6 +296,17 @@ public sealed partial class SheetLayoutEngine
         double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - legendFont.FontSize - (anyLine ? 14 : 0); // the text width the box leaves (the widest line, at most the cap)
+        // A bar chart's category labels wrap at their spaces to lines of at most 0.484 (W - the side legend's box) - 10.9 (fitted to the brackets of 7 samples in Word 2021
+        // at 10 pt, W 200 to 500, with and without a right legend; INFERRED at other sizes); the plot's left edge then follows the widest line.
+        _wordBarLabels = null;
+        if (bar && chart.Categories.Count > 0)
+        {
+            double cap = 0.484 * (w - (verticalLegend && !chart.LegendOverlay ? legendShift : 0)) - 10.9 * categoryFont.FontSize / 10;
+            var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
+            _wordBarLabels = (barLines, cap);
+            double wrapped = barLines.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
+            left += wrapped - labelWidth;
+        }
         // Overlay (measured in Word 2021, column charts at r, l, t, b and tr): the legend stands where the normal one does but the plot keeps the legend-less
         // layout and the legend is drawn after it.
         bool overlay = hasLegend && chart.LegendOverlay;
@@ -446,7 +460,7 @@ public sealed partial class SheetLayoutEngine
             else if (scatter) EmitScatter(chart, pl, pt, pr, pb, font, items);
             else EmitAxisChart(chart, pl, pt, pr, pb, font, items);
         }
-        finally { _wordPlot = null; _wordCategories = null; }
+        finally { _wordPlot = null; _wordCategories = null; _wordBarLabels = null; }
         if (overlay) DrawLegend();
         return true;
     }

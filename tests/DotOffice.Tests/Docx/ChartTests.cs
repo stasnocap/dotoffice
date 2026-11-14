@@ -338,6 +338,17 @@ public class ChartTests
     }
 
     [Fact]
+    public void A_Word_bar_chart_wraps_a_category_label_wider_than_the_chart_instead_of_drawing_nothing()
+    {
+        const string name = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi";
+        var xml = ChartXml().Replace("<c:barDir val=\"col\"/>", "<c:barDir val=\"bar\"/>").Replace("<c:v>a</c:v>", $"<c:v>{name}</c:v>")
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var page = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page;
+        Assert.Equal(3, Bars(page, Accent1).Count);
+        Assert.Contains(page.Items.OfType<TextItem>(), t => t.Text == "Alpha"); // the label is drawn, wrapped to lines of at most 0.484 W - 10.9 (163.3 pt)
+    }
+
+    [Fact]
     public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
     {
         var page = CategoryLabelPage("A", 80, 360); // slot 4 pt: every 2nd label upright (40) beats every 3rd turned (27)
