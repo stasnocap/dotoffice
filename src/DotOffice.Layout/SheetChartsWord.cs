@@ -419,17 +419,24 @@ public sealed partial class SheetLayoutEngine
         if (_wordBarLabels is { } barLabels && barWrapped >= 0)
         {
             double barBand = (bottom - top) / chart.Categories.Count;
-            // The plot's top comes down by (4.6 n s + 9.72 - 0.107 s - (W - the side legend's box)) / 8 when that is positive, n the lines the top category shows
-            // (measured in Word 2021, 54 samples at 8, 10 and 14 pt, W 100 to 200, H 160 to 300, 4 label sets, with and without a right legend: within 0.08 pt;
-            // the chart's height does not matter). The bottom also rises once the bottom category shows 5 lines (UNMEASURED rule, left out); a left legend is INFERRED.
+            // The plot's top comes down by (c n 1.15 s + 11.04 - 0.32 c - 0.107 s - (W - the side legend's box)) / 2c when that is positive, c the categories, n the lines
+            // the top category shows (measured in Word 2021, 64 samples at 8, 10 and 14 pt, 3, 4 and 6 categories, W 100 to 200, H 160 to 300, with and without a right
+            // legend: within 0.08 pt; the chart's height does not matter); a left legend is INFERRED.
             if (!chart.ReverseCategories)
             {
                 double s = categoryFont.FontSize;
+                int c = chart.Categories.Count;
                 double box = verticalLegend && !overlay && hasLegend ? legendShift : 0;
                 // n counts whole 1.15 em lines inside the band before it is lowered (Word keeps 5 lines in a 46.2 band at 8 pt, 3 of 4 in a 45.3 band at 10 pt).
-                int n = Math.Min(FitWordBarLines(barLabels.Lines[^1], barBand, barLabels.Cap, categoryFont).Count, (int)Math.Floor(barBand / (1.15 * s) + 1e-9));
-                double drop = (4.6 * n * s + 9.72 - 0.107 * s - (w - box)) / 8;
-                if (drop > 0) { top += drop; barBand = (bottom - top) / chart.Categories.Count; }
+                int Lines(List<string> l) => Math.Min(FitWordBarLines(l, barBand, barLabels.Cap, categoryFont).Count, (int)Math.Floor(barBand / (1.15 * s) + 1e-9));
+                double drop = (c * Lines(barLabels.Lines[^1]) * 1.15 * s + 11.04 - 0.32 * c - 0.107 * s - (w - box)) / (2 * c);
+                // The bottom rises by (c n 1.15 s + 10.05 - 25.75 c - 13.88 (s - 10) - (W - the box)) / 2c, n the bottom category's lines counted the same way (measured
+                // in Word 2021, 18 samples at 8, 10 and 14 pt, 3 and 4 categories, W 100 to 160, H 216 / 300, 4 to 7 lines: within 0.05 pt; 2 categories with 7 lines
+                // do not rise; the size term is measured with 4 categories only).
+                double rise = (c * Lines(barLabels.Lines[0]) * 1.15 * s + 10.05 - 25.75 * c - 13.88 * (s - 10) - (w - box)) / (2 * c);
+                if (drop > 0) top += drop;
+                if (rise > 0) bottom -= rise;
+                barBand = (bottom - top) / chart.Categories.Count;
             }
             double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += shown - barWrapped;
