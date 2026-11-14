@@ -347,10 +347,10 @@ public sealed partial class SheetLayoutEngine
         double legendShift = hasLegend ? widest + 12.04 + keyShare : 0;
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
         double textWidth = legendShift - 12.04 - keyShare; // the text width the box leaves (the widest line, at most the cap)
-        // A bar chart's category labels wrap at their spaces to lines of at most 0.499 W - 0.49 x the side legend's box - 14.5 - 0.55 (size - 10) (fitted to the
-        // brackets of 156 samples in Word 2021 at 8, 10, 12 and 14 pt, W 120 to 500, H 104 to 288, with and without a right legend, t26, t31 and t32; 6 miss by
-        // 0.09 to 0.93 pt, and bw-s10-w160-r, whose legend Word lays out differently, is left out; the chart's height does not matter); the plot's left edge then
-        // follows the widest line shown.
+        // A bar chart's category labels wrap at their spaces to lines of at most 0.4975 W - 0.49 x the side legend's box - 11.43 - 0.05 (size - 10) - 0.3 x the last
+        // value label's width (fitted to the brackets of 121 legend-less samples in Word 2021 at 8, 10, 12 and 14 pt, W 120 to 500, H 104 to 288, t26, t31 and t32:
+        // all inside, with 0.1 pt to spare; the legend term is from the earlier fit, and bw-s10-w160-r, whose legend Word lays out differently, is left out;
+        // the chart's height does not matter); the plot's left edge then follows the widest line shown.
         _wordBarLabels = null;
         _wordBarTurned = bar && chart.TextStyles.CategoryAxis?.Rotation == 45 && chart.Categories.Count > 0;
         // A bar chart's labels asked to turn by 45 degrees (rot -2700000; measured in Word 2021, 25 samples at 8, 10 and 14 pt, H 216 / 288, 4 label sets) never wrap:
@@ -359,7 +359,8 @@ public sealed partial class SheetLayoutEngine
         if (_wordBarTurned) left = 6.5 + 0.7071 * labelWidth + 1.65 * categoryFont.FontSize;
         else if (bar && chart.Categories.Count > 0)
         {
-            double cap = 0.499 * w - 0.49 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 14.5 - 0.55 * (categoryFont.FontSize - 10);
+            double lastTick = chart.Ticks.Count > 0 ? MeasureChartText(chart.Ticks[^1].Label, valueFont) : 0;
+            double cap = 0.4975 * w - 0.49 * (verticalLegend && !chart.LegendOverlay ? legendShift : 0) - 11.43 - 0.05 * (categoryFont.FontSize - 10) - 0.3 * lastTick;
             var barLines = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
             _wordBarLabels = (barLines, cap);
             double wrapped = barLines.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
