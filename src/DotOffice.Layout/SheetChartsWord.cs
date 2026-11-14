@@ -235,11 +235,11 @@ public sealed partial class SheetLayoutEngine
             var (pitch, ascent, descent) = LineMetrics(font);
             double toBaseline = (pitch - (ascent + descent)) / 2 + ascent, step = 1.15 * fs, scale = fs / 10;
             var lines = plan.Lines[i];
-            double own = lines.Max(l => MeasureChartText(l, font));
+            double own = lines.Max(l => WordBarLineWidth(l, font)); // a cut line's "…" hangs, as a bar label's (measured at 12 and 14 pt)
             for (int k = 0; k < lines.Count; k++)
             {
-                double inset = (own - MeasureChartText(lines[k], font)) / 2, shift = (k - (lines.Count - 1) / 2.0) * step;
-                if (plan.Angle == 90) PlaceText(lines[k], font, cx + 3.45 * scale + shift - toBaseline, plotBottom + 6.05 * scale + inset, Anchor.End, false, 90, items);
+                double inset = (own - WordBarLineWidth(lines[k], font)) / 2, shift = (k - (lines.Count - 1) / 2.0) * step;
+                if (plan.Angle == 90) PlaceText(lines[k], font, cx + 3.45 * scale + shift - toBaseline, plotBottom + 6.05 * scale + inset - (MeasureChartText(lines[k], font) - WordBarLineWidth(lines[k], font)), Anchor.End, false, 90, items);
                 else PlaceText(lines[k], font, cx - 3.39 * scale - shift + toBaseline, plotBottom + 6.09 * scale + inset, Anchor.Start, false, -90, items);
             }
         }
@@ -331,13 +331,13 @@ public sealed partial class SheetLayoutEngine
         // The first value label is centered on the plot's top, which gives way to it: 12.82 at 14 pt, 11.71 at 12 pt, 11 at 8 and 10 pt (a line through the 12 and 14 pt samples; INFERRED beyond them).
         double topMargin = bar || pie ? 11 : Math.Max(11, 0.555 * valueFont.FontSize + 5.05);
         double left = pie ? 11 : 6.5 + labelWidth + WordAxisGap(bar ? categoryFont : valueFont), right = w - 11, top = topMargin + band, bottom = pie ? h - 11 : h - (6.5 + WordLineHeight(bottomFont) + 5.71 * bottomFont.FontSize / 10);
-        // Reversed categories (measured in Word 2021, 2 column samples at 10 pt): the value axis and its labels move to the right; the plot starts 11 from the left
-        // and its right edge gives way by the labels' width + the axis gap less 4.52 (INFERRED: one label width).
+        // Reversed categories (measured in Word 2021, columns at 8, 10 and 14 pt): the value axis and its labels move to the right; the plot starts 11 from the left
+        // and its right edge gives way by the labels' width + the axis gap less 4.52 (confirmed at 8, 10 and 14 pt with 1 to 7 digit labels).
         bool reversed = chart.ReverseCategories && !bar;
         if (reversed) { right -= left - 6.5 - 4.52; left = 11; }
-        // Reversed bars (measured in Word 2021, 2 samples at 10 pt): the first category is on top, the value axis and its labels move to the top; the plot
-        // runs from 11 + 12.71 to H - 11 (the 12.71 scaling with the value font is INFERRED).
-        if (bar && chart.ReverseCategories) { top = 11 + 1.271 * valueFont.FontSize + band; bottom = h - 11; }
+        // Reversed bars (measured in Word 2021 at 8, 10 and 14 pt, value labels 1 to 7 digits): the first category is on top, the value axis and its labels move to the top;
+        // the plot runs from 11 + 1.72 s - 4.49 (9.27 / 12.71 / 19.59) to H - 11.
+        if (bar && chart.ReverseCategories) { top = 11 + 1.72 * valueFont.FontSize - 4.49 + band; bottom = h - 11; }
         // The key's share: the font size for square keys (22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt); a line key's is 24 at any size (measured in Word 2021
         // at 8, 10, 12 and 14 pt, 3 name sets, with and without markers).
         double keyShare = anyLine ? 24 : legendFont.FontSize;
@@ -424,13 +424,15 @@ public sealed partial class SheetLayoutEngine
         _wordCategories = null;
         if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is 90 or -90)
         {
-            // An asked turn by 90 degrees (measured in Word 2021 at 10 pt, H 144 / 216 / 288): the labels wrap at their spaces to lines of at most 0.5 H - 12 (fitted, INFERRED)
-            // and the plot's bottom stands 12.51 + the widest line (as this code measures it) above the chart's bottom.
-            double fs = categoryFont.FontSize, cap = 0.5 * h - 12;
-            var asked = chart.Categories.Select(c => WrapLegendName(c.Replace('\n', ' '), categoryFont, cap)).ToList();
-            double askedWidest = asked.SelectMany(l => l).Select(l => MeasureChartText(l, categoryFont)).DefaultIfEmpty(0).Max();
+            // An asked turn by 90 degrees either way (measured in Word 2021 at 8, 10, 12 and 14 pt, H 120 to 300): the labels wrap at their spaces to lines of at most
+            // 0.5 H - 11.2 - 0.25 (size - 10) (bracketed by 20 samples; the slope to 0.03) and the plot's bottom stands 0.6025 em + 6.52 + the widest line above the chart's bottom.
+            double fs = categoryFont.FontSize, cap = 0.5 * h - 11.2 - 0.25 * (fs - 10);
+            // The lines stand across the category's slot; those that do not fit it are cut as a bar label's (measured at 12 and 14 pt, H 120 and 160).
+            double askedSlot = (right - left) / (chart.CategoriesBetween ? chart.Categories.Count : Math.Max(chart.Categories.Count - 1, 1));
+            var asked = chart.Categories.Select(c => FitWordBarLines(WrapLegendName(c.Replace('\n', ' '), categoryFont, cap), askedSlot, cap, categoryFont)).ToList();
+            double askedWidest = asked.SelectMany(l => l).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             _wordCategories = new WordCategoryPlan(styles.CategoryAxis!.Rotation!.Value, 1, asked, askedWidest, Asked: true);
-            bottom = h - (12.51 * fs / 10 + askedWidest);
+            bottom = h - (0.6025 * fs + 6.52 + askedWidest);
             if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
         }
         else if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null or 0 or 45)
