@@ -317,6 +317,16 @@ public class ChartTests
     }
 
     [Fact]
+    public void Word_keeps_category_labels_asked_to_turn_by_45_degrees_on_one_line_as_measured_in_Word_2021()
+    {
+        var xml = ChartXml().Replace("<c:v>a</c:v>", "<c:v>Alpha beta gamma</c:v>")
+            .Replace("</c:catAx>", "<c:txPr><a:bodyPr rot=\"-2700000\" vert=\"horz\"/><a:p><a:pPr><a:defRPr/></a:pPr></a:p></c:txPr></c:catAx>")
+            .Replace("</c:chartSpace>", "<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz=\"1000\"><a:latin typeface=\"Arial\"/></a:defRPr></a:pPr></a:p></c:txPr></c:chartSpace>");
+        var page = Run(b => P(Inline(b.AddPart("charts/chart1.xml", ChartType, xml), 360, 216))).Page;
+        Assert.Equal(3, page.Items.OfType<PushItem>().Count(p => p.Rotation == 45)); // one turned line per label, even where the slot would let it wrap
+    }
+
+    [Fact]
     public void Word_shows_every_other_category_label_upright_when_that_shows_at_least_as_many_as_turning_would()
     {
         var page = CategoryLabelPage("A", 80, 360); // slot 4 pt: every 2nd label upright (40) beats every 3rd turned (27)

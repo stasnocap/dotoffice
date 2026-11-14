@@ -57,7 +57,7 @@ public sealed partial class SheetLayoutEngine
         && chart.ExtraGroups.Count == 0 && !chart.ShowSecondaryAxis
         && string.IsNullOrEmpty(chart.ValueAxisTitle) && string.IsNullOrEmpty(chart.CategoryAxisTitle)
         && (chart.Kind == ChartKind.Pie || chart is { ShowValueAxis: true, ShowCategoryAxis: true, ReverseValues: false, ReverseCategories: false })
-        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90)
+        && chart.TextStyles.ValueAxis?.Rotation is null or 0 && (chart.TextStyles.CategoryAxis?.Rotation is null or 0 || chart.Kind is ChartKind.Column or ChartKind.Line && chart.TextStyles.CategoryAxis?.Rotation is 90 or -90 or 45)
         && chart.Series.Count > 0;
 
     private static List<(string Name, Color Color, ChartSeries? Series, ChartKind Kind)> WordLegendEntries(SheetChart chart)
@@ -340,12 +340,15 @@ public sealed partial class SheetLayoutEngine
             bottom = h - (12.51 * fs / 10 + askedWidest);
             if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
         }
-        else if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null or 0)
+        else if (!bar && !pie && !scatter && chart.ShowCategoryAxis && chart.Categories.Count > 0 && styles.CategoryAxis?.Rotation is null or 0 or 45)
         {
             double fs = categoryFont.FontSize, scale = fs / 10;
             int slots = chart.CategoriesBetween ? chart.Categories.Count : Math.Max(chart.Categories.Count - 1, 1);
             double slot = (right - left) / slots, restBottom = 6.5 + WordLineHeight(categoryFont) + 5.71 * scale;
-            var plan = PlanWordCategoryLabels(chart.Categories, categoryFont, slot, h, band + (hasLegend && !overlay && chart.Legend is LegendPosition.Top or LegendPosition.Bottom ? rowHeight + extraRows : 0));
+            double labelBand = band + (hasLegend && !overlay && chart.Legend is LegendPosition.Top or LegendPosition.Bottom ? rowHeight + extraRows : 0);
+            // An asked turn by 45 degrees (rot -2700000; measured in Word 2021 at 10 pt, H 216 / 288): never wraps or skips, cut as an automatic turn is.
+            var plan = styles.CategoryAxis?.Rotation == 45 ? TruncateTurnedLabels(chart.Categories, categoryFont, 45, 1, h, labelBand)
+                : PlanWordCategoryLabels(chart.Categories, categoryFont, slot, h, labelBand);
             _wordCategories = plan;
             if (plan.MaxLines > 1) bottom -= (plan.MaxLines - 1) * 1.15 * fs;
             else if (plan.Angle == 45) bottom += restBottom - (6.5 + WordTurnBottom * fs + 0.7071 * plan.Width);
