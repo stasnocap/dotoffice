@@ -309,9 +309,12 @@ public sealed partial class SheetLayoutEngine
         // Reversed bars (measured in Word 2021, 2 samples at 10 pt): the first category is on top, the value axis and its labels move to the top; the plot
         // runs from 11 + 12.71 to H - 11 (the 12.71 scaling with the value font is INFERRED).
         if (bar && chart.ReverseCategories) { top = 11 + 1.271 * valueFont.FontSize + band; bottom = h - 11; }
-        double legendShift = hasLegend ? widest + 12.04 + legendFont.FontSize + (anyLine ? 14 : 0) : 0; // 22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt
+        // The key's share: the font size for square keys (22.04 at 10 pt; 20.04 and 26.04 measured at 8 and 14 pt); a line key's is 24 at any size (measured in Word 2021
+        // at 8, 10, 12 and 14 pt, 3 name sets, with and without markers).
+        double keyShare = anyLine ? 24 : legendFont.FontSize;
+        double legendShift = hasLegend ? widest + 12.04 + keyShare : 0;
         if (verticalLegend) legendShift = Math.Min(legendShift, w / 3 + 9.0 + (anyLine ? 14 : 0)); // the box is at most W / 3 + 9.0 (measured at 10 pt)
-        double textWidth = legendShift - 12.04 - legendFont.FontSize - (anyLine ? 14 : 0); // the text width the box leaves (the widest line, at most the cap)
+        double textWidth = legendShift - 12.04 - keyShare; // the text width the box leaves (the widest line, at most the cap)
         // A bar chart's category labels wrap at their spaces to lines of at most 0.484 (W - the side legend's box) - 10.9 (fitted to the brackets of 7 samples in Word 2021
         // at 10 pt, W 200 to 500, with and without a right legend; INFERRED at other sizes); the plot's left edge then follows the widest line.
         _wordBarLabels = null;
