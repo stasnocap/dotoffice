@@ -441,7 +441,11 @@ public sealed partial class SheetLayoutEngine
                 if (rise > 0) bottom -= rise;
                 barBand = (bottom - top) / chart.Categories.Count;
             }
-            double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
+            // A single letter wider than the break limit (cap - 0.75) pushes the plot in only up to the cap less 0.05 em, never below 0, and the labels overflow past
+            // the chart's left edge (measured in Word 2021, 15 samples at 8, 10 and 14 pt, W 50 to 90, t54: within 0.03 pt but s14-w50-n, 0.36 off with the cap).
+            double letterRoom = Math.Max(barLabels.Cap - 0.05 * categoryFont.FontSize, 0);
+            double Room(string l) => WordBarLineWidth(l, categoryFont) is var lw && l.TrimEnd('…').Length == 1 && lw > barLabels.Cap - 0.75 ? Math.Min(lw, letterRoom) : lw;
+            double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(Room).DefaultIfEmpty(0).Max();
             left += shown - barWrapped;
         }
         // Word draws a bar chart's plot however little room is left, 0.12 pt wide at the least (measured in Word 2021 at 8, 10 and 14 pt, W 50 to 110, t54).
