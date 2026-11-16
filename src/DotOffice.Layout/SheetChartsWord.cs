@@ -491,7 +491,12 @@ public sealed partial class SheetLayoutEngine
                 if (plan.Stride > 1) right -= Math.Max(0, 7.23 * scale - 0.5 * slot + 0.48 - 9.3 / chart.Categories.Count);
                 // Only the first label's start keeps the plot's left edge clear (measured in Word 2021: a short first label lets the plot start at its normal left even when
                 // the second is long, um-8-l10-short1; "Quarterly…" then "Annual total west").
-                left = Math.Max(left, 0.7071 * (plan.Widths?[0] ?? plan.Width) + WordTurnLeft - right / (2 * slots));
+                // Reversed (measured in Word 2021 at 14 pt, W 160 to 200, 1 and 4 digit values, t56): the last label stands leftmost and the half slot is added, not taken,
+                // over the unreversed right edge W - 11, so the plot's left edge moves right as the chart widens (with a legend INFERRED the same).
+                // Its right edge keeps at least 22.19 + (W - 11) / 2n off the chart's right (measured with 1 digit values; 4 digit labels take more; the 22.19 at other sizes is UNMEASURED).
+                if (reversed) right = Math.Min(right, w - 22.19 - (w - 11) / (2 * slots));
+                left = reversed ? Math.Max(left, 0.7071 * (plan.Widths?[^1] ?? plan.Width) + WordTurnLeft + 0.23 + (w - 11) / (2 * slots))
+                    : Math.Max(left, 0.7071 * (plan.Widths?[0] ?? plan.Width) + WordTurnLeft - right / (2 * slots));
             }
             if (right - left < 20 || bottom - top < 20) { _wordCategories = null; return false; }
         }
