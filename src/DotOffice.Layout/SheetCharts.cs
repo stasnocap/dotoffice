@@ -942,26 +942,26 @@ public sealed partial class SheetLayoutEngine
             int j = i;
             while (j + 1 < points.Length && points[j + 1] is not null) j++;
             var run = points[i..(j + 1)].Select(p => p!.Value).ToList();
+            var path = smooth && run.Count > 1 ? new List<PathPoint> { new(run[0].X, run[0].Y, PathPointKind.Move) } : null;
             for (int k = 0; k + 1 < run.Count; k++)
             {
-                if (!smooth)
+                if (path is null)
                 {
                     items.Add(new LineItem(run[k].X, run[k].Y, run[k + 1].X, run[k + 1].Y, width, color));
                     continue;
                 }
-                var p0 = run[Math.Max(k - 1, 0)]; var p1 = run[k]; var p2 = run[k + 1]; var p3 = run[Math.Min(k + 2, run.Count - 1)];
-                var c1 = (X: p1.X + (p2.X - p0.X) / 6, Y: p1.Y + (p2.Y - p0.Y) / 6);
-                var c2 = (X: p2.X - (p3.X - p1.X) / 6, Y: p2.Y - (p3.Y - p1.Y) / 6);
-                var last = p1;
-                for (int step = 1; step <= 12; step++)
-                {
-                    double t = step / 12.0, u = 1 - t;
-                    var q = (X: u * u * u * p1.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p2.X,
-                             Y: u * u * u * p1.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p2.Y);
-                    items.Add(new LineItem(last.X, last.Y, q.X, q.Y, width, color));
-                    last = q;
-                }
+                // Catmull-Rom tangents, at either end of the run a third of the span; both of a span's control vectors then shrink by one factor until neither
+                // is longer than half the span (measured in Word 2021 on 534 points of 34 charts, t58; Excel and PowerPoint share its chart engine, INFERRED).
+                var p0 = k > 0 ? run[k - 1] : (X: 2 * run[k].X - run[k + 1].X, Y: 2 * run[k].Y - run[k + 1].Y); var p1 = run[k]; var p2 = run[k + 1];
+                var p3 = k + 2 < run.Count ? run[k + 2] : (X: 2 * p2.X - p1.X, Y: 2 * p2.Y - p1.Y);
+                var (t1, t2) = ((X: (p2.X - p0.X) / 6, Y: (p2.Y - p0.Y) / 6), (X: (p3.X - p1.X) / 6, Y: (p3.Y - p1.Y) / 6));
+                double longest = Math.Max(Math.Sqrt(t1.X * t1.X + t1.Y * t1.Y), Math.Sqrt(t2.X * t2.X + t2.Y * t2.Y));
+                double half = Math.Sqrt((p2.X - p1.X) * (p2.X - p1.X) + (p2.Y - p1.Y) * (p2.Y - p1.Y)) / 2, f = longest > half ? half / longest : 1;
+                path.Add(new(p1.X + f * t1.X, p1.Y + f * t1.Y, PathPointKind.Curve));
+                path.Add(new(p2.X - f * t2.X, p2.Y - f * t2.Y, PathPointKind.Curve));
+                path.Add(new(p2.X, p2.Y, PathPointKind.Curve));
             }
+            if (path is not null) items.Add(new PathItem(path, null, color, width));
             i = j + 1;
         }
     }

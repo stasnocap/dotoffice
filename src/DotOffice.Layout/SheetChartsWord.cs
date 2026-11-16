@@ -278,7 +278,7 @@ public sealed partial class SheetLayoutEngine
             : entries[i].Kind == ChartKind.Scatter ? WordKey.Marker : WordKey.Square;
         // From the key's left edge to the text: the key and its gap (the square 5.03 + 2.2, the line 19.2 + 2.09, the marker alone 5.04 + 2.3).
         double square = 0.503 * legendFont.FontSize; // the key is 0.503 em square (4.02 / 5.03 / 7.04 pt measured at 8 / 10 / 14 pt)
-        double Advance(int i) => KeyOf(i) switch { WordKey.Line => 21.29, _ => square + 0.25 * legendFont.FontSize - 0.3 }; // the gap to the text: 1.72 / 2.2 / 3.22 pt measured; the line key is only measured at 10 pt; a marker key takes a square key's room (measured in Word 2021, scatter at 8, 10 and 14 pt with right and bottom legends, t50)
+        double Advance(int i) => KeyOf(i) switch { WordKey.Line => 21.25, _ => square + 0.25 * legendFont.FontSize - 0.3 }; // the gap to the text: 1.72 / 2.2 / 3.22 pt measured; the line key's 19.2 + 2.05 measured at 9 to 12 pt (t58); a marker key takes a square key's room (measured in Word 2021, scatter at 8, 10 and 14 pt with right and bottom legends, t50)
         bool anyLine = Enumerable.Range(0, entries.Count).Any(i => KeyOf(i) == WordKey.Line);
         double entryPitch = WordLineHeight(legendFont) + 6.0 - 0.043 * legendFont.FontSize; // 14.85 / 17.07 / 21.49 pt measured at 8 / 10 / 14 pt
         double rowHeight = entryPitch + 6.0;
@@ -289,7 +289,10 @@ public sealed partial class SheetLayoutEngine
         // at that width less the key (measured in Word 2021 at 10 pt, W 200: "… number 1 here" 175.4 wide wraps, one line from W 220; the cap lies in 152.8..175.4).
         bool verticalLegend = hasLegend && chart.Legend is LegendPosition.Right or LegendPosition.Left;
         double rowCap = 0.9 * w + 2.85 - 0.566 * legendFont.FontSize;
-        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, w / 3 - 1.15 * legendFont.FontSize)
+        // The limit was measured with square keys; beside line keys it is less by their wider key share, 24 - the size (see keyShare below; measured in Word 2021:
+        // "Online sales", 60.5 wide at 11 pt, wraps at W 250 where the square's limit is 70.7, t58; INFERRED from one sample).
+        double sideCap = w / 3 - 1.15 * legendFont.FontSize - (anyLine ? 24 - legendFont.FontSize : 0);
+        var lines = entries.Select((e, i) => verticalLegend ? WrapLegendName(e.Name, legendFont, sideCap)
             : hasLegend && Advance(i) + widths[i] > rowCap ? WrapLegendName(e.Name, legendFont, rowCap - Advance(i)) : [e.Name]).ToList();
         int maxLines = lines.Select(l => l.Count).DefaultIfEmpty(1).Max();
         double lineStep = 1.15 * legendFont.FontSize; // lines inside an entry: 11.50 / 9.20 pt measured at 10 / 8 pt
@@ -511,7 +514,9 @@ public sealed partial class SheetLayoutEngine
             // of 1 and 2 lines, H 130 to 216: all 32 counts, t52 / t53; the last series counts whether or not it is shown).
             double lastPitch = entryPitch + (lines[^1].Count - 1) * 1.106 * legendFont.FontSize;
             int shown = topRight ? entries.Count : Math.Clamp((int)Math.Floor((0.9 * (h - band) + 2.76 - lastPitch) / stackPitch + 1e-9) + 1, 1, entries.Count);
-            double textLeft = chart.Legend == LegendPosition.Right ? w - 10.05 - textWidth : 10.76 + 0.25 * (legendFont.FontSize - 10) + Enumerable.Range(0, entries.Count).Max(Advance);
+            // A left legend's square key starts 10.76 + 0.25 (size - 10) in, a line key 10.65 whatever the size (measured in Word 2021 at 9 to 12 pt, t58).
+            double textLeft = chart.Legend == LegendPosition.Right ? w - 10.05 - textWidth
+                : Enumerable.Range(0, entries.Count).Max(i => (KeyOf(i) == WordKey.Line ? 10.65 : 10.76 + 0.25 * (legendFont.FontSize - 10)) + Advance(i));
             // Centered on (H + band) / 2 whether or not entries are cut (measured: 10 of 12 shown; the left legend is INFERRED the same). A tr legend starts at the top.
             // The first key sits beside the first line: its centre is (H + band) / 2 - shown x pitch / 2 + single pitch / 2 (measured with 1, 2 and 3 lines).
             // Centred on shown x pitch, or, when that overflows the room (a short last series let one more in), on (shown - 1) x pitch + the last series' pitch (measured, t53).
@@ -561,8 +566,8 @@ public sealed partial class SheetLayoutEngine
                     case WordKey.Line:
                         items.Add(new LineItem(kx, ky, kx + 19.2, ky, series?.StrokeWidth ?? 1.5, series?.StrokeColor ?? color));
                         if (series is null || series.Marker)
-                            // The key's marker is capped at 0.6 em (measured in Word 2021: 7, 9 and 12 drawn 6.0 at 10 pt, 7 kept at 14 pt).
-                            DrawMarker(items, kx + 9.6, ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, 0.6 * legendFont.FontSize), series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
+                            // The key's marker is capped at floor(0.6 em) pt (measured in Word 2021: 7, 9 and 12 drawn 6.0 at 10 pt, 7 kept at 14 pt; 7 drawn 5 at 9 pt and 6 at 11 pt, t58).
+                            DrawMarker(items, kx + 9.6, ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, Math.Floor(0.6 * legendFont.FontSize)), series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
                         break;
                     case WordKey.Marker:
                         if (series is null || series.Marker)

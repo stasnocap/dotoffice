@@ -211,7 +211,8 @@ internal static class DmlCharts
                 if (kind == ChartKind.Bubble) sizes = Numbers(Child(ser, "bubbleSize")).Values;
             }
             sourceFormat ??= format;
-            bool smooth = kind is ChartKind.Line or ChartKind.Scatter && Child(ser, "smooth") is { } sm && ((string?)sm.Attribute("val") is null || Flag(sm, "val"));
+            // Word smooths a line series that has no c:smooth at all (measured in Word 2021, t58); Word itself always writes the element.
+            bool smooth = kind is ChartKind.Line or ChartKind.Scatter && (Child(ser, "smooth") is { } sm ? (string?)sm.Attribute("val") is null || Flag(sm, "val") : kind == ChartKind.Line && context.WordChartFrame);
             string name = Child(Child(ser, "tx"), "v")?.Value is { } literal ? literal : Strings(Child(ser, "tx")).FirstOrDefault() is { Length: > 0 } cached ? cached : $"Series{firstIndex + i + 1}";
             var spPr = Child(ser, "spPr");
             bool lineLike = kind is ChartKind.Line or ChartKind.Scatter || (kind == ChartKind.Radar && !filled);
@@ -601,6 +602,12 @@ internal static class DmlCharts
                     foreach (var bars in sr.ErrorBars?.Where(b => !b.Horizontal) ?? [])
                         for (int p = 0; p < sr.Values.Count && p < bars.Plus.Count; p++)
                             if (sr.Values[p] is { } x) (lo, hi) = (Math.Min(lo, x - bars.Minus[p]), Math.Max(hi, x + bars.Plus[p]));
+                // Word scales a smoothed line to its points and the midpoint of each curved span (measured in Word 2021, t58: 117, 931, 930 reaches 981 halfway
+                // between the last two, so 0 to 1200 by 200 where the points alone give 0 to 1000; 20, 85, 70 keeps 0 to 90 though its curve peaks at 87.1;
+                // the midpoints fit all 33 charts, the whole curve or its thirds miss one; INFERRED: Word halves each span once).
+                if (context.WordChartFrame && g == ChartGrouping.Clustered)
+                    foreach (var sr in list.Where(sr => sr.Smooth))
+                        foreach (var y in SmoothedValues(sr.Values)) (lo, hi) = (Math.Min(lo, y), Math.Max(hi, y));
                 if (g == ChartGrouping.Stacked)
                     for (int p = 0; p < points; p++)
                     {
@@ -611,6 +618,18 @@ internal static class DmlCharts
                     }
             }
             return (lo, hi, loPositive);
+        }
+
+        // The midpoints of the spans of the curve through a series' values as SheetCharts draws it smoothed: Catmull-Rom, the end control points a third of the way along.
+        static IEnumerable<double> SmoothedValues(IReadOnlyList<double?> values)
+        {
+            for (int k = 0; k + 1 < values.Count; k++)
+            {
+                if (values[k] is not { } y1 || values[k + 1] is not { } y2) continue;
+                double y0 = k > 0 && values[k - 1] is { } a ? a : 2 * y1 - y2, y3 = k + 2 < values.Count && values[k + 2] is { } b ? b : 2 * y2 - y1;
+                double c1 = y1 + (y2 - y0) / 6, c2 = y2 - (y3 - y1) / 6;
+                yield return (y1 + 3 * c1 + 3 * c2 + y2) / 8;
+            }
         }
 
         var ticks = new List<ChartTick>();

@@ -772,12 +772,15 @@ public class SheetChartLayoutTests
     }
 
     [Fact]
-    public void A_smoothed_line_is_drawn_as_many_short_segments()
+    public void A_smoothed_line_is_drawn_as_one_Bezier_path()
     {
         var straight = Page(Chart(ChartKind.Line, Series(Red, 5, 20, 5))).Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width > 2);
-        var smooth = Page(Chart(ChartKind.Line, new ChartSeries("S", new double?[] { 5, 20, 5 }, Red, Smooth: true))).Items.OfType<LineItem>().Count(l => l.Color == Red && l.Width > 2);
+        var smooth = Page(Chart(ChartKind.Line, new ChartSeries("S", new double?[] { 5, 20, 5 }, Red, Smooth: true))).Items.OfType<PathItem>().Single(p => p.Stroke == Red);
         Assert.Equal(2, straight);
-        Assert.Equal(24, smooth);
+        Assert.Equal([PathPointKind.Move, .. Enumerable.Repeat(PathPointKind.Curve, 6)], smooth.Points.Select(p => p.Kind));
+        // The first control point lies a third of the way along the first span (less where the span is short beside a steep one).
+        var (a, c, b) = (smooth.Points[0], smooth.Points[1], smooth.Points[3]);
+        Assert.True(Math.Abs(c.X - a.X - (b.X - a.X) / 3) < 1e-6 || c.X - a.X < (b.X - a.X) / 3);
     }
 
     [Fact]
