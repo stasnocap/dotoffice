@@ -444,7 +444,9 @@ public sealed partial class SheetLayoutEngine
             double shown = barLabels.Lines.SelectMany(l => FitWordBarLines(l, barBand, barLabels.Cap, categoryFont)).Select(l => WordBarLineWidth(l, categoryFont)).DefaultIfEmpty(0).Max();
             left += shown - barWrapped;
         }
-        if (right - left < 20 || bottom - top < 20) return false;
+        // Word draws a bar chart's plot however little room is left, 0.12 pt wide at the least (measured in Word 2021 at 8, 10 and 14 pt, W 50 to 110, t54).
+        if (bar) right = Math.Max(right, left + 0.12);
+        if (right - left < (bar ? 0 : 20) || bottom - top < 20) return false;
 
         // ---- the category labels (columns and lines): they may wrap, turn or be skipped, which moves the plot's bottom, left and, when skipping, right edge
         _wordCategories = null;

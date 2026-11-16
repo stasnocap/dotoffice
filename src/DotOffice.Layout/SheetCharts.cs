@@ -476,7 +476,7 @@ public sealed partial class SheetLayoutEngine
             if (_wordPlot is { } wp) (plotLeft, plotTop, plotRight, plotBottom) = (wp.X, wp.Y, wp.X + wp.Width, wp.Y + wp.Height);
         }
         if (_manualPlot is { } manual) (plotLeft, plotTop, plotRight, plotBottom) = (manual.X, manual.Y, manual.X + manual.Width, manual.Y + manual.Height);
-        if (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) return;
+        if (_wordPlot is null && (plotRight - plotLeft < 10 || plotBottom - plotTop < 10) || plotRight <= plotLeft || plotBottom <= plotTop) return;
         double plotWidth = plotRight - plotLeft, plotHeight = plotBottom - plotTop;
         if (chart.PlotBackground is { } plotFill) items.Add(new RectItem(plotLeft, plotTop, plotWidth, plotHeight, plotFill));
         if (chart.PlotBorder is { } plotLine) StrokeRect(plotLeft, plotTop, plotWidth, plotHeight, plotLine, chart.PlotBorderWidth, items); // centred on the plot's edge (measured, Word 2021)
@@ -498,8 +498,12 @@ public sealed partial class SheetLayoutEngine
         var errorBars = new List<(ChartSeries Series, int Index, double Across, double Value, AxisScale Scale)>();
 
         // ---- gridlines and value labels
+        // Word: a bar chart's axis of one interval shows its last label and gridline only while the plot is at least as wide as that label (measured in Word 2021
+        // at 8, 10 and 14 pt with "10", "100" and "1000": bracketed to 0.987..1.030 of the width by 30 samples, t54); the plot still gives way by half of it.
+        bool hideLastTick = horizontalBars && _wordPlot is not null && chart.Ticks.Count == 2 && plotWidth < MeasureChartText(chart.Ticks[^1].Label, valueFont);
         foreach (var tick in chart.Ticks)
         {
+            if (hideLastTick && tick == chart.Ticks[^1]) break;
             if (horizontalBars)
             {
                 double tx = ValueX(primary, tick.Value);
@@ -746,7 +750,7 @@ public sealed partial class SheetLayoutEngine
                         ValueTick(horizontalBars ? ValueX(primary, v) : ValueY(primary, v), 0.231 * tickScale, ChartTickMark.Out);
                     }
             if (chart.ValueAxisMinorTicks == ChartTickMark.Out && chart.Ticks.Count > 1 && chart.LogBase == 0) ValueTick(horizontalBars ? ValueX(primary, chart.Ticks[^1].Value) : ValueY(primary, chart.Ticks[^1].Value), 0.231 * tickScale, ChartTickMark.Out);
-            foreach (var tick in chart.Ticks) ValueTick(horizontalBars ? ValueX(primary, tick.Value) : ValueY(primary, tick.Value), 0.302 * tickScale, chart.ValueAxisTicks);
+            foreach (var tick in hideLastTick ? chart.Ticks.Take(1) : chart.Ticks) ValueTick(horizontalBars ? ValueX(primary, tick.Value) : ValueY(primary, tick.Value), 0.302 * tickScale, chart.ValueAxisTicks);
         }
         if (chart.ShowCategoryAxis && (chart.CategoryAxisTicks != ChartTickMark.None || chart.CategoryAxisMinorTicks == ChartTickMark.Out))
         {
