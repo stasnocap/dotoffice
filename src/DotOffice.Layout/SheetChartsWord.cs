@@ -561,7 +561,7 @@ public sealed partial class SheetLayoutEngine
                         break;
                     case WordKey.Marker:
                         if (series is null || series.Marker)
-                            DrawMarker(items, x + textLeft - (0.4717 * legendFont.FontSize + 0.165), ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, 0.5 * legendFont.FontSize), // at most 0.5 em (3.96 at 8 pt), its centre 0.4717 em + 0.165 before the text (3.94 / 4.75 / 6.77 measured)
+                            DrawMarker(items, x + textLeft - (0.4717 * legendFont.FontSize + 0.165), ky, series?.MarkerSymbol ?? ChartMarkerSymbol.Auto, Math.Min(series?.MarkerDiameter ?? 5, Math.Floor(0.6 * legendFont.FontSize)), // at most floor(0.6 em) pt (4, 6 and 8 at 8, 10 and 14 pt, measured in Word 2021 with markers 3 to 14, t55), its centre 0.4717 em + 0.165 before the text (3.94 / 4.75 / 6.77 measured)
                              series?.AutomaticMarker ?? new ChartAutoMarker(0, color, color, 0.75, 5), series?.MarkerStyle);
                         break;
                     default:
