@@ -677,12 +677,15 @@ public sealed partial class SheetLayoutEngine
                         if (s.Labels is { } l && i < l.Count && l[i].Length > 0)
                         {
                             var (px, py) = points[i]!.Value;
-                            labels.Add(LabelPlacementAt(s, i) switch
+                            // Word puts a line's label right of its point unless told otherwise (measured in Word 2021, t59).
+                            labels.Add((LabelPlacementAt(s, i) ?? (chart.WordLayout ? ChartLabelPlacement.Right : null)) switch
                             {
                                 ChartLabelPlacement.Center => (l[i], px, py, false, s.Color, LabelStyleAt(s, i), LabelSide.Center),
                                 ChartLabelPlacement.Below => (l[i], px, py + 6, false, s.Color, LabelStyleAt(s, i), LabelSide.Below),
                                 ChartLabelPlacement.Left => (l[i], px - 6, py, false, s.Color, LabelStyleAt(s, i), LabelSide.Left),
-                                ChartLabelPlacement.Right => (l[i], px + 6, py, false, s.Color, LabelStyleAt(s, i), LabelSide.Right),
+                                // Word: 8.5 from the point, 9.6 with markers, whatever the size, and 0.35 lower (measured in Word 2021 at 8 to 14 pt, t59).
+                                ChartLabelPlacement.Right => chart.WordLayout ? (l[i], px + (s.Marker ? 9.6 : 8.5), py + 0.35, false, s.Color, LabelStyleAt(s, i), LabelSide.Right)
+                                    : (l[i], px + 6, py, false, s.Color, LabelStyleAt(s, i), LabelSide.Right),
                                 _ => (l[i], px, py - 6, false, s.Color, LabelStyleAt(s, i), LabelSide.Auto),
                             });
                         }
