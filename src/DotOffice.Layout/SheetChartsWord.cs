@@ -70,8 +70,9 @@ public sealed partial class SheetLayoutEngine
         // the stack's first series the lowest segment). Measured on the right; a bottom legend of clustered bars lists them backwards too (measured at 8 and 14 pt);
         // the top and left legends and percent-stacked columns are INFERRED.
         bool vertical = chart.Legend is LegendPosition.Right or LegendPosition.Left;
+        // A side legend of stacked columns or stacked lines lists the series last first (lines measured in Word 2021 at 8 to 14 pt, t59).
         if (chart.Kind == ChartKind.Bar && chart.Grouping == ChartGrouping.Clustered && !chart.ReverseCategories || // reversed bars list the series in order (measured in Word 2021)
-             vertical && chart.Kind == ChartKind.Column && chart.Grouping != ChartGrouping.Clustered) entries.Reverse();
+             vertical && chart.Kind is ChartKind.Column or ChartKind.Line && chart.Grouping != ChartGrouping.Clustered) entries.Reverse();
         return entries;
     }
 
