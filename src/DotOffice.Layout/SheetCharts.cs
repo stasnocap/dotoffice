@@ -986,6 +986,9 @@ public sealed partial class SheetLayoutEngine
         // Labels outside the pie (and best-fit ones, which may end up there) need room around it.
         bool outside = chart.Kind == ChartKind.Pie && chart.Series[0].LabelPlacements is { } places && places.Any(p => p is ChartLabelPlacement.OutsideEnd or ChartLabelPlacement.BestFit);
         double radius = Math.Min(right - left, bottom - top) / 2 - (_wordPlot is not null && !outside ? 0 : 4) - (outside ? font.FontSize * 2 : 0);
+        // Word shrinks a labelled pie to 0.875 r - 1.37 whatever the text size, the centre kept (measured in Word 2021: 8 pies, r 59 to 129, 8 to 14 pt,
+        // default best-fit labels, within 0.03; other placements UNMEASURED).
+        if (_wordPlot is not null && chart.Series[0].Labels is { } pieLabels && pieLabels.Any(t => t.Length > 0)) radius = 0.875 * radius - 1.37;
         if (radius < 5) return;
         double cx = (left + right) / 2, cy = (top + bottom) / 2;
         // Word fills and strokes a pie's plot area as the square around the pie (measured in Word 2021: 2r a side, centred on the pie).
@@ -1025,6 +1028,15 @@ public sealed partial class SheetLayoutEngine
                 // Straight above or below the pie the text is pushed clear of the rim by half its own height.
                 if (anchor == Anchor.Middle) oy += sin * style.FontSize * 0.7 * (1 + label.Text.Count(c => c == '\n'));
                 PlaceText(label.Text, style, ox, oy, anchor, true, 0, items);
+                continue;
+            }
+            if (_wordPlot is not null && label.Placement is null && label.Inner <= 0)
+            {
+                // Word's default (best fit) inside a pie: the text box stands its half extent along the radius plus 3.8 in from the rim (fitted to 6 Word 2021 pies,
+                // 8 to 14 pt, within about 1 pt; the turn off the bisector Word sometimes makes is not modelled).
+                var block = BuildBlock(ChartCell(label.Text, style), label.Text, 1e7);
+                double half = Math.Abs(cos) * block.Width / 2 + Math.Abs(sin) * WordLineHeight(style) / 2, rho = label.Radius - half - 3.8;
+                PlaceText(label.Text, StyleFor(LabelColor(chart, label.Fill)), cx + rho * cos, cy + rho * sin, Anchor.Middle, true, 0, items);
                 continue;
             }
             double r = label.Inner > 0 ? (label.Inner + label.Radius) / 2
