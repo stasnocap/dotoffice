@@ -24,9 +24,9 @@ public sealed partial class SheetLayoutEngine
         if (shape.Reflection is { } reflection && shape.Geometry != ShapeGeometry.Line) EmitReflection(shape, reflection, x, y, width, height, items);
         if (shape.Shadow is { } shadow)
         {
-            // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 5 x 5 grid of such copies spread
-            // over the blur radius, each so faint that the middle, where they all overlap, ends up with the shadow's opacity; at the edge
-            // that ramps the opacity across the blur radius, as PowerPoint 2021 does.
+            // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 7 x 7 grid of such copies, each so
+            // faint that the middle, where they all overlap, ends up with the shadow's opacity. The copies sit at the quantiles of a Gaussian
+            // whose deviation is the blur radius / 2.8, so that the edge falls off as PowerPoint 2021's does (fitted on 8 and 15 pt blurs).
             bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null || shape.FillImage is not null;
             // A filled shape's outline is cast with its fill as one area (the frame grown by half the line), so that the translucent copies
             // do not darken where the line overlaps the fill.
@@ -38,12 +38,12 @@ public sealed partial class SheetLayoutEngine
                 LineColor = shape.LineColor is null || merged ? null : shadow.Color, Paragraphs = [],
             };
             bool soft = shadow.Blur >= 0.5;
-            int reach = soft ? 2 : 0;
-            double spread = shadow.Blur / 4, copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / 25) : shadow.Opacity;
-            for (int gx = -reach; gx <= reach; gx++)
-                for (int gy = -reach; gy <= reach; gy++)
+            double[] offsets = soft ? [.. BlurQuantiles.Select(z => z * shadow.Blur / BlurSigmas)] : [0];
+            double copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / (offsets.Length * offsets.Length)) : shadow.Opacity;
+            foreach (double ox in offsets)
+                foreach (double oy in offsets)
                 {
-                    double dx = shadow.Dx + gx * spread, dy = shadow.Dy + gy * spread;
+                    double dx = shadow.Dx + ox, dy = shadow.Dy + oy;
                     items.Add(new PushItem(null, 0, cx + dx, cy + dy, shape.FlipH, shape.FlipV, copyOpacity));
                     EmitOutline(dark, x + dx - grow, y + dy - grow, width + 2 * grow, height + 2 * grow, items);
                     items.Add(new PopItem());
@@ -56,6 +56,12 @@ public sealed partial class SheetLayoutEngine
         if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line) EmitShapeText(shape, x, y, width, height, items);
         for (int i = 0; i < pushed; i++) items.Add(new PopItem());
     }
+
+    /// <summary>The standard normal quantiles at (i + 0.5) / 7: where a blurred shadow's copies sit, in deviations.</summary>
+    private static readonly double[] BlurQuantiles = [-1.4652, -0.7916, -0.3661, 0, 0.3661, 0.7916, 1.4652];
+
+    /// <summary>How many deviations of the shadow's Gaussian fit in its blur radius.</summary>
+    private const double BlurSigmas = 2.8;
 
     /// <summary>
     /// A reflection: the shape (without its text and effects) mirrored about a line half the reflection's distance under its bottom edge,
