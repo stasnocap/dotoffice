@@ -200,6 +200,35 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void Links_jump_to_shown_slides_by_relationship_or_by_place_in_the_show()
+    {
+        static string Linked(string click) => Sp(Xfrm(0, 0, 1270000, 1270000), $"<a:p><a:r><a:rPr lang=\"en-US\">{click}</a:rPr><a:t>go</a:t></a:r></a:p>");
+        var builder = new PptxBuilder()
+            .AddSlide(Linked("<a:hlinkClick r:id=\"rIdJ3\" action=\"ppaction://hlinksldjump\"/>"))
+            .AddSlide(Linked("<a:hlinkClick r:id=\"\" action=\"ppaction://hlinkshowjump?jump=nextslide\"/>"), "show=\"0\"")
+            .AddSlide(Linked("<a:hlinkClick r:id=\"rIdJ1\" action=\"ppaction://hlinksldjump\"/>"))
+            .AddSlide(Linked("<a:hlinkClick r:id=\"\" action=\"ppaction://hlinkshowjump?jump=previousslide\"/>"));
+        var slides = Read(builder).Presentation.Slides;
+        Hyperlink? LinkOf(Slide slide) => Assert.IsType<SheetShape>(Assert.Single(slide.Objects)).Paragraphs[0].Runs[0].Link;
+        Assert.Equal(3, slides.Count); // the hidden slide is not a page
+        Assert.Equal(slides[1].Anchor, LinkOf(slides[0])!.Bookmark);
+        Assert.Equal(slides[0].Anchor, LinkOf(slides[1])!.Bookmark);
+        // The slide after the first one is hidden, so a next-slide jump from the first slide goes nowhere.
+        var hidden = Read(new PptxBuilder().AddSlide(Linked("<a:hlinkClick r:id=\"\" action=\"ppaction://hlinkshowjump?jump=nextslide\"/>")).AddSlide("", "show=\"0\"")).Presentation.Slides;
+        Assert.Null(LinkOf(Assert.Single(hidden)));
+        Assert.Equal(slides[1].Anchor, LinkOf(slides[2])!.Bookmark);
+        Assert.NotNull(slides[0].Anchor);
+    }
+
+    [Fact]
+    public void A_shape_with_a_click_link_links_its_whole_frame()
+    {
+        var sp = Sp(Xfrm(0, 0, 1270000, 1270000) + Red).Replace("<p:cNvPr id=\"2\" name=\"s\"/>", "<p:cNvPr id=\"2\" name=\"s\"><a:hlinkClick r:id=\"rIdH\"/></p:cNvPr>");
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(sp)).Objects));
+        Assert.Equal(new Hyperlink("https://example.com/"), shape.Link);
+    }
+
+    [Fact]
     public void A_cropped_picture_with_an_outline_keeps_its_crop_as_a_shape()
     {
         var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"10000\" b=\"20000\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +

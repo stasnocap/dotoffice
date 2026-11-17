@@ -27,6 +27,15 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
     private XElement? _defaultTextStyle;
     private int _slideNumber;
 
+    /// <summary>The parts of the slides that are shown (become pages), in order; links can only jump to these.</summary>
+    private readonly List<string> _shownSlides = [];
+
+    /// <summary>The parts of all slides, hidden ones included, in order: a next or previous slide is counted among these.</summary>
+    private readonly List<string> _allSlides = [];
+
+    /// <summary>The part of the slide being read, for relative jumps (next or previous slide).</summary>
+    private string? _currentSlide;
+
     private sealed record Master(XElement Root, Host Host, string MajorFont, string MinorFont, IReadOnlyDictionary<string, string> ColorMap);
 
     private sealed record Layout(XElement Root, Host Host, Master? Master);
@@ -46,6 +55,32 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
             relationships.TryGetValue(relationshipId, out var rel) && !rel.IsExternal && context._package.Exists(rel.Target) ? rel.Target : null;
 
         public string? ExternalTarget(string relationshipId) => relationships.TryGetValue(relationshipId, out var rel) && rel.IsExternal ? rel.Target : null;
+
+        /// <summary>
+        /// A jump to a shown slide: one named by the relationship, or the first, last, next or previous one of the show. As in PowerPoint
+        /// 2021's PDFs, the next and previous slides are counted among all slides, so a jump that lands on a hidden one goes nowhere.
+        /// </summary>
+        public Hyperlink? ActionLink(string? relationshipId, string action)
+        {
+            var shown = context._shownSlides;
+            string? target = null;
+            if (action.StartsWith("ppaction://hlinksldjump", StringComparison.Ordinal))
+                target = relationshipId is null ? null : Part(relationshipId);
+            else if (action.StartsWith("ppaction://hlinkshowjump?jump=", StringComparison.Ordinal) && shown.Count > 0)
+            {
+                var all = context._allSlides;
+                int current = context._currentSlide is { } part ? all.IndexOf(part) : -1;
+                target = action["ppaction://hlinkshowjump?jump=".Length..] switch
+                {
+                    "firstslide" => shown[0],
+                    "lastslide" => shown[^1],
+                    "nextslide" when current >= 0 && current + 1 < all.Count => all[current + 1],
+                    "previousslide" when current > 0 => all[current - 1],
+                    _ => null,
+                };
+            }
+            return target is not null && shown.Contains(target) ? new Hyperlink(null, target) : null;
+        }
 
         public ImageData? Image(string relationshipId, out bool unreadable)
         {
@@ -93,16 +128,28 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 if ((string?)style.Attribute("styleId") is { } styleId) _tableStyles[styleId] = style;
         var relationships = _package.GetRelationships(part);
         var presentation = new Presentation();
-        _slideNumber = (int)Number(root, "firstSlideNum", 1) - 1;
+        // The slides first, so that a link can jump ahead to a slide not read yet.
+        var slides = new List<(string Part, XElement Root)?>();
         foreach (var id in Child(root, "sldIdLst")?.Elements() ?? [])
         {
-            _slideNumber++;
             if (RelationshipId(id) is not { } rid || !relationships.TryGetValue(rid, out var rel) || rel.IsExternal || !_package.Exists(rel.Target))
             {
                 options.Warnings.Warn("pptx.slide-missing", "A slide listed in the presentation is missing from the file; it was skipped.");
+                slides.Add(null);
                 continue;
             }
-            if (ReadSlide(rel.Target, width, height) is { } slide) presentation.Slides.Add(slide);
+            var slideRoot = Load(rel.Target);
+            slides.Add((rel.Target, slideRoot));
+            _allSlides.Add(rel.Target);
+            if (Shown(slideRoot)) _shownSlides.Add(rel.Target);
+        }
+        _slideNumber = (int)Number(root, "firstSlideNum", 1) - 1;
+        foreach (var entry in slides)
+        {
+            _slideNumber++;
+            if (entry is not var (slidePart, slideRoot2) || !Shown(slideRoot2)) continue;
+            _currentSlide = slidePart;
+            presentation.Slides.Add(ReadSlide(slidePart, slideRoot2, width, height));
         }
 
         foreach (var (what, count) in _skipped)
@@ -148,16 +195,16 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
 
     private static bool ShowsMasterShapes(XElement? root) => (string?)root?.Attribute("showMasterSp") is not ("0" or "false");
 
-    private Slide? ReadSlide(string part, double width, double height)
+    private static bool Shown(XElement slideRoot) => (string?)slideRoot.Attribute("show") is not ("0" or "false");
+
+    private Slide ReadSlide(string part, XElement root, double width, double height)
     {
-        var root = Load(part);
-        if ((string?)root.Attribute("show") is "0" or "false") return null;
         var layout = LayoutOf(part);
         var master = layout?.Master;
         var theme = master?.Host.Theme ?? DmlTheme.Default;
         var map = OverrideMap(root) ?? OverrideMap(layout?.Root) ?? master?.ColorMap ?? new Dictionary<string, string>();
         var host = new Host(this, _package.GetRelationships(part), theme);
-        var slide = new Slide(width, height);
+        var slide = new Slide(width, height) { Anchor = part };
 
         ReadBackground(slide, [(root, host), (layout?.Root, layout?.Host), (master?.Root, master?.Host)], map, theme);
 
@@ -254,6 +301,10 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         return Path(nv, "nvPr", "ph");
     }
 
+    /// <summary>The click link of a whole shape, picture or frame (its <c>cNvPr</c>'s <c>hlinkClick</c>).</summary>
+    private static Hyperlink? ShapeLink(XElement element, Scope scope) =>
+        DmlShapes.ReadLink(scope.Host, Child(element.Elements().FirstOrDefault(e => e.Name.LocalName.StartsWith("nv", StringComparison.Ordinal)), "cNvPr") is { } cNvPr ? Child(cNvPr, "hlinkClick") : null);
+
     private void ReadObject(Slide slide, XElement element, Scope scope, Placement? placement, ref int z)
     {
         switch (element.Name.LocalName)
@@ -269,7 +320,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                     {
                         Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
                         Rotation = shape.Rotation + place.Turns.Sum(t => t.Rotation), GroupTurns = place.Turns,
-                        ZOrder = z++,
+                        Link = ShapeLink(element, scope), ZOrder = z++,
                     });
                     break;
                 }
@@ -490,7 +541,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 {
                     Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
                     Rotation = shape.Rotation + place.Turns.Sum(t => t.Rotation), GroupTurns = place.Turns,
-                    ZOrder = z++,
+                    Link = ShapeLink(pic, scope), ZOrder = z++,
                 });
                 return;
             }
@@ -502,7 +553,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
             CropLeft = Crop("l"), CropTop = Crop("t"), CropRight = Crop("r"), CropBottom = Crop("b"),
             Rotation = -Number(xfrm, "rot") / 60_000.0 + place.Turns.Sum(t => t.Rotation), GroupTurns = place.Turns,
             FlipH = Flag(xfrm, "flipH"), FlipV = Flag(xfrm, "flipV"),
-            ZOrder = z++,
+            Link = ShapeLink(pic, scope), ZOrder = z++,
         });
     }
 

@@ -169,7 +169,7 @@ internal sealed class PptxBuilder
                 var slide = _slides[i];
                 Write(zip, $"ppt/slides/slide{i + 1}.xml", $"<p:sld {Ns} {slide.Attributes}><p:cSld>{slide.Head}<p:spTree>{Tree(slide.Tree)}</p:spTree></p:cSld></p:sld>");
                 Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png"), ("rIdC", "chart", "../charts/chart1.xml"),
-                    ("rIdDM", "diagramData", "../diagrams/data1.xml"), ("rIdDD", "diagramDrawing", "../diagrams/drawing1.xml"), ("rIdH", "hyperlink", "https://example.com/")));
+                    ("rIdDM", "diagramData", "../diagrams/data1.xml"), ("rIdDD", "diagramDrawing", "../diagrams/drawing1.xml"), ("rIdH", "hyperlink", "https://example.com/"), ("rIdJ1", "slide", "slide1.xml"), ("rIdJ3", "slide", "slide3.xml")));
             }
             foreach (var (name, bytes) in _media)
             {

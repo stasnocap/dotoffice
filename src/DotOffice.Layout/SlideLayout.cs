@@ -41,6 +41,7 @@ public sealed partial class SheetLayoutEngine
             else if (slide.BackgroundGradient is { } gradient) SheetPass.EmitGradient(gradient, 0, 0, slide.Width, slide.Height, items);
             else if (slide.Background is { } color) items.Add(new RectItem(0, 0, slide.Width, slide.Height, color));
 
+            if (slide.Anchor is { } anchor) items.Add(new AnchorItem(anchor, 0, 0));
             var whole = (0.0, 0.0, slide.Width, slide.Height);
             var placed = slide.Objects.OrderBy(o => o.ZOrder).Select(o => (Object: o, Rect: PlaceInFrame(o, o.X, o.Y, o.Width, o.Height))).ToList();
             FitText(placed);
@@ -53,6 +54,7 @@ public sealed partial class SheetLayoutEngine
                     case SheetChart chart: EmitChart(chart, x, y, w, h, whole, items); break;
                     case SheetImage image: SheetPass.EmitImage(image, x, y, w, h, whole, items); break;
                 }
+                if (obj.Link is { } link) items.Add(new LinkItem(x, y, w, h, link));
             }
             document.Pages.Add(page);
         }

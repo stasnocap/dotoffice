@@ -29,6 +29,9 @@ public sealed class Slide(double width, double height)
     /// <summary>A picture background stretched over the slide, drawn instead of <see cref="Background"/>.</summary>
     public ImageData? BackgroundImage { get; set; }
 
+    /// <summary>The bookmark name that links to this slide (<see cref="Hyperlink.Bookmark"/>) jump to; null when nothing links here.</summary>
+    public string? Anchor { get; set; }
+
     /// <summary>Pictures and shapes, drawn in <see cref="SheetObject.ZOrder"/> order.</summary>
     public List<SheetObject> Objects { get; } = [];
 }

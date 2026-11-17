@@ -16,6 +16,9 @@ internal interface IDmlHost
     /// <summary>The address an external relationship (a hyperlink) points to; null when it is missing or inside the file.</summary>
     string? ExternalTarget(string relationshipId);
 
+    /// <summary>The link of a click action inside the file (a jump to another slide); null when there is none or it goes nowhere.</summary>
+    Hyperlink? ActionLink(string? relationshipId, string action) => null;
+
     /// <summary>Records something drawn approximately or left out, for a warning.</summary>
     void Note(string note);
 }
@@ -559,6 +562,19 @@ internal static class DmlShapes
         return result.Count > 0 ? result : null;
     }
 
+    /// <summary>
+    /// Where a click (<c>hlinkClick</c>) leads: an address outside the file, or what the host makes of an action inside it (a jump to
+    /// another slide); null for anything else (macros, sounds, no action).
+    /// </summary>
+    internal static Hyperlink? ReadLink(IDmlHost host, XElement? hlinkClick)
+    {
+        if (hlinkClick is null) return null;
+        var id = hlinkClick.Attributes().FirstOrDefault(a => a.Name.LocalName == "id")?.Value is { Length: > 0 } rid ? rid : null;
+        string action = (string?)hlinkClick.Attribute("action") ?? "";
+        if (action.Length == 0) return id is not null && host.ExternalTarget(id) is { } target ? new Hyperlink(target) : null;
+        return host.ActionLink(id, action);
+    }
+
     private static List<ShapeParagraph> ReadText(IDmlHost host, XElement? txBody, DmlTheme theme, Color? defaultColor, out XElement? bodyProperties)
     {
         bodyProperties = Child(txBody, "bodyPr");
@@ -588,10 +604,7 @@ internal static class DmlShapes
                 return font;
             }
 
-            // A run's click link, when it goes to an address outside the file (a jump to another slide is left out).
-            Hyperlink? Link(XElement? rPr) =>
-                Child(rPr, "hlinkClick")?.Attributes().FirstOrDefault(a => a.Name.LocalName == "id")?.Value is { Length: > 0 } id && host.ExternalTarget(id) is { } target
-                    ? new Hyperlink(target) : null;
+            Hyperlink? Link(XElement? rPr) => ReadLink(host, Child(rPr, "hlinkClick"));
 
             var runs = new List<CellTextRun>();
             foreach (var child in p.Elements())

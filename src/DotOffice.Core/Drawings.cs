@@ -45,6 +45,9 @@ public abstract record SheetObject
     public bool FlipH { get; init; }
     public bool FlipV { get; init; }
 
+    /// <summary>Where a click on the object leads; its whole frame becomes the link. Null means none.</summary>
+    public Hyperlink? Link { get; init; }
+
     /// <summary>Position in the drawing's z-order (later is on top), shared by all kinds of objects of a sheet.</summary>
     public int ZOrder { get; init; }
 }

@@ -26,6 +26,23 @@ public class SlideLayoutTests
         new(HorizontalAlignment.Left, [new CellTextRun(text, Font)], 10, indent, margin);
 
     [Fact]
+    public void A_slide_is_a_link_target_and_a_linked_shape_is_a_link_over_its_frame()
+    {
+        var slide = new Slide(400, 300) { Anchor = "/ppt/slides/slide2.xml" };
+        slide.Objects.Add(new SheetShape
+        {
+            Anchor = ImageAnchorKind.Absolute, X = 10, Y = 20, Width = 30, Height = 40, Geometry = ShapeGeometry.Rectangle, Fill = Color.Black,
+            Link = new Hyperlink(null, "/ppt/slides/slide1.xml"),
+        });
+        var presentation = new Presentation();
+        presentation.Slides.Add(slide);
+        var items = new SheetLayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(LayoutTestHelpers.Noto)) }).Layout(presentation).Pages[0].Items;
+        Assert.Equal(("/ppt/slides/slide2.xml", 0.0), items.OfType<AnchorItem>().Select(a => (a.Name, a.Y)).Single());
+        var link = items.OfType<LinkItem>().Single();
+        Assert.Equal((10.0, 20.0, 30.0, 40.0, "/ppt/slides/slide1.xml"), (link.X, link.Y, link.Width, link.Height, link.Link.Bookmark));
+    }
+
+    [Fact]
     public void A_hanging_indent_puts_the_bullet_at_the_indent_and_every_line_of_text_at_the_margin()
     {
         var texts = Texts(120, Paragraph("•\tone two three four five six seven eight nine ten", 0, 30));
