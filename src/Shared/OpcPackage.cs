@@ -30,6 +30,8 @@ internal sealed class OpcPackage : IDisposable
         try
         {
             _zip = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
+            // The central directory is read on first use; a damaged one fails here.
+            _ = _zip.Entries;
         }
         catch (InvalidDataException e)
         {
