@@ -315,7 +315,9 @@ public sealed partial class SheetLayoutEngine
             var e = Enumerable.Range(0, n).Select(i => Advance(i) + widths[i]).ToList();
             rowTotal = e.Sum();
             if (rowTotal + 0.283 * fs * (n + 1) <= lmax)
-                rowGap = Math.Min(0.2 * widths.Sum() + 0.482 * fs * n + (1.28 + 0.16 * fs), lmax - rowTotal) / (n + 1);
+                // A line key adds 8.18 - 0.55 x size pt to the spread: 3.23 / 2.71 / 1.6 at 9 / 10 / 12 pt (measured in Word 2021, t58, 2 to 4 entries; not seen outside 9 to 12 pt).
+                rowGap = Math.Min(0.2 * widths.Sum() + 0.482 * fs * n + (1.28 + 0.16 * fs)
+                    + Enumerable.Range(0, n).Count(i => KeyOf(i) == WordKey.Line) * Math.Max(0, 8.18 - 0.55 * fs), lmax - rowTotal) / (n + 1);
             else
             {
                 gridPitch = e.Max() + 0.283 * fs;

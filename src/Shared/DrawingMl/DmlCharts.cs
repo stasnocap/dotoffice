@@ -498,15 +498,15 @@ internal static class DmlCharts
                 bool stacked = Math.Max(11, 0.555 * fontSize0 + 5.05) + band + series.Count * pitch <= 0.43 * template.Height;
                 return stacked ? length - series.Count * pitch - 6 : length - 6;
             }
-            // A top or bottom legend of several rows takes (rows - 1) x pitch - 1.5 more (measured in Word 2021 at 10 pt; the same at 8 and 14 pt, rows estimated here from names of 0.53 em a character).
+            // A top or bottom legend of several rows takes (rows - 1) x pitch - 1.5 more (measured in Word 2021 at 10 pt; the same at 8 and 14 pt, rows estimated here from names in Arial's advances (EstimatedWidth)).
             double ExtraLegendRows(double pitch)
             {
                 int n = series.Count;
                 if (n == 0) return 0;
-                double lmax = 0.9 * template.Width + 2.85, advance = 0.753 * fontSize0 - 0.3, rowCap = lmax - 0.566 * fontSize0;
-                // A name too long for the row wraps at rowCap less the key (see SheetChartsWord); each extra line adds 1.106 em to every row.
-                double NameWidth(ChartSeries sr) => Math.Min(sr.Name.Length * 0.53 * fontSize0, rowCap - advance);
-                int maxLines = series.Max(sr => advance + sr.Name.Length * 0.53 * fontSize0 > rowCap ? (int)Math.Ceiling(sr.Name.Length * 0.53 * fontSize0 / Math.Max(1, rowCap - advance)) : 1);
+                double lmax = 0.9 * template.Width + 2.85, advance = kind is ChartKind.Line ? 21.25 : 0.753 * fontSize0 - 0.3, rowCap = lmax - 0.566 * fontSize0;
+                // A line chart's key and gap are 21.25 (see SheetChartsWord). A name too long for the row wraps at rowCap less the key (see SheetChartsWord); each extra line adds 1.106 em to every row.
+                double NameWidth(ChartSeries sr) => Math.Min(EstimatedWidth(sr.Name, fontSize0), rowCap - advance);
+                int maxLines = series.Max(sr => advance + EstimatedWidth(sr.Name, fontSize0) > rowCap ? (int)Math.Ceiling(EstimatedWidth(sr.Name, fontSize0) / Math.Max(1, rowCap - advance)) : 1);
                 double extra = (maxLines - 1) * 1.106 * fontSize0;
                 double total = series.Sum(sr => advance + NameWidth(sr));
                 if (total + 0.283 * fontSize0 * (n + 1) <= lmax) return extra;
@@ -939,6 +939,12 @@ internal static class DmlCharts
         return amount < -1e-9 ? Shade(accent, 1 + amount) : amount > 1e-9 ? Tint(accent, 1 - amount) : accent;
     }
 
+
+    // Arial's (Helvetica-metric) advances, in thousandths of an em, for ' ' to '~'.
+    private static readonly short[] ArialAdvances = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584];
+
+    /// <summary>A string's width in Arial at the size, as text is not measured here: ASCII by Arial's advances, anything else 0.556 em.</summary>
+    internal static double EstimatedWidth(string text, double size) => text.Sum(ch => ch is >= ' ' and <= '~' ? ArialAdvances[ch - ' '] : 556) / 1000.0 * size;
 
     /// <summary>The palette number p (1 to 8) and the block (0 to 5) of a <c>c:style</c>; an absent or out-of-range style counts as style 2.</summary>
     internal static (int P, int Block) StyleParts(int? style)
