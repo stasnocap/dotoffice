@@ -253,6 +253,16 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_runs_own_shadow_is_read_onto_its_font()
+    {
+        var shadowed = "<a:effectLst><a:outerShdw dist=\"38100\" dir=\"0\"><a:srgbClr val=\"FF0000\"/></a:outerShdw></a:effectLst>";
+        var sp = Sp(Xfrm(0, 0, 1270000, 1270000), $"<a:p><a:r><a:rPr lang=\"en-US\">{shadowed}</a:rPr><a:t>a</a:t></a:r><a:r><a:rPr lang=\"en-US\"/><a:t>b</a:t></a:r></a:p>");
+        var runs = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(sp)).Objects)).Paragraphs[0].Runs;
+        Assert.Equal(new ShapeShadow(new Color(255, 0, 0), 1, 3, 0), runs[0].Font.TextShadow);
+        Assert.Null(runs[1].Font.TextShadow);
+    }
+
+    [Fact]
     public void A_cropped_picture_with_an_outline_keeps_its_crop_as_a_shape()
     {
         var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"10000\" b=\"20000\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +

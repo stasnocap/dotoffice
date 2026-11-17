@@ -37,6 +37,9 @@ public sealed record TextItem(double X, double Baseline, TrueTypeFont Font, doub
     /// <summary>Set for dynamic fields whose text is substituted after pagination.</summary>
     public FieldRun? Field { get; init; }
 
+    /// <summary>A shadow the text casts (drawn under it by the shape that holds it); null means none.</summary>
+    public ShapeShadow? Shadow { get; init; }
+
     /// <summary>The glyphs are filled as outlines, not written as text (a shadow, so the text is not found twice).</summary>
     public bool AsPaths { get; init; }
 

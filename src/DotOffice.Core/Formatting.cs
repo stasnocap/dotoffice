@@ -27,6 +27,9 @@ public sealed record RunProperties
     public bool Strike { get; init; }
     public bool DoubleStrike { get; init; }
 
+    /// <summary>A shadow cast by the text itself (a DrawingML run's outer shadow); null means none.</summary>
+    public ShapeShadow? TextShadow { get; init; }
+
     /// <summary>Text color; null means automatic (black on light backgrounds).</summary>
     public Color? Color { get; init; }
 

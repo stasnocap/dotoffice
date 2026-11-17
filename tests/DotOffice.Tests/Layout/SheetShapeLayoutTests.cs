@@ -301,6 +301,21 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void A_runs_own_shadow_is_its_glyphs_as_outlines_under_it()
+    {
+        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = 10 };
+        var shape = Shape() with
+        {
+            Paragraphs = [new ShapeParagraph(HorizontalAlignment.Left, [new CellTextRun("plain ", font), new CellTextRun("shaded", font with { TextShadow = new ShapeShadow(Red, 1, 2, 2) })], 10)],
+        };
+        var texts = Page(shape).Items.OfType<TextItem>().ToList();
+        var shade = Assert.Single(texts, t => t.AsPaths);
+        var text = Assert.Single(texts, t => !t.AsPaths && t.Text.Contains("shaded"));
+        Assert.Equal((Red, text.X + 2, text.Baseline + 2), (shade.Color, shade.X, shade.Baseline));
+        Assert.True(texts.IndexOf(shade) < texts.IndexOf(text));
+    }
+
+    [Fact]
     public void A_blurred_shadow_is_forty_nine_faint_copies_that_add_up_to_its_opacity()
     {
         var page = Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4, Blur: 6) });

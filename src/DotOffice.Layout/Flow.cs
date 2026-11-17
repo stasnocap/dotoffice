@@ -418,7 +418,7 @@ internal static class ParagraphLayouter
                     items.Add(new TextItem(x0 + a.X + a.LeadingSpace, baseline - a.Rise, a.Font!.Font, a.Size, a.Text, color,
                         a.Font.SyntheticBold, a.Font.SyntheticItalic, a.Props.CharacterSpacing)
                     {
-                        Field = a.Field, Glyphs = a.Glyphs, RightToLeft = a.RightToLeft,
+                        Field = a.Field, Glyphs = a.Glyphs, RightToLeft = a.RightToLeft, Shadow = a.Props.TextShadow,
                     });
                     break;
                 case AtomKind.Image:

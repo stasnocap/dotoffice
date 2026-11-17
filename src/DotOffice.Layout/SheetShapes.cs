@@ -37,9 +37,7 @@ public sealed partial class SheetLayoutEngine
                 Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, FillImage = null, Shadow = null,
                 LineColor = shape.LineColor is null || merged ? null : shadow.Color, Paragraphs = [],
             };
-            bool soft = shadow.Blur >= 0.5;
-            double[] offsets = soft ? [.. BlurQuantiles.Select(z => z * shadow.Blur / BlurSigmas)] : [0];
-            double copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / (offsets.Length * offsets.Length)) : shadow.Opacity;
+            var (offsets, copyOpacity) = ShadowCopies(shadow);
             // The text is shadowed too (seen where it is not over the fill), its glyphs drawn as outlines in the shadow color.
             var text = new List<LayoutItem>();
             if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
@@ -78,8 +76,44 @@ public sealed partial class SheetLayoutEngine
         }
         else EmitOutline(shape, x, y, width, height, items);
         if (flipped) items.Add(new PopItem());
-        if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line) EmitShapeText(shape, x, y, width, height, items);
+        if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
+        {
+            var text = new List<LayoutItem>();
+            EmitShapeText(shape, x, y, width, height, text);
+            EmitTextShadows(text, items);
+            items.AddRange(text);
+        }
         for (int i = 0; i < pushed; i++) items.Add(new PopItem());
+    }
+
+    /// <summary>Where a shadow's copies sit around its place (on each axis) and how opaque each is, so that together they make its blur.</summary>
+    private static (double[] Offsets, double CopyOpacity) ShadowCopies(ShapeShadow shadow)
+    {
+        if (shadow.Blur < 0.5) return ([0], shadow.Opacity);
+        double[] offsets = [.. BlurQuantiles.Select(z => z * shadow.Blur / BlurSigmas)];
+        return (offsets, 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / (offsets.Length * offsets.Length)));
+    }
+
+    /// <summary>
+    /// The shadows the text casts itself (a run's own shadow, as in WordArt): copies of its glyphs as outlines in the shadow color, laid
+    /// under the text, inside the same turns and clips.
+    /// </summary>
+    private static void EmitTextShadows(List<LayoutItem> text, List<LayoutItem> items)
+    {
+        if (!text.Any(i => i is TextItem { Shadow: not null, AsPaths: false })) return;
+        foreach (var item in text)
+        {
+            if (item is PushItem or PopItem) { items.Add(item); continue; }
+            if (item is not TextItem { Shadow: { } shadow, AsPaths: false } run) continue;
+            var (offsets, copyOpacity) = ShadowCopies(shadow);
+            foreach (double ox in offsets)
+                foreach (double oy in offsets)
+                {
+                    items.Add(new PushItem(null, Opacity: copyOpacity));
+                    items.Add(run.Offset(shadow.Dx + ox, shadow.Dy + oy) is TextItem copy ? copy with { Color = shadow.Color, AsPaths = true, Shadow = null } : run);
+                    items.Add(new PopItem());
+                }
+        }
     }
 
     /// <summary>The standard normal quantiles at (i + 0.5) / 7: where a blurred shadow's copies sit, in deviations.</summary>

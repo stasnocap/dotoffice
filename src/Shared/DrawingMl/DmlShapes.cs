@@ -594,6 +594,7 @@ internal static class DmlShapes
                 if ((string?)rPr.Attribute("strike") is { } strike) font = font with { Strike = strike != "noStrike" };
                 if ((string?)Child(rPr, "latin")?.Attribute("typeface") is { Length: > 0 } face && !face.StartsWith('+')) font = font with { FontFamily = face };
                 if (Child(rPr, "solidFill") is { } fillElement && Resolve(fillElement, theme) is { } color) font = font with { Color = color };
+                if (ReadShadow(Child(rPr, "effectLst"), theme, null) is { } textShadow) font = font with { TextShadow = textShadow };
                 // PowerPoint 2021 draws a link's text in the theme's hyperlink color, underlined, whatever the run's own color.
                 if (Child(rPr, "hlinkClick") is not null)
                 {
