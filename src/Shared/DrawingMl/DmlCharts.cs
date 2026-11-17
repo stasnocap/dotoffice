@@ -257,7 +257,7 @@ internal static class DmlCharts
             if (slices)
             {
                 int count = Math.Max(values.Count, categories.Count);
-                pointColors = Enumerable.Range(0, count).Select(k => PaletteColor(theme, k)).ToList();
+                pointColors = Enumerable.Range(0, count).Select(k => AutomaticSeriesColor(theme, chartStyle, k, count)).ToList();
                 foreach (var point in ser.Elements().Where(e => e.Name.LocalName == "dPt"))
                     if ((int)Number(Child(point, "idx"), "val", -1) is var k && k >= 0 && k < count && SolidFill(Child(point, "spPr"), theme) is { } c) pointColors[k] = c;
             }
