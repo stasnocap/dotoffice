@@ -118,6 +118,27 @@ public class DocumentConverterTests
         Assert.Contains(warnings.Warnings, w => w.Code == "pdf.image-format");
     }
 
+    [Theory]
+    [InlineData(".pptm")]
+    [InlineData(".potx")]
+    [InlineData(".ppsx")]
+    public async Task Macro_enabled_files_templates_and_shows_convert_by_their_extension(string extension)
+    {
+        var input = Path.Combine(Path.GetTempPath(), $"dotoffice-{Guid.NewGuid():N}{extension}");
+        var output = Path.ChangeExtension(input, ".pdf");
+        await File.WriteAllBytesAsync(input, new Pptx.PptxBuilder().AddSlide(Pptx.PptxBuilder.Sp(Pptx.PptxBuilder.Xfrm(0, 0, 1270000, 1270000), Pptx.PptxBuilder.P("x"))).BuildStream().ToArray());
+        try
+        {
+            await DocumentConverter.ConvertAsync(input, output, new ConvertOptions { Fonts = TestFonts, UseSystemFonts = false });
+            Assert.StartsWith("%PDF", Encoding.Latin1.GetString(await File.ReadAllBytesAsync(output)));
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(output);
+        }
+    }
+
     [Fact]
     public async Task Converts_a_presentation_to_one_page_per_slide()
     {

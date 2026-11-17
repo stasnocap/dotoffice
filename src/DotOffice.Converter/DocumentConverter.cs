@@ -115,9 +115,10 @@ public static class DocumentConverter
     internal static DocumentFormat FormatFromPath(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".docx" => DocumentFormat.Docx,
-            ".xlsx" => DocumentFormat.Xlsx,
-            ".pptx" => DocumentFormat.Pptx,
+            // Macro-enabled files and templates are the same packages; the macros are not run.
+            ".docx" or ".docm" or ".dotx" or ".dotm" => DocumentFormat.Docx,
+            ".xlsx" or ".xlsm" or ".xltx" or ".xltm" => DocumentFormat.Xlsx,
+            ".pptx" or ".pptm" or ".potx" or ".potm" or ".ppsx" or ".ppsm" => DocumentFormat.Pptx,
             ".pdf" => DocumentFormat.Pdf,
             var ext => throw new NotSupportedException($"Unknown format '{ext}'."),
         };
