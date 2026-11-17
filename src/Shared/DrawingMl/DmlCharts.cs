@@ -616,19 +616,35 @@ internal static class DmlCharts
                             if (p < s.Values.Count && s.Values[p] is { } x) { if (x >= 0) positive += x; else negative += x; }
                         (lo, hi) = (Math.Min(lo, negative), Math.Max(hi, positive));
                     }
+                // Stacked smoothed lines: each series' curve runs through the running totals and its whole curve counts, peak included (t59: 42, 42, 30 peaks at 42.89,
+                // so 0 to 50 where the midpoints give 45; 11 stacked charts fit), unlike a clustered line's midpoints.
+                if (context.WordChartFrame && g == ChartGrouping.Stacked && list.Any(sr => sr.Smooth))
+                {
+                    var total = new double?[points];
+                    foreach (var sr in list)
+                    {
+                        for (int p = 0; p < points; p++) total[p] = p < sr.Values.Count && sr.Values[p] is { } x ? (total[p] ?? 0) + x : total[p];
+                        if (sr.Smooth) foreach (var y in SmoothedValues(total, whole: true)) (lo, hi) = (Math.Min(lo, y), Math.Max(hi, y));
+                    }
+                }
             }
             return (lo, hi, loPositive);
         }
 
         // The midpoints of the spans of the curve through a series' values as SheetCharts draws it smoothed: Catmull-Rom, the end control points a third of the way along.
-        static IEnumerable<double> SmoothedValues(IReadOnlyList<double?> values)
+        static IEnumerable<double> SmoothedValues(IReadOnlyList<double?> values, bool whole = false)
         {
             for (int k = 0; k + 1 < values.Count; k++)
             {
                 if (values[k] is not { } y1 || values[k + 1] is not { } y2) continue;
                 double y0 = k > 0 && values[k - 1] is { } a ? a : 2 * y1 - y2, y3 = k + 2 < values.Count && values[k + 2] is { } b ? b : 2 * y2 - y1;
                 double c1 = y1 + (y2 - y0) / 6, c2 = y2 - (y3 - y1) / 6;
-                yield return (y1 + 3 * c1 + 3 * c2 + y2) / 8;
+                if (!whole) { yield return (y1 + 3 * c1 + 3 * c2 + y2) / 8; continue; }
+                for (int i = 1; i < 64; i++)
+                {
+                    double t = i / 64.0, u = 1 - t;
+                    yield return u * u * u * y1 + 3 * t * u * u * c1 + 3 * t * t * u * c2 + t * t * t * y2;
+                }
             }
         }
 
