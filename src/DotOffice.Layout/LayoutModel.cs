@@ -50,7 +50,7 @@ public sealed record TextItem(double X, double Baseline, TrueTypeFont Font, doub
 
 public enum LineStyle { Solid, Dotted, Dashed }
 
-public sealed record LineItem(double X1, double Y1, double X2, double Y2, double Width, Color Color, LineStyle Style = LineStyle.Solid)
+public sealed record LineItem(double X1, double Y1, double X2, double Y2, double Width, Color Color, LineStyle Style = LineStyle.Solid, bool Round = false)
     : LayoutItem
 {
     public override LayoutItem Offset(double dx, double dy) => this with { X1 = X1 + dx, X2 = X2 + dx, Y1 = Y1 + dy, Y2 = Y2 + dy };

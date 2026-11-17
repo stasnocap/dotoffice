@@ -208,6 +208,9 @@ public sealed record SheetShape : SheetObject
 
     public double LineWidth { get; init; } = 1;
 
+    /// <summary>The outline lies wholly outside the frame, with round corners, as PowerPoint draws a picture's.</summary>
+    public bool LineOutside { get; init; }
+
     public StrokeStyle LineStyle { get; init; }
 
     public List<ShapeParagraph> Paragraphs { get; init; } = [];

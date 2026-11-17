@@ -260,6 +260,7 @@ public class PptxReaderTests
         var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddImage(Png).AddSlide(pic)).Objects));
         Assert.Equal((0.1, 0.0, 0.0, 0.2), (shape.FillCropLeft, shape.FillCropTop, shape.FillCropRight, shape.FillCropBottom));
         Assert.Equal(new Color(255, 0, 0), shape.LineColor!.Value);
+        Assert.True(shape.LineOutside);
     }
 
     [Fact]

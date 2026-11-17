@@ -301,6 +301,18 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void An_outline_outside_the_frame_runs_half_its_width_out_with_round_corners()
+    {
+        var centered = Page(Shape(fill: Red, line: Color.Black)).Items.OfType<LineItem>().ToList();
+        var outside = Page(Shape(fill: Red, line: Color.Black) with { LineOutside = true }).Items.OfType<LineItem>().ToList();
+        Assert.Equal(4, outside.Count);
+        Assert.All(outside, l => Assert.True(l.Round));
+        Assert.All(centered, l => Assert.False(l.Round));
+        Assert.Equal(centered.Min(l => l.X1) - 1, outside.Min(l => l.X1), 6);
+        Assert.Equal(centered.Max(l => l.Y2) + 1, outside.Max(l => l.Y2), 6);
+    }
+
+    [Fact]
     public void A_picture_fill_is_the_image_over_the_frame_cut_at_the_outline()
     {
         var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");

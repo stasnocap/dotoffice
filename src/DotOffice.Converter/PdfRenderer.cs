@@ -261,7 +261,9 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     canvas.SetLineWidth(line.Width);
                     if (line.Style != LineStyle.Solid)
                         canvas.SetDash(line.Style == LineStyle.Dotted ? [line.Width, line.Width * 2] : [line.Width * 4, line.Width * 2]);
+                    if (line.Round) canvas.SetLineCap(1);
                     canvas.MoveTo(line.X1, h - line.Y1).LineTo(line.X2, h - line.Y2).Stroke();
+                    if (line.Round) canvas.SetLineCap(0);
                     if (line.Style != LineStyle.Solid) canvas.SetDash();
                     break;
                 case ImageItem image:

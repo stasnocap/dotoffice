@@ -31,7 +31,7 @@ public sealed partial class SheetLayoutEngine
             // A filled shape's outline is cast with its fill as one area (the frame grown by half the line), so that the translucent copies
             // do not darken where the line overlaps the fill.
             bool merged = filled && shape.LineColor is not null && shape.LineWidth > 0 && shape.Geometry != ShapeGeometry.Line;
-            double grow = merged ? shape.LineWidth / 2 : 0;
+            double grow = merged ? (shape.LineOutside ? shape.LineWidth : shape.LineWidth / 2) : 0;
             var dark = shape with
             {
                 Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, FillImage = null, Shadow = null,
@@ -51,6 +51,13 @@ public sealed partial class SheetLayoutEngine
         }
         if (flipped) items.Add(new PushItem(null, 0, cx, cy, shape.FlipH, shape.FlipV));
         if (shape.SoftEdge >= 0.5 && shape.Geometry != ShapeGeometry.Line && shape.Paths?.Any(p => p.Rings is not null) != true) EmitSoftEdged(shape, x, y, width, height, items);
+        else if (shape.LineOutside && shape.LineColor is not null && shape.LineWidth > 0)
+        {
+            // The outline runs around the frame grown by half its width, so that it lies wholly outside, with round corners.
+            double half = shape.LineWidth / 2;
+            EmitOutline(shape with { LineColor = null }, x, y, width, height, items);
+            EmitOutline(shape with { Fill = null, FillGradient = null, FillPattern = null, FillImage = null }, x - half, y - half, width + 2 * half, height + 2 * half, items, round: true);
+        }
         else EmitOutline(shape, x, y, width, height, items);
         if (flipped) items.Add(new PopItem());
         if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line) EmitShapeText(shape, x, y, width, height, items);
@@ -335,7 +342,7 @@ public sealed partial class SheetLayoutEngine
         }
     }
 
-    internal static void EmitOutline(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items)
+    internal static void EmitOutline(SheetShape shape, double x, double y, double w, double h, List<LayoutItem> items, bool round = false)
     {
         var dash = shape.LineStyle switch { StrokeStyle.Dotted => LineStyle.Dotted, StrokeStyle.Dashed => LineStyle.Dashed, _ => LineStyle.Solid };
         double strokeWidth = Math.Max(shape.LineWidth, 0.25);
@@ -357,9 +364,9 @@ public sealed partial class SheetLayoutEngine
                     EmitFill(shape, filled, x, y, w, h, false, items);
                 }
                 if (shape.LineColor is not { } color || shape.LineWidth <= 0 || !path.Stroke) continue;
-                EmitStroke(points, path.Closed, strokeWidth, color, dash, path.Closed ? default : shape.HeadEnd, path.Closed ? default : shape.TailEnd, items);
+                EmitStroke(points, path.Closed, strokeWidth, color, dash, path.Closed ? default : shape.HeadEnd, path.Closed ? default : shape.TailEnd, items, round);
                 foreach (var ring in path.Rings ?? [])
-                    EmitStroke(ring.Select(p => (X: x + p.X * w, Y: y + p.Y * h)).ToList(), true, strokeWidth, color, dash, default, default, items);
+                    EmitStroke(ring.Select(p => (X: x + p.X * w, Y: y + p.Y * h)).ToList(), true, strokeWidth, color, dash, default, default, items, round);
             }
             return;
         }
@@ -372,7 +379,7 @@ public sealed partial class SheetLayoutEngine
         var outline = Outline(shape, w, h).Select(p => (X: x + p.X, Y: y + p.Y)).ToList();
         EmitFill(shape, outline, x, y, w, h, shape.Geometry == ShapeGeometry.Ellipse, items);
         if (shape.LineColor is { } color2 && shape.LineWidth > 0)
-            EmitStroke(outline, true, shape.LineWidth, color2, dash, default, default, items);
+            EmitStroke(outline, true, shape.LineWidth, color2, dash, default, default, items, round);
     }
 
     /// <summary>Fills an outline: with its gradient, as an ellipse when it is one, else as a polygon.</summary>
@@ -490,7 +497,7 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>Strokes a polyline (closed when asked) and puts arrowheads on its open ends.</summary>
-    private static void EmitStroke(List<(double X, double Y)> points, bool closed, double width, Color color, LineStyle dash, LineEnd head, LineEnd tail, List<LayoutItem> items)
+    private static void EmitStroke(List<(double X, double Y)> points, bool closed, double width, Color color, LineStyle dash, LineEnd head, LineEnd tail, List<LayoutItem> items, bool round = false)
     {
         points = new List<(double X, double Y)>(points);
         if (!closed && points.Count >= 2)
@@ -503,7 +510,7 @@ public sealed partial class SheetLayoutEngine
         for (int i = 0; i < segments; i++)
         {
             var (a, b) = (points[i], points[(i + 1) % points.Count]);
-            items.Add(new LineItem(a.X, a.Y, b.X, b.Y, width, color, dash));
+            items.Add(new LineItem(a.X, a.Y, b.X, b.Y, width, color, dash, round));
         }
     }
 

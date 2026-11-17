@@ -558,7 +558,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 {
                     Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
                     Rotation = shape.Rotation + place.Turns.Sum(t => t.Rotation), GroupTurns = place.Turns,
-                    Link = ShapeLink(pic, scope), ZOrder = z++,
+                    Link = ShapeLink(pic, scope), LineOutside = true, ZOrder = z++,
                 });
                 return;
             }
