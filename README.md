@@ -2,7 +2,7 @@
 
 Pure managed .NET library for converting office documents — no LibreOffice, no native binaries, MIT licensed.
 
-> **Status:** preview. DOCX and XLSX to PDF are usable; PPTX is experimental. The API may still change before 1.0.
+> **Status:** preview. DOCX, XLSX and PPTX to PDF are usable. The API may still change before 1.0.
 
 ```
 dotnet add package DotOffice.Converter --prerelease
@@ -28,7 +28,7 @@ await DocumentConverter.ConvertAsync(input, output, DocumentFormat.Xlsx, Documen
 |---|---|
 | DOCX | Usable: styles, lists, tables, headers/footers, images, fields, floats, columns, footnotes, charts, complex scripts (bidi, Indic, Southeast Asian) |
 | XLSX | Usable: cell styles, number formats, merges, page setup, print areas and titles, breaks, headers/footers, charts |
-| PPTX | Experimental: slide/layout/master inheritance, shapes and text; many features missing |
+| PPTX | Usable: slide/layout/master inheritance, shapes and text, bullets and fields, tables, charts, SmartArt, pictures, OLE and media previews, shadows, hyperlinks |
 | ODF, DOC, XLS | Not supported |
 
 Fonts the document names but that are not available are substituted (metric-compatible Liberation, Carlito and Caladea fonts are
