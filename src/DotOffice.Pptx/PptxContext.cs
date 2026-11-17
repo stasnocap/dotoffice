@@ -25,6 +25,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
     private readonly List<string> _notes = [];
     private readonly SortedDictionary<string, int> _skipped = new(StringComparer.Ordinal);
     private XElement? _defaultTextStyle;
+    private int _slideNumber;
 
     private sealed record Master(XElement Root, Host Host, string MajorFont, string MinorFont, IReadOnlyDictionary<string, string> ColorMap);
 
@@ -90,8 +91,10 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 if ((string?)style.Attribute("styleId") is { } styleId) _tableStyles[styleId] = style;
         var relationships = _package.GetRelationships(part);
         var presentation = new Presentation();
+        _slideNumber = (int)Number(root, "firstSlideNum", 1) - 1;
         foreach (var id in Child(root, "sldIdLst")?.Elements() ?? [])
         {
+            _slideNumber++;
             if (RelationshipId(id) is not { } rid || !relationships.TryGetValue(rid, out var rel) || rel.IsExternal || !_package.Exists(rel.Target))
             {
                 options.Warnings.Warn("pptx.slide-missing", "A slide listed in the presentation is missing from the file; it was skipped.");
@@ -631,6 +634,11 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 var rPr = Run(Child(run, "rPr"));
                 Child(run, "rPr")?.Remove();
                 run.AddFirst(rPr);
+                if (run.Name.LocalName == "fld" && FieldText(run, rPr) is { } text)
+                {
+                    if (Child(run, "t") is { } t) t.Value = text;
+                    else run.Add(new XElement(a + "t", text));
+                }
                 if (run.Name.LocalName != "br" && (Child(run, "t")?.Value.Length ?? 0) > 0)
                 {
                     hasText = true;
@@ -653,6 +661,44 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 firstRun.AddBeforeSelf(new XElement(a + "r", rPr, new XElement(a + "t", bullet)));
             }
         }
+    }
+
+    /// <summary>
+    /// What PowerPoint shows for a field: the slide's number or today's date and time in the run's language (formats as PowerPoint 2021 prints
+    /// them for en-US and de-DE); null for other fields, which keep the text saved with them.
+    /// </summary>
+    private string? FieldText(XElement field, XElement rPr)
+    {
+        var type = (string?)field.Attribute("type") ?? "";
+        if (type == "slidenum") return _slideNumber.ToString(CultureInfo.InvariantCulture);
+        if (!type.StartsWith("datetime", StringComparison.Ordinal)) return null;
+        CultureInfo culture;
+        try { culture = CultureInfo.GetCultureInfo((string?)rPr.Attribute("lang") ?? "en-US"); }
+        catch (CultureNotFoundException) { culture = CultureInfo.GetCultureInfo("en-US"); }
+        if (culture.Name.Length == 0) culture = CultureInfo.GetCultureInfo("en-US");
+        var info = culture.DateTimeFormat;
+        bool english = culture.TwoLetterISOLanguageName == "en" || culture.Name.Length == 0;
+        string date = english ? "M/d/yyyy" : info.ShortDatePattern;
+        string format = type switch
+        {
+            "datetime" or "datetime1" => date,
+            "datetime2" => english ? "dddd, MMMM d, yyyy" : info.LongDatePattern,
+            "datetime3" => "d MMMM yyyy",
+            "datetime4" => english ? "MMMM d, yyyy" : info.LongDatePattern.Replace("dddd, ", "", StringComparison.Ordinal),
+            "datetime5" => "d-MMM-yy",
+            "datetime6" => "MMMM yy",
+            "datetime7" => "MMM-yy",
+            "datetime8" => date + " h:mm tt",
+            "datetime9" => date + " h:mm:ss tt",
+            "datetime10" => "HH:mm",
+            "datetime11" => "HH:mm:ss",
+            "datetime12" => "h:mm tt",
+            "datetime13" => "h:mm:ss tt",
+            _ => "",
+        };
+        if (format.Length == 0) return null;
+        if (format.Contains("tt", StringComparison.Ordinal)) culture = CultureInfo.GetCultureInfo("en-US");
+        return DateTime.Now.ToString(format, culture);
     }
 
     /// <summary>The text a bullet stands for, followed by a space; null when the paragraph has none. Numbered bullets count per level.</summary>

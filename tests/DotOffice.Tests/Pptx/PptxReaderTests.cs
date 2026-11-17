@@ -1,3 +1,4 @@
+using System.Globalization;
 using DotOffice.Core;
 using DotOffice.Pptx;
 using static DotOffice.Tests.Pptx.PptxBuilder;
@@ -32,6 +33,19 @@ public class PptxReaderTests
         Assert.Equal(2, presentation.Slides.Count);
         Assert.Equal((960.0, 540.0), (presentation.Slides[0].Width, presentation.Slides[0].Height));
         Assert.Empty(warnings.Warnings);
+    }
+
+    [Fact]
+    public void Slide_number_and_date_fields_show_the_slide_number_and_today_not_the_saved_text()
+    {
+        static string Field(string type, string lang = "en-US") =>
+            $"<a:p><a:fld id=\"{{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}}\" type=\"{type}\"><a:rPr lang=\"{lang}\"/><a:t>saved</a:t></a:fld></a:p>";
+        string body = Field("slidenum") + Field("datetime1") + Field("datetime2", "de-DE") + Field("other");
+        var builder = new PptxBuilder().AddSlide(Sp(Xfrm(0, 0, 12700, 12700))).AddSlide(Sp(Xfrm(0, 0, 1270000, 1270000), body));
+        var today = DateTime.Now;
+        var shape = Assert.IsType<SheetShape>(Assert.Single(Read(builder).Presentation.Slides[1].Objects));
+        Assert.Equal(["2", today.ToString("M/d/yyyy", CultureInfo.InvariantCulture), today.ToString("dddd, d. MMMM yyyy", CultureInfo.GetCultureInfo("de-DE")), "saved"],
+            shape.Paragraphs.Select(p => string.Concat(p.Runs.Select(r => r.Text))));
     }
 
     [Fact]
