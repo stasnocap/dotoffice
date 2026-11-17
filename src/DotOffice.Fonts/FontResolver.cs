@@ -59,7 +59,8 @@ public sealed class FontResolver
         "Noto Sans Symbols", "Noto Sans Symbols 2", "Noto Sans Math", "DejaVu Serif", "FreeSerif", "FreeSans",
         "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Bengali", "Noto Sans Thai",
         "Noto Sans Armenian", "Noto Sans Georgian", "Noto Sans Ethiopic", "Noto Sans Tamil",
-        "Noto Sans SC", "Noto Sans JP", "Noto Sans KR", "Noto Sans TC", "Droid Sans Fallback",
+        "Noto Sans SC", "Noto Sans JP", "Noto Sans KR", "Noto Sans TC",
+        "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK TC", "Source Han Sans SC", "Source Han Sans", "Droid Sans Fallback",
         "WenQuanYi Zen Hei", "Microsoft YaHei", "SimSun", "MS Gothic", "Malgun Gothic", "Nirmala UI", "Leelawadee UI",
     ];
 
