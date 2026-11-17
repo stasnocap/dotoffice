@@ -268,17 +268,17 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
-    public void A_blurred_shadow_is_nine_faint_copies_that_add_up_to_its_opacity()
+    public void A_blurred_shadow_is_twenty_five_faint_copies_that_add_up_to_its_opacity()
     {
         var page = Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4, Blur: 6) });
         var copies = page.Items.OfType<PushItem>().Where(p => p.Opacity < 1).ToList();
-        Assert.Equal(9, copies.Count);
+        Assert.Equal(25, copies.Count);
         double each = copies[0].Opacity;
-        Assert.Equal(0.5, 1 - Math.Pow(1 - each, 9), 6);
+        Assert.Equal(0.5, 1 - Math.Pow(1 - each, 25), 6);
         Assert.All(copies, c => Assert.Equal(each, c.Opacity, 9));
         // The copies are spread over the blur radius (3 points either side) around the shadow's place.
         var xs = copies.Select(c => c.CenterX).Distinct().Order().ToList();
-        Assert.Equal(3, xs.Count);
+        Assert.Equal(5, xs.Count);
         Assert.Equal(3 * 2, xs[^1] - xs[0], 6);
         Assert.Single(Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4) }).Items.OfType<PushItem>(), p => p.Opacity < 1);
     }

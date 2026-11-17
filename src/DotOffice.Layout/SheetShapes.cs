@@ -24,8 +24,9 @@ public sealed partial class SheetLayoutEngine
         if (shape.Reflection is { } reflection && shape.Geometry != ShapeGeometry.Line) EmitReflection(shape, reflection, x, y, width, height, items);
         if (shape.Shadow is { } shadow)
         {
-            // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 3 x 3 grid of such copies spread
-            // over the blur radius, each so faint that the middle, where they all overlap, ends up with the shadow's opacity.
+            // The shadow is the shape's outline in the shadow color, moved and translucent. A blur is a 5 x 5 grid of such copies spread
+            // over the blur radius, each so faint that the middle, where they all overlap, ends up with the shadow's opacity; at the edge
+            // that ramps the opacity across the blur radius, as PowerPoint 2021 does.
             bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null || shape.FillImage is not null;
             var dark = shape with
             {
@@ -33,9 +34,10 @@ public sealed partial class SheetLayoutEngine
                 LineColor = shape.LineColor is null ? null : shadow.Color, Paragraphs = [],
             };
             bool soft = shadow.Blur >= 0.5;
-            double spread = shadow.Blur / 2, copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / 9) : shadow.Opacity;
-            for (int gx = soft ? -1 : 0; gx <= (soft ? 1 : 0); gx++)
-                for (int gy = soft ? -1 : 0; gy <= (soft ? 1 : 0); gy++)
+            int reach = soft ? 2 : 0;
+            double spread = shadow.Blur / 4, copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / 25) : shadow.Opacity;
+            for (int gx = -reach; gx <= reach; gx++)
+                for (int gy = -reach; gy <= reach; gy++)
                 {
                     double dx = shadow.Dx + gx * spread, dy = shadow.Dy + gy * spread;
                     items.Add(new PushItem(null, 0, cx + dx, cy + dy, shape.FlipH, shape.FlipV, copyOpacity));
