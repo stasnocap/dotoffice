@@ -43,6 +43,21 @@ public class SlideLayoutTests
     }
 
     [Fact]
+    public void A_turned_linked_shape_links_the_box_around_it()
+    {
+        var slide = new Slide(400, 300);
+        slide.Objects.Add(new SheetShape
+        {
+            Anchor = ImageAnchorKind.Absolute, X = 100, Y = 100, Width = 40, Height = 20, Rotation = 90, Geometry = ShapeGeometry.Rectangle, Fill = Color.Black,
+            Link = new Hyperlink("https://example.com/"),
+        });
+        var presentation = new Presentation();
+        presentation.Slides.Add(slide);
+        var link = new SheetLayoutEngine(new LayoutOptions { Fonts = new FontResolver(new FontCollection().Add(LayoutTestHelpers.Noto)) }).Layout(presentation).Pages[0].Items.OfType<LinkItem>().Single();
+        Assert.Equal((110.0, 90.0, 20.0, 40.0), (Math.Round(link.X, 6), Math.Round(link.Y, 6), Math.Round(link.Width, 6), Math.Round(link.Height, 6)));
+    }
+
+    [Fact]
     public void A_hanging_indent_puts_the_bullet_at_the_indent_and_every_line_of_text_at_the_margin()
     {
         var texts = Texts(120, Paragraph("•\tone two three four five six seven eight nine ten", 0, 30));

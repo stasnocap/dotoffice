@@ -229,6 +229,30 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_groups_click_link_is_dropped_but_its_parts_keep_theirs()
+    {
+        var own = Sp(Xfrm(0, 0, 100, 100) + Red).Replace("<p:cNvPr id=\"2\" name=\"s\"/>", "<p:cNvPr id=\"2\" name=\"s\"><a:hlinkClick r:id=\"rIdJ1\" action=\"ppaction://hlinksldjump\"/></p:cNvPr>");
+        var group = "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"5\" name=\"g\"><a:hlinkClick r:id=\"rIdH\"/></p:cNvPr><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"1270000\" cy=\"1270000\"/>" +
+                    "<a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"200\" cy=\"200\"/></a:xfrm></p:grpSpPr>" + Sp(Xfrm(100, 0, 100, 100) + Red) + own + "</p:grpSp>";
+        var objects = Read(new PptxBuilder().AddSlide(group).AddSlide("")).Presentation.Slides[0].Objects;
+        Assert.Null(objects[0].Link);
+        Assert.NotNull(objects[1].Link!.Bookmark);
+    }
+
+    [Fact]
+    public void A_tables_click_link_is_one_link_over_its_frame()
+    {
+        var table = Table([1270000, 2540000], "", "<a:tr h=\"254000\"><a:tc><a:txBody><a:bodyPr/><a:p/></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:p/></a:txBody><a:tcPr/></a:tc></a:tr>");
+        table = System.Text.RegularExpressions.Regex.Replace(table, "(<p:cNvPr [^>]*?)/>", "$1><a:hlinkClick r:id=\"rIdH\"/></p:cNvPr>");
+        var objects = ReadSlide(new PptxBuilder().AddSlide(table)).Objects;
+        var linked = Assert.Single(objects, o => o.Link is not null);
+        Assert.Equal(new Hyperlink("https://example.com/"), linked.Link);
+        Assert.Equal(300, linked.Width, 6);
+        Assert.Equal(objects.Max(o => o.ZOrder), linked.ZOrder);
+        Assert.Null(((SheetShape)linked).Fill);
+    }
+
+    [Fact]
     public void A_cropped_picture_with_an_outline_keeps_its_crop_as_a_shape()
     {
         var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"10000\" b=\"20000\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +

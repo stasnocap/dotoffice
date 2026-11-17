@@ -54,7 +54,12 @@ public sealed partial class SheetLayoutEngine
                     case SheetChart chart: EmitChart(chart, x, y, w, h, whole, items); break;
                     case SheetImage image: SheetPass.EmitImage(image, x, y, w, h, whole, items); break;
                 }
-                if (obj.Link is { } link) items.Add(new LinkItem(x, y, w, h, link));
+                if (obj.Link is { } link)
+                {
+                    // A turned object links the box around it, as PowerPoint 2021 does.
+                    double angle = obj.Rotation * Math.PI / 180, bw = Math.Abs(w * Math.Cos(angle)) + Math.Abs(h * Math.Sin(angle)), bh = Math.Abs(w * Math.Sin(angle)) + Math.Abs(h * Math.Cos(angle));
+                    items.Add(new LinkItem(x + (w - bw) / 2, y + (h - bh) / 2, bw, bh, link));
+                }
             }
             document.Pages.Add(page);
         }

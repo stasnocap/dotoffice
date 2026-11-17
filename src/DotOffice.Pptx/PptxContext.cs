@@ -307,6 +307,23 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
 
     private void ReadObject(Slide slide, XElement element, Scope scope, Placement? placement, ref int z)
     {
+        ReadObjectItself(slide, element, scope, placement, ref z);
+        // A frame's (table, chart, diagram) link is one link over the frame, laid over what it is drawn as. A group's link is dropped, as
+        // PowerPoint 2021 does.
+        if (element.Name.LocalName == "graphicFrame" && ShapeLink(element, scope) is { } link)
+        {
+            var place = placement ?? Own(Child(element, "xfrm"));
+            slide.Objects.Add(new SheetShape
+            {
+                Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
+                GroupTurns = place.Turns, Rotation = -Number(Child(element, "xfrm"), "rot") / 60_000.0 + place.Turns.Sum(t => t.Rotation),
+                Geometry = ShapeGeometry.Rectangle, Link = link, ZOrder = z++,
+            });
+        }
+    }
+
+    private void ReadObjectItself(Slide slide, XElement element, Scope scope, Placement? placement, ref int z)
+    {
         switch (element.Name.LocalName)
         {
             case "sp" or "cxnSp":
