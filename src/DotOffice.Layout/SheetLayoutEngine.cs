@@ -359,9 +359,10 @@ public sealed partial class SheetLayoutEngine
             }
             if (lines.Count == 0) lines.Add(new Line { Atoms = [] });
             // A wrapped paragraph's lines are sized by the tallest run on them; the paragraph's tallest run is a close upper bound.
+            // Among runs of one size the last decides, so a slide's leading bullet (drawn in its own font) leaves the text's metrics.
             foreach (var line in lines)
             {
-                var props = line.Atoms.Take(line.VisibleCount).Where(a => a.Font is not null).Select(a => a.Props).DefaultIfEmpty(tallest).MaxBy(p => p.FontSize)!;
+                var props = line.Atoms.Take(line.VisibleCount).Where(a => a.Font is not null).Select(a => a.Props).DefaultIfEmpty(tallest).Reverse().MaxBy(p => p.FontSize)!;
                 block.Lines.Add(line);
                 block.Metrics.Add(Measure(props));
             }

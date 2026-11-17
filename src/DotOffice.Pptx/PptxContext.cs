@@ -653,7 +653,16 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
 
             if (Bullet(pPr, level, hasText, numbering) is { } bullet && firstRun is not null)
             {
-                var rPr = new XElement(Child(firstRun, "rPr")!);
+                var textRPr = Child(firstRun, "rPr")!;
+                var rPr = new XElement(textRPr);
+                // The bullet is drawn in buFont (Arial in the default masters); the gap after it stays in the text's font.
+                if ((string?)Child(pPr, "buFont")?.Attribute("typeface") is { Length: > 0 } buFont && !SymbolFonts.Contains(buFont, StringComparer.OrdinalIgnoreCase))
+                    Child(rPr, "latin")!.SetAttributeValue("typeface", buFont switch
+                    {
+                        "+mn-lt" => master?.MinorFont ?? "Calibri",
+                        "+mj-lt" => master?.MajorFont ?? "Calibri Light",
+                        _ => buFont,
+                    });
                 if (Child(pPr, "buClr") is { } color && color.Elements().FirstOrDefault() is { } colorElement)
                 {
                     foreach (var f in rPr.Elements().Where(e => FillKinds.Contains(e.Name.LocalName)).ToList()) f.Remove();
@@ -661,7 +670,8 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 }
                 if (Child(pPr, "buSzPct") is { } percent)
                     rPr.SetAttributeValue("sz", Math.Max(100, Math.Round(Number(rPr, "sz", 1800) * Number(percent, "val", 100_000) / 100_000.0 / 50) * 50).ToString(CultureInfo.InvariantCulture));
-                firstRun.AddBeforeSelf(new XElement(a + "r", rPr, new XElement(a + "t", bullet)));
+                firstRun.AddBeforeSelf(new XElement(a + "r", rPr, new XElement(a + "t", bullet[..^1])),
+                    new XElement(a + "r", new XElement(textRPr), new XElement(a + "t", bullet[^1..])));
             }
         }
     }
