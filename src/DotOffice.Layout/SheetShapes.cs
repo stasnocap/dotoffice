@@ -548,10 +548,6 @@ public sealed partial class SheetLayoutEngine
             double first = Math.Clamp(paragraph.Indent, 0, areaWidth - 1) - margin;
             blocks.Add((BuildBlock(cell, text, shape.WrapText ? areaWidth : 1e6, margin, first), paragraph));
         }
-        if (_fontLineHeight)
-            foreach (var (block, _) in blocks)
-                for (int i = 0; i < block.Metrics.Count; i++)
-                    block.Metrics[i] = block.Metrics[i] with { Pitch = block.Metrics[i].Ascent + block.Metrics[i].Descent };
         total = 0;
         for (int b = 0; b < blocks.Count; b++)
         {
@@ -560,8 +556,32 @@ public sealed partial class SheetLayoutEngine
             total += paragraph.SpaceBefore;
             if (b < blocks.Count - 1) total += paragraph.SpaceAfter;
         }
+        // On slides the text ends at the last baseline plus the single-spaced room below it, not at the bottom of the last line's spacing.
+        if (_slideText && blocks.Count > 0 && blocks[^1].Block.Metrics.Count > 0)
+        {
+            var (block, paragraph) = blocks[^1];
+            var (pitch, ascent, descent) = block.Metrics[^1];
+            double spaced = Spaced(paragraph, pitch);
+            total -= spaced - (Baseline(spaced, pitch, ascent, descent) + pitch - SingleBaseline(pitch, ascent, descent));
+        }
         return blocks;
     }
+
+    /// <summary>
+    /// Where a line's baseline goes below its top. Sheets put extra line spacing above the text (tighter spacing pulls it up) and center the
+    /// font's height in single spacing. Slides follow PowerPoint 2021: single spacing puts 80% of what it leaves beyond the font's height
+    /// above the text (Calibri, Arial, Times, Cambria); any other spacing, in percent or points, puts the baseline three quarters down the
+    /// line, whatever the font, though below single spacing never higher than its single-spaced distance from the line's bottom.
+    /// </summary>
+    private double Baseline(double spaced, double pitch, double ascent, double descent)
+    {
+        if (!_slideText) return spaced - pitch + (pitch - (ascent + descent)) / 2 + ascent;
+        double single = SingleBaseline(pitch, ascent, descent);
+        if (Math.Abs(spaced - pitch) < 0.01) return single;
+        return spaced > pitch ? 0.75 * spaced : Math.Max(0.75 * spaced, spaced - (pitch - single));
+    }
+
+    private static double SingleBaseline(double pitch, double ascent, double descent) => (pitch - (ascent + descent)) * 0.8 + ascent;
 
     private static double Spaced(ShapeParagraph paragraph, double pitch) => paragraph.LinePitch ?? pitch * paragraph.LineSpacing;
 
@@ -605,8 +625,7 @@ public sealed partial class SheetLayoutEngine
                         double w = LineWidth(line), start = line.Atoms[0].X;
                         x0 = paragraph.Alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + start + right) / 2 - (w - start) / 2 - start, _ => left };
                     }
-                    // Extra line spacing goes above the text, as PowerPoint does; tighter spacing pulls it up.
-                    EmitLine(line, x0, lineTop + spaced - pitch + (pitch - (ascent + descent)) / 2 + ascent, x - 1e6, x + 1e6, items);
+                    EmitLine(line, x0, lineTop + Baseline(spaced, pitch, ascent, descent), x - 1e6, x + 1e6, items);
                 }
                 lineTop += spaced;
             }

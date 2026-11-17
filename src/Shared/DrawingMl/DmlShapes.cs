@@ -590,10 +590,11 @@ internal static class DmlShapes
             var pPr = Child(p, "pPr");
             double margin = Math.Max(0, Number(pPr, "marL") / EmuPerPoint);
             double indent = Math.Max(0, (Number(pPr, "marL") + Number(pPr, "indent")) / EmuPerPoint);
-            // Spacing in hundredths of a point (spcPts) or thousandths of a percent (spcPct): of single spacing for lines, of the font size around paragraphs.
+            // Spacing in hundredths of a point (spcPts) or thousandths of a percent (spcPct) of single spacing, which is 1.2 times the font size
+            // around paragraphs (PowerPoint 2021).
             double? Points(string name) => Child(Child(pPr, name), "spcPts") is { } pts ? Number(pts, "val") / 100 : null;
             double? Percent(string name) => Child(Child(pPr, name), "spcPct") is { } pct ? Number(pct, "val") / 100_000 : null;
-            double Around(string name) => Math.Max(0, Points(name) ?? Percent(name) * emptySize ?? 0);
+            double Around(string name) => Math.Max(0, Points(name) ?? Percent(name) * emptySize * 1.2 ?? 0);
             result.Add(new ShapeParagraph(alignment, runs, emptySize, indent, margin == indent ? null : margin,
                 Math.Max(0, Percent("lnSpc") ?? 1), Points("lnSpc") is { } pitch ? Math.Max(0, pitch) : null, Around("spcBef"), Around("spcAft")));
         }

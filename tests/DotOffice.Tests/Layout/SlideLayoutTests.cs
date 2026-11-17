@@ -45,8 +45,10 @@ public class SlideLayoutTests
             return baselines[1] - baselines[0];
         }
         double single = Gap(Paragraph("second"));
-        Assert.Equal(2 * single + 6, Gap(Paragraph("second") with { SpaceBefore = 6, LineSpacing = 2 }), 3);
-        Assert.Equal(40, Gap(Paragraph("second") with { LinePitch = 40 }), 3);
+        // Spaced lines put their baseline three quarters down the line, as PowerPoint 2021 does.
+        double forty = Gap(Paragraph("second") with { LinePitch = 40 });
+        Assert.Equal(0.75 * 20, Gap(Paragraph("second") with { LinePitch = 60 }) - forty, 3);
+        Assert.Equal(6, Gap(Paragraph("second") with { LinePitch = 40, SpaceBefore = 6 }) - forty, 3);
         Assert.Equal(single, Gap(Paragraph("second") with { SpaceAfter = 50 }), 3);
     }
 

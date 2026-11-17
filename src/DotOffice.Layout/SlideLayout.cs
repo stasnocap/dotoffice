@@ -8,14 +8,14 @@ public sealed partial class SheetLayoutEngine
     public LayoutDocument Layout(Presentation presentation, CancellationToken cancellationToken = default)
     {
         var document = new LayoutDocument { Title = presentation.Title, Author = presentation.Author };
-        _fontLineHeight = true;
+        _slideText = true;
         try
         {
             LayoutSlides(presentation, document, cancellationToken);
         }
         finally
         {
-            _fontLineHeight = false;
+            _slideText = false;
         }
         if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(720, 540));
         Metafiles.Expand(document, _fonts, _warnings);
@@ -23,10 +23,12 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>
-    /// Whether shape text is single-spaced by the font's own line height (ascent plus descent), as PowerPoint and LibreOffice space slide
-    /// text; spreadsheet shapes keep the row-height pitch they were tuned to.
+    /// Whether shape text is spaced as on slides: PowerPoint 2021 single-spaces every font at 1.2 times its size (LibreOffice uses the
+    /// font's own height); spreadsheet shapes keep the row-height pitch they were tuned to.
     /// </summary>
-    private bool _fontLineHeight;
+    private bool _slideText;
+
+    private const double SlideLineHeightRatio = 1.2;
 
     private void LayoutSlides(Presentation presentation, LayoutDocument document, CancellationToken cancellationToken)
     {

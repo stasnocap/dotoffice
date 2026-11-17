@@ -15,7 +15,7 @@ internal readonly record struct FontMetrics(double Ascent, double Descent)
     /// without win metrics use hhea. USE_TYPO_METRICS is ignored, as in Word. The metrics are not rounded
     /// (Word 2016's single-spaced pitch is the unrounded sum: Calibri 11 13.4297, Times New Roman 10 11.4997). Spreadsheets and slides use the same model.
     /// </summary>
-    public static FontMetrics Of(TrueTypeFont font, double size)
+    public static FontMetrics Of(TrueTypeFont font, double size, bool lineGap = true)
     {
         double scale = size / font.UnitsPerEm;
         double ascent = 0, descent = 0, gap = 0;
@@ -26,7 +26,7 @@ internal readonly record struct FontMetrics(double Ascent, double Descent)
             if (hhea) gap = Math.Max(0, font.LineGap - (ascent + descent - (font.Ascender - font.Descender)));
         }
         else if (hhea) (ascent, descent, gap) = (font.Ascender, -font.Descender, font.LineGap);
-        return new FontMetrics(ascent * scale, (descent + Math.Max(0, gap)) * scale);
+        return new FontMetrics(ascent * scale, (descent + (lineGap ? Math.Max(0, gap) : 0)) * scale);
     }
 }
 

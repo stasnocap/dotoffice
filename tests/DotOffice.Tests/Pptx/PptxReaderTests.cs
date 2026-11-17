@@ -153,8 +153,8 @@ public class PptxReaderTests
         var paragraphs = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(builder).Objects)).Paragraphs;
         Assert.Equal(0.0, paragraphs[0].SpaceBefore); // PowerPoint leaves out the space before a text body's first paragraph
         paragraphs = paragraphs.Skip(1).ToList();
-        Assert.Equal((0.9, null, 4.0, 0.0), (paragraphs[0].LineSpacing, paragraphs[0].LinePitch, paragraphs[0].SpaceBefore, paragraphs[0].SpaceAfter));
-        Assert.Equal((30.0, 4.0, 12.0), (paragraphs[1].LinePitch!.Value, paragraphs[1].SpaceBefore, paragraphs[1].SpaceAfter));
+        Assert.Equal((0.9, null, 4.8, 0.0), (paragraphs[0].LineSpacing, paragraphs[0].LinePitch, paragraphs[0].SpaceBefore, paragraphs[0].SpaceAfter));
+        Assert.Equal((30.0, 4.8, 12.0), (paragraphs[1].LinePitch!.Value, paragraphs[1].SpaceBefore, paragraphs[1].SpaceAfter));
     }
 
     [Fact]

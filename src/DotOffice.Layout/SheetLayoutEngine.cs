@@ -339,8 +339,8 @@ public sealed partial class SheetLayoutEngine
         var block = new TextBlock();
         (double Pitch, double Ascent, double Descent) Measure(RunProperties props)
         {
-            var m = FontMetrics.Of(_fonts.ForCharacter(props, '0').Font, props.FontSize);
-            return (Math.Max(props.FontSize * LineHeightRatio, 1), m.Ascent, m.Descent);
+            var m = FontMetrics.Of(_fonts.ForCharacter(props, '0').Font, props.FontSize, !_slideText);
+            return (Math.Max(props.FontSize * (_slideText ? SlideLineHeightRatio : LineHeightRatio), 1), m.Ascent, m.Descent);
         }
         var firstRun = paragraphs.SelectMany(p => p).Select(r => r.Properties).FirstOrDefault() ?? font;
 
