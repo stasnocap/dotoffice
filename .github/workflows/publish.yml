@@ -1,0 +1,25 @@
+name: Publish
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+*']
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Install fonts for the tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qpdf poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea fonts-noto-core
+      - run: dotnet build -c Release
+      - run: dotnet test -c Release --no-build
+      # MinVer takes the version from the tag (e.g. 0.1.0-preview.1).
+      - run: dotnet pack -c Release --no-build -o pkg
+      - run: dotnet nuget push "pkg/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

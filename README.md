@@ -2,11 +2,41 @@
 
 Pure managed .NET library for converting office documents — no LibreOffice, no native binaries, MIT licensed.
 
-> **Status:** early development. Not usable yet.
+> **Status:** preview. DOCX and XLSX to PDF are usable; PPTX is experimental. The API may still change before 1.0.
+
+```
+dotnet add package DotOffice.Converter --prerelease
+```
 
 ```csharp
+using DotOffice.Converter;
+
 await DocumentConverter.ConvertAsync("invoice.docx", "invoice.pdf");
+
+// Streams, bundled fonts and warnings:
+await DocumentConverter.ConvertAsync(input, output, DocumentFormat.Xlsx, DocumentFormat.Pdf, new ConvertOptions
+{
+    Fonts = myFonts,            // consulted before installed fonts
+    UseSystemFonts = false,     // reproducible output
+    Warnings = myWarningSink,   // unsupported content, font substitutions
+});
 ```
+
+## Support
+
+| Input | State |
+|---|---|
+| DOCX | Usable: styles, lists, tables, headers/footers, images, fields, floats, columns, footnotes, charts, complex scripts (bidi, Indic, Southeast Asian) |
+| XLSX | Usable: cell styles, number formats, merges, page setup, print areas and titles, breaks, headers/footers, charts |
+| PPTX | Experimental: slide/layout/master inheritance, shapes and text; many features missing |
+| ODF, DOC, XLS | Not supported |
+
+Fonts the document names but that are not available are substituted (metric-compatible Liberation, Carlito and Caladea fonts are
+preferred when installed) and reported through `ConvertOptions.Warnings`. On Linux and in containers, install those fonts or pass
+your own through `ConvertOptions.Fonts` for output that matches Word.
+
+`DocumentConverter` and `ConvertOptions` are the supported API. The other packages' public types (document model, layout, PDF
+writer) are usable but may change in any 0.x release.
 
 ## Goals
 
