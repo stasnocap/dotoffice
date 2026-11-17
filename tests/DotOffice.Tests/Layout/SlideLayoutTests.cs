@@ -78,17 +78,6 @@ public class SlideLayoutTests
     };
 
     [Fact]
-    public void A_shape_that_fits_its_text_grows_down_from_its_top_and_never_shrinks()
-    {
-        var lines = Enumerable.Range(0, 6).Select(i => Paragraph($"line {i}")).ToArray();
-        var grown = Assert.Single(Fills(Lay(Box(20, 10, lines) with { GrowToFit = true })));
-        Assert.Equal(20, grown.Top, 3);
-        Assert.True(grown.Bottom - 20 > 60);
-        Assert.Equal(220, Assert.Single(Fills(Lay(Box(20, 200, lines) with { GrowToFit = true }))).Bottom, 3);
-        Assert.Equal(30, Assert.Single(Fills(Lay(Box(20, 10, lines)))).Bottom, 3);
-    }
-
-    [Fact]
     public void A_table_row_grows_to_fit_its_cell_text_and_moves_the_rows_below_down()
     {
         double[] heights = [10, 20];

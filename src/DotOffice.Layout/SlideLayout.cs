@@ -57,18 +57,11 @@ public sealed partial class SheetLayoutEngine
     }
 
     /// <summary>
-    /// Grows frames to fit their text: shapes that fit their size to the text (<see cref="SheetShape.GrowToFit"/>) get taller, keeping their
-    /// top; table rows get taller when a cell's text needs more than the row's height, moving the rows below down. Frames never shrink.
+    /// Grows table rows when a cell's text needs more than the row's height, moving the rows below down; rows never shrink. Shapes that fit
+    /// their size to the text (<c>spAutoFit</c>) keep the size they were saved with, as in PowerPoint, which resizes them only while editing.
     /// </summary>
     private void FitText(List<(SheetObject Object, (double X, double Y, double Width, double Height) Rect)> placed)
     {
-        for (int i = 0; i < placed.Count; i++)
-            if (placed[i].Object is SheetShape { GrowToFit: true, TableRows: null, TextRotation: 0 } shape && shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
-            {
-                var rect = placed[i].Rect;
-                if (ShapeTextHeight(shape, rect.Width) is var need && need > rect.Height) placed[i] = (shape, rect with { Height = need });
-            }
-
         foreach (var table in placed.Select((p, i) => (p, i)).Where(t => t.p.Object is SheetShape { TableRows: not null }).GroupBy(t => ((SheetShape)t.p.Object).TableRows!.Table))
         {
             var parts = table.ToList();

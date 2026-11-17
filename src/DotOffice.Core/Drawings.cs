@@ -217,11 +217,6 @@ public sealed record SheetShape : SheetObject
     /// </summary>
     public double TextRotation { get; init; }
 
-    /// <summary>
-    /// Whether the shape grows taller to fit its text (DrawingML <c>spAutoFit</c>); its top stays where it is. Applied when slides are laid out.
-    /// </summary>
-    public bool GrowToFit { get; init; }
-
     /// <summary>The rows of a table this shape is a cell or border of; null for a shape outside tables. Rows grow to fit their cells' text.</summary>
     public TableRowSpan? TableRows { get; init; }
 }

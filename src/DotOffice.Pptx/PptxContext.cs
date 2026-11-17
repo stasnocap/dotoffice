@@ -586,6 +586,7 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         styles.Add(Child(body, "lstStyle"));
 
         var numbering = new Dictionary<int, int>();
+        var firstParagraph = Child(body, "p");
         foreach (var p in body.Elements().Where(e => e.Name.LocalName == "p").ToList())
         {
             var ownPPr = Child(p, "pPr");
@@ -606,6 +607,8 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
                 MergeRun(defRPr, Child(ownPPr, "defRPr"));
                 ownPPr.Remove();
             }
+            // PowerPoint leaves out the space before the first paragraph of a text body.
+            if (p == firstParagraph) Child(pPr, "spcBef")?.Remove();
             p.AddFirst(pPr);
 
             XElement Run(XElement? own)

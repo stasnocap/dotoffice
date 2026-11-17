@@ -149,8 +149,10 @@ public class PptxReaderTests
     {
         var builder = new PptxBuilder { TextStyles = "<p:bodyStyle><a:lvl1pPr><a:lnSpc><a:spcPct val=\"90000\"/></a:lnSpc><a:spcBef><a:spcPct val=\"20000\"/></a:spcBef><a:defRPr sz=\"2000\"/></a:lvl1pPr></p:bodyStyle>" }
             .AddSlide(Sp(Xfrm(0, 0, 5080000, 2540000),
-                P("Inherited") + P("Own", "<a:pPr><a:lnSpc><a:spcPts val=\"3000\"/></a:lnSpc><a:spcAft><a:spcPts val=\"1200\"/></a:spcAft></a:pPr>"), "type=\"body\""));
+                P("First") + P("Inherited") + P("Own", "<a:pPr><a:lnSpc><a:spcPts val=\"3000\"/></a:lnSpc><a:spcAft><a:spcPts val=\"1200\"/></a:spcAft></a:pPr>"), "type=\"body\""));
         var paragraphs = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(builder).Objects)).Paragraphs;
+        Assert.Equal(0.0, paragraphs[0].SpaceBefore); // PowerPoint leaves out the space before a text body's first paragraph
+        paragraphs = paragraphs.Skip(1).ToList();
         Assert.Equal((0.9, null, 4.0, 0.0), (paragraphs[0].LineSpacing, paragraphs[0].LinePitch, paragraphs[0].SpaceBefore, paragraphs[0].SpaceAfter));
         Assert.Equal((30.0, 4.0, 12.0), (paragraphs[1].LinePitch!.Value, paragraphs[1].SpaceBefore, paragraphs[1].SpaceAfter));
     }
@@ -271,16 +273,6 @@ public class PptxReaderTests
             Sp(Xfrm(0, 0, 1270000, 127000) + "<a:prstGeom prst=\"rect\"/>", body).Replace("<p:txBody><a:bodyPr/><a:lstStyle/>", "<p:txBody>")));
         Assert.Equal(0, Assert.IsType<SheetShape>(Assert.Single(presentation.Slides[0].Objects)).TextRotation);
         Assert.Contains(warnings.Warnings, w => w.Message.Contains("stacked vertical text"));
-    }
-
-    [Fact]
-    public void A_shape_that_fits_its_size_to_the_text_is_marked_to_grow()
-    {
-        var body = "<a:bodyPr><a:spAutoFit/></a:bodyPr><a:lstStyle/>" + P("text");
-        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(
-            Sp(Xfrm(0, 0, 1270000, 127000) + "<a:prstGeom prst=\"rect\"/>", body).Replace("<p:txBody><a:bodyPr/><a:lstStyle/>", "<p:txBody>"))).Objects));
-        Assert.True(shape.GrowToFit);
-        Assert.Null(shape.TableRows);
     }
 
     [Fact]
