@@ -103,7 +103,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     Fill(text.Color);
                     if (text.SyntheticBold) Stroke(text.Color);
                     canvas.DrawGlyphs(Font(text.Font), text.FontSize, h - text.Baseline, Positions(text, shaped),
-                        new TextStyle(text.SyntheticBold, text.SyntheticItalic));
+                        new TextStyle(text.SyntheticBold, text.SyntheticItalic, AsPaths: text.AsPaths));
                     break;
                 case TextItem text:
                     // Coalesce following runs that share font, size, style and baseline into one text object.
@@ -116,7 +116,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
                     Fill(text.Color);
                     if (text.SyntheticBold) Stroke(text.Color);
                     canvas.DrawTextSegments(Font(text.Font), text.FontSize, h - text.Baseline, segments,
-                        new TextStyle(text.SyntheticBold, text.SyntheticItalic, text.CharacterSpacing));
+                        new TextStyle(text.SyntheticBold, text.SyntheticItalic, text.CharacterSpacing, text.AsPaths));
                     break;
                 case PushItem push:
                     // q/Q also save and restore the colors, so the cached ones must follow.
@@ -306,7 +306,7 @@ internal sealed class PdfRenderer(bool embedFonts, IConversionWarningSink? warni
     private static bool SameRun(TextItem a, TextItem b) =>
         ReferenceEquals(a.Font, b.Font) && a.FontSize == b.FontSize && a.Color == b.Color && Math.Abs(a.Baseline - b.Baseline) < 0.001
         && a.SyntheticBold == b.SyntheticBold && a.SyntheticItalic == b.SyntheticItalic && a.CharacterSpacing == b.CharacterSpacing
-        && b.X >= a.X && b.Glyphs is null;
+        && a.AsPaths == b.AsPaths && b.X >= a.X && b.Glyphs is null;
 
     private PdfFont Font(TrueTypeFont font)
     {

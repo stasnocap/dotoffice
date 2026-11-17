@@ -51,4 +51,18 @@ public class TrueTypeFontTests
     {
         Assert.Throws<InvalidDataException>(() => TrueTypeFont.Load(new byte[64]));
     }
+
+    [Fact]
+    public void A_glyph_outline_is_its_contours_and_a_composite_glyph_is_resolved_into_its_parts()
+    {
+        var o = Font.GetGlyphOutline(Font.GetGlyphId('o'));
+        Assert.Equal(2, o.Count); // the outer and the inner loop
+        Assert.Contains(o[0], p => !p.OnCurve);
+        Assert.Empty(Font.GetGlyphOutline(Font.GetGlyphId(' ')));
+        // é is e with an acute accent: the e's loops and the accent's.
+        var e = Font.GetGlyphOutline(Font.GetGlyphId('e'));
+        var accented = Font.GetGlyphOutline(Font.GetGlyphId('é'));
+        Assert.True(accented.Count > e.Count);
+        Assert.True(accented.SelectMany(c => c).Max(p => p.Y) > e.SelectMany(c => c).Max(p => p.Y));
+    }
 }

@@ -2,8 +2,11 @@ using System.Text;
 
 namespace DotOffice.Pdf;
 
-/// <summary>Text rendering tweaks: synthetic bold (fill + stroke), synthetic italic (skew) and Tc spacing.</summary>
-public readonly record struct TextStyle(bool FakeBold = false, bool FakeItalic = false, double CharacterSpacing = 0);
+/// <summary>
+/// Text rendering tweaks: synthetic bold (fill + stroke), synthetic italic (skew) and Tc spacing. With <c>AsPaths</c> the glyphs are filled as outlines rather than written as text, so that they cannot be selected or
+/// found (a shadow of text that is written once already); a font without TrueType outlines then draws nothing.
+/// </summary>
+public readonly record struct TextStyle(bool FakeBold = false, bool FakeItalic = false, double CharacterSpacing = 0, bool AsPaths = false);
 
 /// <summary>A piece of text whose first glyph starts at the absolute x position <see cref="X"/>.</summary>
 public readonly record struct TextSegment(double X, string Text);
@@ -27,6 +30,9 @@ public sealed class PdfCanvas
     internal HashSet<PdfFont> Fonts { get; } = [];
     internal HashSet<PdfImage> Images { get; } = [];
     internal HashSet<PdfShading> Shadings { get; } = [];
+
+    /// <summary>The glyph outlines drawn as forms (see <see cref="FillGlyphOutlines"/>), by font and glyph; resource names Gl1, Gl2, ...</summary>
+    internal Dictionary<(DotOffice.Fonts.TrueTypeFont Font, ushort Glyph), (string Name, byte[] Content)> GlyphForms { get; } = [];
 
     /// <summary>The opacities (in percent) set with <see cref="SetAlpha"/>; each becomes a graphics state in the page resources.</summary>
     internal SortedSet<int> Alphas { get; } = [];
@@ -111,6 +117,22 @@ public sealed class PdfCanvas
     public PdfCanvas DrawTextSegments(PdfFont font, double fontSize, double y, IReadOnlyList<TextSegment> segments, TextStyle style = default)
     {
         if (segments.Count == 0) return this;
+        if (style.AsPaths)
+        {
+            var glyphs = new List<PositionedGlyph>();
+            double scale = fontSize / font.Font.UnitsPerEm;
+            foreach (var segment in segments)
+            {
+                double gx = segment.X;
+                foreach (var rune in segment.Text.EnumerateRunes())
+                {
+                    ushort id = font.Font.GetGlyphId(rune.Value);
+                    glyphs.Add(new PositionedGlyph(id, rune.ToString(), gx, 0));
+                    gx += font.Font.GetAdvanceWidth(id) * scale + style.CharacterSpacing;
+                }
+            }
+            return FillGlyphOutlines(font.Font, fontSize, y, glyphs, style.FakeItalic);
+        }
         Fonts.Add(font);
         // Tc persists in the graphics state, so it is tracked and only emitted when it changes.
         if (style.CharacterSpacing != _charSpacing)
@@ -138,12 +160,83 @@ public sealed class PdfCanvas
     }
 
     /// <summary>
+    /// Fills glyphs as their outlines. Each glyph's outline (quadratic TrueType curves drawn as cubics, in font units) is a form drawn in the
+    /// current fill color, so that many copies of the same text (a blurred shadow) cost one placement per glyph.
+    /// </summary>
+    private PdfCanvas FillGlyphOutlines(DotOffice.Fonts.TrueTypeFont font, double fontSize, double y, IReadOnlyList<PositionedGlyph> glyphs, bool italic)
+    {
+        double scale = fontSize / font.UnitsPerEm, slant = italic ? 0.2126 : 0;
+        var sb = new StringBuilder();
+        foreach (var g in glyphs)
+        {
+            if (!GlyphForms.TryGetValue((font, g.GlyphId), out var form))
+            {
+                var outline = GlyphOutline(font, g.GlyphId);
+                if (outline.Length == 0) continue;
+                GlyphForms[(font, g.GlyphId)] = form = ($"Gl{GlyphForms.Count + 1}", outline);
+            }
+            if (form.Content.Length == 0) continue;
+            sb.Append("q ").Append(N(scale)).Append(" 0 ").Append(N(slant * scale)).Append(' ').Append(N(scale)).Append(' ')
+              .Append(N(g.X)).Append(' ').Append(N(y + g.Rise)).Append(" cm /").Append(form.Name).Append(" Do Q ");
+        }
+        return sb.Length > 0 ? Op(sb.ToString().TrimEnd()) : this;
+    }
+
+    /// <summary>A glyph's outline as a filled path in font units; empty for a blank glyph.</summary>
+    private static byte[] GlyphOutline(DotOffice.Fonts.TrueTypeFont font, ushort glyphId)
+    {
+        var sb = new StringBuilder();
+        string P(double ux, double uy) => $"{N(ux)} {N(uy)}";
+        foreach (var contour in font.GetGlyphOutline(glyphId))
+        {
+            int n = contour.Count;
+            if (n < 2) continue;
+            // Start on a point on the curve (or between two control points when there is none).
+            int first = Enumerable.Range(0, n).FirstOrDefault(k => contour[k].OnCurve, -1);
+            (double X, double Y) start = first >= 0 ? (contour[first].X, contour[first].Y)
+                : ((contour[0].X + contour[1].X) / 2, (contour[0].Y + contour[1].Y) / 2);
+            int from = first >= 0 ? first : 0;
+            sb.Append(P(start.X, start.Y)).Append(" m ");
+            var current = start;
+            (double X, double Y)? control = null;
+            for (int k = 1; k <= n; k++)
+            {
+                var pt = contour[(from + k) % n];
+                bool closing = k == n;
+                if (pt.OnCurve || closing && first >= 0)
+                {
+                    var end = closing ? start : (pt.X, pt.Y);
+                    if (control is { } q) Quad(q, end); else sb.Append(P(end.X, end.Y)).Append(" l ");
+                    control = null;
+                }
+                else
+                {
+                    if (control is { } q) Quad(q, ((q.X + pt.X) / 2, (q.Y + pt.Y) / 2));
+                    control = (pt.X, pt.Y);
+                    if (closing) Quad(control.Value, start);
+                }
+            }
+            sb.Append("h ");
+
+            void Quad((double X, double Y) q, (double X, double Y) end)
+            {
+                sb.Append(P(current.X + 2.0 / 3 * (q.X - current.X), current.Y + 2.0 / 3 * (q.Y - current.Y))).Append(' ')
+                  .Append(P(end.X + 2.0 / 3 * (q.X - end.X), end.Y + 2.0 / 3 * (q.Y - end.Y))).Append(' ')
+                  .Append(P(end.X, end.Y)).Append(" c ");
+                current = end;
+            }
+        }
+        return sb.Length == 0 ? [] : Encoding.ASCII.GetBytes(sb.Append('f').ToString());
+    }
+
+    /// <summary>
     /// Draws shaped glyphs (already in visual order) on the baseline <paramref name="y"/>. Consecutive glyphs on
     /// the same rise share one TJ array whose adjustments place each glyph exactly.
     /// </summary>
     public PdfCanvas DrawGlyphs(PdfFont font, double fontSize, double y, IReadOnlyList<PositionedGlyph> glyphs, TextStyle style = default)
     {
         if (glyphs.Count == 0) return this;
+        if (style.AsPaths) return FillGlyphOutlines(font.Font, fontSize, y, glyphs, style.FakeItalic);
         Fonts.Add(font);
         if (_charSpacing != 0)
         {

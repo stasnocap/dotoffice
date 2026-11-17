@@ -40,12 +40,30 @@ public sealed partial class SheetLayoutEngine
             bool soft = shadow.Blur >= 0.5;
             double[] offsets = soft ? [.. BlurQuantiles.Select(z => z * shadow.Blur / BlurSigmas)] : [0];
             double copyOpacity = soft ? 1 - Math.Pow(1 - Math.Min(shadow.Opacity, 0.999), 1.0 / (offsets.Length * offsets.Length)) : shadow.Opacity;
+            // The text is shadowed too (seen where it is not over the fill), its glyphs drawn as outlines in the shadow color.
+            var text = new List<LayoutItem>();
+            if (shape.Paragraphs.Count > 0 && shape.Geometry != ShapeGeometry.Line)
+            {
+                EmitShapeText(shape, x, y, width, height, text);
+                text = text.Select(item => item switch
+                {
+                    TextItem t => t with { Color = shadow.Color, AsPaths = true },
+                    LineItem l => l with { Color = shadow.Color },
+                    PushItem or PopItem => item,
+                    _ => null,
+                }).OfType<LayoutItem>().ToList();
+            }
             foreach (double ox in offsets)
                 foreach (double oy in offsets)
                 {
                     double dx = shadow.Dx + ox, dy = shadow.Dy + oy;
                     items.Add(new PushItem(null, 0, cx + dx, cy + dy, shape.FlipH, shape.FlipV, copyOpacity));
                     EmitOutline(dark, x + dx - grow, y + dy - grow, width + 2 * grow, height + 2 * grow, items);
+                    items.Add(new PopItem());
+                    if (text.Count == 0) continue;
+                    // The text is not mirrored with a flipped shape, so its copies are moved without the flip.
+                    items.Add(new PushItem(null, 0, cx, cy, false, false, copyOpacity));
+                    items.AddRange(text.Select(item => item.Offset(dx, dy)));
                     items.Add(new PopItem());
                 }
         }

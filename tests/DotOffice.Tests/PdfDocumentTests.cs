@@ -86,6 +86,23 @@ public class PdfDocumentTests
         Assert.Throws<InvalidDataException>(() => PdfImage.FromJpeg([1, 2, 3, 4]));
     }
 
+    [Fact]
+    public void Text_drawn_as_paths_places_one_form_per_glyph_and_writes_no_text()
+    {
+        var doc = new PdfDocument();
+        var font = doc.AddFont(Font);
+        doc.AddPage(PageSize.A4).Canvas.DrawTextSegments(font, 20, 700, [new TextSegment(72, "oo i")], new TextStyle(AsPaths: true));
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var streams = Inflated(ms.ToArray());
+        var content = streams.Single(c => c.Contains(" Do"));
+        Assert.DoesNotContain("TJ", content);
+        // "o" twice and "i" once share two forms; the space has no outline.
+        Assert.Equal(3, Regex.Matches(content, " Do").Count);
+        Assert.Equal(2, Regex.Matches(Encoding.Latin1.GetString(ms.ToArray()), "/Subtype /Form").Count);
+        Assert.Contains(streams, c => c.EndsWith(" c h f") || c.EndsWith(" l h f"));
+    }
+
     private static List<string> Inflated(byte[] pdf)
     {
         var result = new List<string>();

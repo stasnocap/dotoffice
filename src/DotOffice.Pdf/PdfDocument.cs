@@ -102,9 +102,11 @@ public sealed class PdfDocument
                 resources.Append(" /Font <<")
                          .AppendJoin("", page.Canvas.Fonts.Select(f => $" /{f.ResourceName} {fontIds[f]} 0 R"))
                          .Append(" >>");
-            if (page.Canvas.Images.Count > 0)
+            var glyphForms = page.Canvas.GlyphForms.Values.Select(f => (f.Name, f.Content, Id: writer.Allocate())).ToList();
+            if (page.Canvas.Images.Count > 0 || glyphForms.Count > 0)
                 resources.Append(" /XObject <<")
                          .AppendJoin("", page.Canvas.Images.Select(img => $" /{img.ResourceName} {IdOf(imageIds, img)} 0 R"))
+                         .AppendJoin("", glyphForms.Select(f => $" /{f.Name} {f.Id} 0 R"))
                          .Append(" >>");
             if (page.Canvas.Shadings.Count > 0)
                 resources.Append(" /Shading <<")
@@ -123,6 +125,8 @@ public sealed class PdfDocument
                 $"<< /Type /Page /Parent {pagesId} 0 R /MediaBox [0 0 {PdfFormat.Number(page.Size.Width)} " +
                 $"{PdfFormat.Number(page.Size.Height)}] /Resources {resources} /Contents {pageIds[i].Content} 0 R{annots} >>");
             writer.WriteStream(pageIds[i].Content, "", page.Canvas.ToBytes());
+            foreach (var form in glyphForms)
+                writer.WriteStream(form.Id, "/Type /XObject /Subtype /Form /BBox [-32768 -32768 32767 32767]", form.Content);
             for (int k = 0; k < links.Count; k++)
             {
                 var link = links[k];

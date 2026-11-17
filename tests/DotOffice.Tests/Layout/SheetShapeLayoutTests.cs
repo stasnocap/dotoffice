@@ -284,6 +284,23 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void A_shadow_falls_on_the_text_too_as_outlines_in_the_shadow_color()
+    {
+        var shape = Shape() with
+        {
+            Paragraphs = [new ShapeParagraph(HorizontalAlignment.Left, [new CellTextRun("caption", RunProperties.Default with { FontFamily = "Calibri", FontSize = 10 })], 10)],
+            Shadow = new ShapeShadow(Color.Black, 0.5, 2, 3),
+        };
+        var texts = Page(shape).Items.OfType<TextItem>().Where(t => t.Text.Contains("caption")).ToList();
+        Assert.Equal(2, texts.Count);
+        var (shade, text) = (texts[0], texts[1]);
+        Assert.True(shade.AsPaths);
+        Assert.False(text.AsPaths);
+        Assert.Equal(Color.Black, shade.Color);
+        Assert.Equal((text.X + 2, text.Baseline + 3), (shade.X, shade.Baseline));
+    }
+
+    [Fact]
     public void A_blurred_shadow_is_forty_nine_faint_copies_that_add_up_to_its_opacity()
     {
         var page = Page(Shape(fill: Red) with { Shadow = new ShapeShadow(Color.Black, 0.5, 4, 4, Blur: 6) });

@@ -243,6 +243,86 @@ public sealed class TrueTypeFont
     /// <summary>The legacy kern table (empty when the font has none or only unsupported formats).</summary>
     internal Shaping.KernTable Kern => _kern ??= new Shaping.KernTable(GetTableData("kern"));
 
+    /// <summary>
+    /// A glyph's outline in font units: its contours, each a closed loop of points that are on the curve or quadratic control points
+    /// off it. Composite glyphs are resolved into their parts. Empty for a blank glyph or for a font with CFF outlines, which are not read.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<(double X, double Y, bool OnCurve)>> GetGlyphOutline(ushort glyphId)
+    {
+        var contours = new List<IReadOnlyList<(double X, double Y, bool OnCurve)>>();
+        AddGlyphOutline(glyphId, (1, 0, 0, 1, 0, 0), contours, 0);
+        return contours;
+    }
+
+    private void AddGlyphOutline(ushort glyphId, (double A, double B, double C, double D, double E, double F) m,
+        List<IReadOnlyList<(double X, double Y, bool OnCurve)>> contours, int depth)
+    {
+        var g = GetGlyphData(glyphId);
+        if (g.Length < 10 || depth > 8) return;
+        var bytes = g.ToArray();
+        double F2Dot14(int at) => BinaryPrimitives.ReadInt16BigEndian(bytes.AsSpan(at)) / 16384.0;
+        short count = BinaryPrimitives.ReadInt16BigEndian(g);
+        (double X, double Y) Map(double x, double y) => (m.A * x + m.C * y + m.E, m.B * x + m.D * y + m.F);
+        if (count >= 0)
+        {
+            int p = 10;
+            var ends = new int[count];
+            for (int i = 0; i < count; i++, p += 2) ends[i] = BinaryPrimitives.ReadUInt16BigEndian(g[p..]);
+            int points = count == 0 ? 0 : ends[^1] + 1;
+            p += 2 + BinaryPrimitives.ReadUInt16BigEndian(g[p..]); // the instructions
+            var flags = new byte[points];
+            for (int i = 0; i < points;)
+            {
+                byte f = g[p++];
+                flags[i++] = f;
+                if ((f & 8) != 0) for (int r = g[p++]; r > 0 && i < points; r--) flags[i++] = f;
+            }
+            var xs = new int[points];
+            var ys = new int[points];
+            for (int axis = 0; axis < 2; axis++)
+            {
+                int v = 0, shortBit = axis == 0 ? 2 : 4, sameBit = axis == 0 ? 16 : 32;
+                var values = axis == 0 ? xs : ys;
+                for (int i = 0; i < points; i++)
+                {
+                    byte f = flags[i];
+                    if ((f & shortBit) != 0) v += (f & sameBit) != 0 ? g[p++] : -g[p++];
+                    else if ((f & sameBit) == 0) { v += BinaryPrimitives.ReadInt16BigEndian(g[p..]); p += 2; }
+                    values[i] = v;
+                }
+            }
+            for (int c = 0, start = 0; c < count; start = ends[c] + 1, c++)
+            {
+                var contour = new List<(double X, double Y, bool OnCurve)>();
+                for (int i = start; i <= ends[c]; i++)
+                {
+                    var (x, y) = Map(xs[i], ys[i]);
+                    contour.Add((x, y, (flags[i] & 1) != 0));
+                }
+                if (contour.Count > 0) contours.Add(contour);
+            }
+            return;
+        }
+        for (int p = 10; ;)
+        {
+            int flags = BinaryPrimitives.ReadUInt16BigEndian(g[p..]);
+            ushort part = BinaryPrimitives.ReadUInt16BigEndian(g[(p + 2)..]);
+            p += 4;
+            double dx, dy;
+            if ((flags & 1) != 0) { dx = BinaryPrimitives.ReadInt16BigEndian(g[p..]); dy = BinaryPrimitives.ReadInt16BigEndian(g[(p + 2)..]); p += 4; }
+            else { dx = (sbyte)g[p]; dy = (sbyte)g[p + 1]; p += 2; }
+            (double A, double B, double C, double D) s = (1, 0, 0, 1);
+            if ((flags & 8) != 0) { double k = F2Dot14(p); s = (k, 0, 0, k); p += 2; }
+            else if ((flags & 0x40) != 0) { s = (F2Dot14(p), 0, 0, F2Dot14(p + 2)); p += 4; }
+            else if ((flags & 0x80) != 0) { s = (F2Dot14(p), F2Dot14(p + 2), F2Dot14(p + 4), F2Dot14(p + 6)); p += 8; }
+            // Only offsets given as x/y (not point matching) are placed; the part's matrix is applied first, then this glyph's.
+            if ((flags & 2) == 0) (dx, dy) = (0, 0);
+            var inner = (s.A * m.A + s.B * m.C, s.A * m.B + s.B * m.D, s.C * m.A + s.D * m.C, s.C * m.B + s.D * m.D, m.A * dx + m.C * dy + m.E, m.B * dx + m.D * dy + m.F);
+            AddGlyphOutline(part, inner, contours, depth + 1);
+            if ((flags & 0x20) == 0) break;
+        }
+    }
+
     internal ReadOnlySpan<byte> GetGlyphData(ushort glyphId)
     {
         if (IsCff || glyphId >= NumGlyphs) return default;
