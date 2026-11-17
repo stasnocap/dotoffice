@@ -320,7 +320,8 @@ public sealed partial class SheetLayoutEngine
                     + Enumerable.Range(0, n).Count(i => KeyOf(i) == WordKey.Line) * Math.Max(0, 8.18 - 0.55 * fs), lmax - rowTotal) / (n + 1);
             else
             {
-                gridPitch = e.Max() + 0.283 * fs;
+                // Line keys: a 2.75 gap whatever the size (2.69 to 2.82 measured at 9 to 12 pt in Word 2021, t58).
+                gridPitch = e.Max() + (anyLine ? 2.75 : 0.283 * fs);
                 int maxCols = Math.Max(1, (int)Math.Floor((lmax - 2.83) / gridPitch));
                 gridRows = (n + maxCols - 1) / maxCols;
                 gridCols = (n + gridRows - 1) / gridRows;
@@ -547,7 +548,8 @@ public sealed partial class SheetLayoutEngine
             {
                 // Grid (measured): column pitch = widest entry + 0.283 em, filled row by row; the order inside a grid of a reversed bar legend is UNMEASURED.
                 double maxE = Enumerable.Range(0, entries.Count).Max(i => Advance(i) + widths[i]);
-                double left0 = start - ((gridCols - 1) * gridPitch + maxE) / 2;
+                // A grid of line keys starts 0.12 (size - 9.5) further left (fitted to 8 grids at 9 to 12 pt in Word 2021, t58).
+                double left0 = start - ((gridCols - 1) * gridPitch + maxE) / 2 - (anyLine ? 0.12 * (legendFont.FontSize - 9.5) : 0);
                 for (int i = 0; i < entries.Count; i++)
                 {
                     double kx = left0 + i % gridCols * gridPitch;
