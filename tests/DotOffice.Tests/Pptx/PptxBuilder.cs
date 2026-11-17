@@ -169,7 +169,7 @@ internal sealed class PptxBuilder
                 var slide = _slides[i];
                 Write(zip, $"ppt/slides/slide{i + 1}.xml", $"<p:sld {Ns} {slide.Attributes}><p:cSld>{slide.Head}<p:spTree>{Tree(slide.Tree)}</p:spTree></p:cSld></p:sld>");
                 Write(zip, $"ppt/slides/_rels/slide{i + 1}.xml.rels", Rels(("rIdL", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rIdImg", "image", "../media/image1.png"), ("rIdC", "chart", "../charts/chart1.xml"),
-                    ("rIdDM", "diagramData", "../diagrams/data1.xml"), ("rIdDD", "diagramDrawing", "../diagrams/drawing1.xml")));
+                    ("rIdDM", "diagramData", "../diagrams/data1.xml"), ("rIdDD", "diagramDrawing", "../diagrams/drawing1.xml"), ("rIdH", "hyperlink", "https://example.com/")));
             }
             foreach (var (name, bytes) in _media)
             {
@@ -183,7 +183,7 @@ internal sealed class PptxBuilder
 
     private static string Rels(params (string Id, string Type, string Target)[] rels) =>
         "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
-        string.Concat(rels.Select(r => $"<Relationship Id=\"{r.Id}\" Type=\"{RelType}{r.Type}\" Target=\"{r.Target}\"/>")) + "</Relationships>";
+        string.Concat(rels.Select(r => $"<Relationship Id=\"{r.Id}\" Type=\"{RelType}{r.Type}\" Target=\"{r.Target}\"{(r.Target.Contains("://", StringComparison.Ordinal) ? " TargetMode=\"External\"" : "")}/>")) + "</Relationships>";
 
     private static void Write(ZipArchive zip, string name, string content)
     {

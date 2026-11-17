@@ -13,6 +13,9 @@ internal interface IDmlHost
     /// <summary>The picture a relationship points to; null when it is missing or linked from outside the file, or unreadable (then <paramref name="unreadable"/> is set).</summary>
     ImageData? Image(string relationshipId, out bool unreadable);
 
+    /// <summary>The address an external relationship (a hyperlink) points to; null when it is missing or inside the file.</summary>
+    string? ExternalTarget(string relationshipId);
+
     /// <summary>Records something drawn approximately or left out, for a warning.</summary>
     void Note(string note);
 }
@@ -170,7 +173,7 @@ internal static class DmlShapes
 
         // Text: the default color is the style's font color (white on the theme's default shapes).
         var fontColor = Resolve(Child(style, "fontRef"), theme);
-        var paragraphs = ReadText(Child(shape, "txBody"), theme, fontColor, out var body);
+        var paragraphs = ReadText(host, Child(shape, "txBody"), theme, fontColor, out var body);
 
         if (fill is null && fillImage is null && lineColor is null && paragraphs.Count == 0) return null;
         double Inset(string name, double fallback) => (string?)body?.Attribute(name) is { } v && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var e) ? e / EmuPerPoint : fallback;
@@ -550,7 +553,7 @@ internal static class DmlShapes
         return result.Count > 0 ? result : null;
     }
 
-    private static List<ShapeParagraph> ReadText(XElement? txBody, DmlTheme theme, Color? defaultColor, out XElement? bodyProperties)
+    private static List<ShapeParagraph> ReadText(IDmlHost host, XElement? txBody, DmlTheme theme, Color? defaultColor, out XElement? bodyProperties)
     {
         bodyProperties = Child(txBody, "bodyPr");
         var result = new List<ShapeParagraph>();
@@ -569,15 +572,27 @@ internal static class DmlShapes
                 if ((string?)rPr.Attribute("strike") is { } strike) font = font with { Strike = strike != "noStrike" };
                 if ((string?)Child(rPr, "latin")?.Attribute("typeface") is { Length: > 0 } face && !face.StartsWith('+')) font = font with { FontFamily = face };
                 if (Child(rPr, "solidFill") is { } fillElement && Resolve(fillElement, theme) is { } color) font = font with { Color = color };
+                // PowerPoint 2021 draws a link's text in the theme's hyperlink color, underlined, whatever the run's own color.
+                if (Child(rPr, "hlinkClick") is not null)
+                {
+                    var ns = rPr.Name.Namespace;
+                    if (Resolve(new XElement(ns + "solidFill", new XElement(ns + "schemeClr", new XAttribute("val", "hlink"))), theme) is { } link) font = font with { Color = link };
+                    if (font.Underline == UnderlineStyle.None) font = font with { Underline = UnderlineStyle.Single };
+                }
                 return font;
             }
+
+            // A run's click link, when it goes to an address outside the file (a jump to another slide is left out).
+            Hyperlink? Link(XElement? rPr) =>
+                Child(rPr, "hlinkClick")?.Attributes().FirstOrDefault(a => a.Name.LocalName == "id")?.Value is { Length: > 0 } id && host.ExternalTarget(id) is { } target
+                    ? new Hyperlink(target) : null;
 
             var runs = new List<CellTextRun>();
             foreach (var child in p.Elements())
             {
                 switch (child.Name.LocalName)
                 {
-                    case "r": runs.Add(new CellTextRun(Child(child, "t")?.Value ?? "", Font(Child(child, "rPr")))); break;
+                    case "r": runs.Add(new CellTextRun(Child(child, "t")?.Value ?? "", Font(Child(child, "rPr")), Link(Child(child, "rPr")))); break;
                     case "br": runs.Add(new CellTextRun("\n", Font(Child(child, "rPr")))); break;
                     case "fld": runs.Add(new CellTextRun(Child(child, "t")?.Value ?? "", Font(Child(child, "rPr")))); break;
                 }

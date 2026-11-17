@@ -45,6 +45,8 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         public string? Part(string relationshipId) =>
             relationships.TryGetValue(relationshipId, out var rel) && !rel.IsExternal && context._package.Exists(rel.Target) ? rel.Target : null;
 
+        public string? ExternalTarget(string relationshipId) => relationships.TryGetValue(relationshipId, out var rel) && rel.IsExternal ? rel.Target : null;
+
         public ImageData? Image(string relationshipId, out bool unreadable)
         {
             unreadable = false;

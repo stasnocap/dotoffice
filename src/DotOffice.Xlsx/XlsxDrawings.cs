@@ -66,6 +66,8 @@ internal static class XlsxDrawings
     {
         public DmlTheme Theme => Context.Theme;
 
+        public string? ExternalTarget(string relationshipId) => Relationships.TryGetValue(relationshipId, out var rel) && rel.IsExternal ? rel.Target : null;
+
         public ImageData? Image(string relationshipId, out bool unreadable)
         {
             unreadable = false;

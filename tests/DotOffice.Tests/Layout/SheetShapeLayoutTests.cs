@@ -49,6 +49,18 @@ public class SheetShapeLayoutTests
     }
 
     [Fact]
+    public void A_linked_run_in_a_shape_becomes_a_link_over_its_text()
+    {
+        var font = RunProperties.Default with { FontFamily = "Calibri", FontSize = 10 };
+        var link = new Hyperlink("https://example.com/");
+        var shape = Shape() with { Paragraphs = [new ShapeParagraph(HorizontalAlignment.Left, [new CellTextRun("Go to ", font), new CellTextRun("example", font, link)], 10)] };
+        var page = Page(shape);
+        var item = Assert.Single(page.Items.OfType<LinkItem>());
+        Assert.Equal(link, item.Link);
+        Assert.True(item.X > page.Items.OfType<TextItem>().Min(t => t.X) && item.Width > 0 && item.Height > 0);
+    }
+
+    [Fact]
     public void An_ellipse_is_an_ellipse_item()
     {
         var page = Page(Shape(ShapeGeometry.Ellipse, Red));

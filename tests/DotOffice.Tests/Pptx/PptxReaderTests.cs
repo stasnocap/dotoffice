@@ -49,6 +49,18 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_linked_run_keeps_its_address_and_is_drawn_underlined_in_the_hyperlink_color()
+    {
+        string body = "<a:p><a:r><a:rPr lang=\"en-US\"/><a:t>Go to </a:t></a:r><a:r><a:rPr lang=\"en-US\"><a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill>" +
+                      "<a:hlinkClick r:id=\"rIdH\"/></a:rPr><a:t>example</a:t></a:r></a:p>";
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddSlide(Sp(Xfrm(0, 0, 1270000, 1270000), body))).Objects));
+        var runs = Assert.Single(shape.Paragraphs).Runs;
+        Assert.Null(runs[0].Link);
+        Assert.Equal(new Hyperlink("https://example.com/"), runs[1].Link);
+        Assert.Equal((new Color(0, 0, 255), UnderlineStyle.Single), (runs[1].Font.Color!.Value, runs[1].Font.Underline));
+    }
+
+    [Fact]
     public void Shapes_are_placed_absolutely_from_their_frame()
     {
         var slide = ReadSlide(new PptxBuilder().AddSlide(Sp(Xfrm(127000, 254000, 381000, 508000) + "<a:prstGeom prst=\"ellipse\"/>" + Red)));

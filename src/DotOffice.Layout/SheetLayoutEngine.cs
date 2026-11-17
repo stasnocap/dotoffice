@@ -302,20 +302,20 @@ public sealed partial class SheetLayoutEngine
     private static List<List<TextRun>> Paragraphs(Cell cell, string text, bool wrap)
     {
         var runs = cell.Runs is { Count: > 0 } r && text == cell.Text
-            ? r.Select(x => (x.Text, x.Font)).ToList()
-            : [(text, cell.Style.Font)];
+            ? r.Select(x => (x.Text, x.Font, x.Link)).ToList()
+            : [(text, cell.Style.Font, (Hyperlink?)null)];
         var paragraphs = new List<List<TextRun>> { new() };
         if (cell.Style.Stacked)
         {
             // Stacked text: every character is a line of its own.
             paragraphs.Clear();
-            foreach (var (runText, font) in runs)
+            foreach (var (runText, font, link) in runs)
                 foreach (var rune in runText.EnumerateRunes())
-                    if (rune.Value is not ('\r' or '\n')) paragraphs.Add([new TextRun(rune.ToString(), font)]);
+                    if (rune.Value is not ('\r' or '\n')) paragraphs.Add([new TextRun(rune.ToString(), font) { Link = link }]);
             if (paragraphs.Count == 0) paragraphs.Add([]);
             return paragraphs;
         }
-        foreach (var (runText, font) in runs)
+        foreach (var (runText, font, link) in runs)
         {
             var normalized = runText.Replace("\r\n", "\n").Replace('\r', '\n');
             if (!wrap) normalized = normalized.Replace("\n", "");
@@ -323,7 +323,7 @@ public sealed partial class SheetLayoutEngine
             for (int i = 0; i < parts.Length; i++)
             {
                 if (i > 0) paragraphs.Add([]);
-                if (parts[i].Length > 0) paragraphs[^1].Add(new TextRun(parts[i], font));
+                if (parts[i].Length > 0) paragraphs[^1].Add(new TextRun(parts[i], font) { Link = link });
             }
         }
         return paragraphs;
@@ -455,6 +455,7 @@ public sealed partial class SheetLayoutEngine
         ImageItem i => i with { X = dx + i.X * scale, Y = dy + i.Y * scale, Width = i.Width * scale, Height = i.Height * scale, Clip = i.Clip?.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         PolygonItem p => p with { Points = p.Points.Select(q => (dx + q.X * scale, dy + q.Y * scale)).ToList() },
         EllipseItem e => e with { X = dx + e.X * scale, Y = dy + e.Y * scale, Width = e.Width * scale, Height = e.Height * scale },
+        LinkItem l => l with { X = dx + l.X * scale, Y = dy + l.Y * scale, Width = l.Width * scale, Height = l.Height * scale },
         RectItem r => r with { X = dx + r.X * scale, Y = dy + r.Y * scale, Width = r.Width * scale, Height = r.Height * scale },
         PathItem p => p with { Points = p.Points.Select(q => q with { X = dx + q.X * scale, Y = dy + q.Y * scale }).ToList(), LineWidth = p.LineWidth * scale },
         _ => item,

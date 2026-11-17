@@ -628,6 +628,7 @@ public sealed partial class SheetLayoutEngine
                         x0 = paragraph.Alignment switch { HorizontalAlignment.Right => right - w, HorizontalAlignment.Center => (left + start + right) / 2 - (w - start) / 2 - start, _ => left };
                     }
                     EmitLine(line, x0, lineTop + Baseline(spaced, pitch, ascent, descent), x - 1e6, x + 1e6, items);
+                    ParagraphLayouter.AddLinks(line, x0, lineTop, lineTop + spaced, items);
                 }
                 lineTop += spaced;
             }

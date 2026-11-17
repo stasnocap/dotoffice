@@ -98,7 +98,7 @@ public sealed class Worksheet(string name)
 public enum CellValueKind { Text, Number, Bool, Error }
 
 /// <summary>One formatted run of a rich-text cell; its <see cref="Font"/> is fully resolved (cell font plus the run's overrides).</summary>
-public sealed record CellTextRun(string Text, RunProperties Font);
+public sealed record CellTextRun(string Text, RunProperties Font, Hyperlink? Link = null);
 
 /// <summary>
 /// A conditional-format data bar: the bar spans <see cref="Start"/> to <see cref="End"/> (fractions of the cell width, left to right).
