@@ -148,7 +148,7 @@ internal static class DmlShapes
         var glow = lineOnly ? null : ReadGlow(effects, theme, Resolve(Child(style, "effectRef"), theme));
         var reflection = lineOnly ? null : ReadReflection(effects, host);
         double softEdge = lineOnly || Child(effects, "softEdge") is not { } soft ? 0 : Number(soft, "rad") / EmuPerPoint;
-        var shadow = lineOnly ? null : ReadShadow(Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } effectRef ? theme.EffectStyle((int)Number(effectRef, "idx")) : null), theme, Resolve(Child(style, "effectRef"), theme));
+        var shadow = ReadShadow(Child(spPr, "effectLst") ?? (Child(Child(shape, "style"), "effectRef") is { } effectRef ? theme.EffectStyle((int)Number(effectRef, "idx")) : null), theme, Resolve(Child(style, "effectRef"), theme));
 
         var ln = Child(spPr, "ln");
         Color? lineColor;

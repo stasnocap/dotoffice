@@ -188,6 +188,18 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_picture_with_an_outline_or_shadow_is_a_shape_filled_with_the_picture()
+    {
+        var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +
+                  "<p:spPr>" + Xfrm(0, 0, 254000, 254000) + "<a:prstGeom prst=\"ellipse\"/><a:ln w=\"25400\">" + Red + "</a:ln>" +
+                  "<a:effectLst><a:outerShdw blurRad=\"0\" dist=\"38100\" dir=\"5400000\"><a:srgbClr val=\"000000\"/></a:outerShdw></a:effectLst></p:spPr></p:pic>";
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddImage(Png).AddSlide(pic)).Objects));
+        Assert.NotNull(shape.FillImage);
+        Assert.Equal((ShapeGeometry.Ellipse, new Color(255, 0, 0), 20.0), (shape.Geometry, shape.LineColor!.Value, shape.Width));
+        Assert.Equal(3, shape.Shadow!.Dy, 6);
+    }
+
+    [Fact]
     public void Pictures_and_grouped_shapes_are_placed_inside_their_frames()
     {
         var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"25000\"/></p:blipFill>" +

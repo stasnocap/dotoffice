@@ -470,6 +470,32 @@ internal sealed partial class PptxContext(OpcPackage package, PptxReaderOptions 
         double Crop(string name) => Math.Clamp(Number(src, name) / 100_000.0, 0, 1);
         var xfrm = Path(effective, "spPr", "xfrm");
         var place = placement ?? Own(xfrm);
+        // An uncropped picture with an outline, a shadow or a shape other than a rectangle is a shape filled with the picture, so the shape
+        // reader draws its outline, effects and clipping as PowerPoint does.
+        var spPr = Child(effective, "spPr");
+        bool cropped = src is not null && new[] { "l", "t", "r", "b" }.Any(n => Number(src, n) != 0);
+        bool styled = Child(spPr, "ln") is { } ln && Child(ln, "noFill") is null || Child(spPr, "effectLst") is not null
+                      || (string?)Child(spPr, "prstGeom")?.Attribute("prst") is { } prst && prst != "rect" || Child(spPr, "custGeom") is not null;
+        if (!cropped && styled && spPr is not null)
+        {
+            var asShape = new XElement(effective.Name.Namespace + "sp", new XElement(spPr), Child(effective, "style") is { } style ? new XElement(style) : null);
+            var shapeProperties = Child(asShape, "spPr")!;
+            XNamespace a = A;
+            var fill = new XElement(Child(effective, "blipFill")!) { Name = a + "blipFill" };
+            if (Child(fill, "stretch") is null && Child(fill, "tile") is null) fill.Add(new XElement(a + "stretch", new XElement(a + "fillRect")));
+            var after = shapeProperties.Elements().LastOrDefault(e => e.Name.LocalName is "xfrm" or "prstGeom" or "custGeom");
+            if (after is null) shapeProperties.AddFirst(fill); else after.AddAfterSelf(fill);
+            if (DmlShapes.ReadShape(scope.Host, asShape, out _) is { } shape)
+            {
+                slide.Objects.Add(shape with
+                {
+                    Anchor = ImageAnchorKind.Absolute, X = place.X, Y = place.Y, Width = place.Width, Height = place.Height, Frame = place.Frame,
+                    Rotation = shape.Rotation + place.Turns.Sum(t => t.Rotation), GroupTurns = place.Turns,
+                    ZOrder = z++,
+                });
+                return;
+            }
+        }
         slide.Objects.Add(new SheetImage
         {
             Image = image,
