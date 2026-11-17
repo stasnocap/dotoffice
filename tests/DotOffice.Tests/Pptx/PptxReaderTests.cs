@@ -200,6 +200,16 @@ public class PptxReaderTests
     }
 
     [Fact]
+    public void A_cropped_picture_with_an_outline_keeps_its_crop_as_a_shape()
+    {
+        var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"10000\" b=\"20000\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +
+                  "<p:spPr>" + Xfrm(0, 0, 254000, 254000) + "<a:prstGeom prst=\"rect\"/><a:ln w=\"25400\">" + Red + "</a:ln></p:spPr></p:pic>";
+        var shape = Assert.IsType<SheetShape>(Assert.Single(ReadSlide(new PptxBuilder().AddImage(Png).AddSlide(pic)).Objects));
+        Assert.Equal((0.1, 0.0, 0.0, 0.2), (shape.FillCropLeft, shape.FillCropTop, shape.FillCropRight, shape.FillCropBottom));
+        Assert.Equal(new Color(255, 0, 0), shape.LineColor!.Value);
+    }
+
+    [Fact]
     public void Pictures_and_grouped_shapes_are_placed_inside_their_frames()
     {
         var pic = "<p:pic><p:nvPicPr><p:cNvPr id=\"4\" name=\"p\"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rIdImg\"/><a:srcRect l=\"25000\"/></p:blipFill>" +

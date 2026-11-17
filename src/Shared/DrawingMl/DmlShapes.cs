@@ -128,6 +128,7 @@ internal static class DmlShapes
         ImageData? fillImage = null;
         ShapeTile? fillTile = null;
         double fillAlpha = 1;
+        var fillCrop = (L: 0.0, T: 0.0, R: 0.0, B: 0.0);
         if (!lineOnly)
         {
             var explicitFill = spPr?.Elements().FirstOrDefault(e => e.Name.LocalName is "noFill" or "solidFill" or "gradFill" or "pattFill" or "blipFill");
@@ -135,7 +136,7 @@ internal static class DmlShapes
             {
                 gradient = ReadGradientFill(explicitFill, theme, null);
                 pattern = ReadPattern(explicitFill, theme);
-                if (explicitFill.Name.LocalName == "blipFill") (fillImage, fillTile, fillAlpha) = ReadPictureFill(host, explicitFill);
+                if (explicitFill.Name.LocalName == "blipFill") (fillImage, fillTile, fillAlpha, fillCrop) = ReadPictureFill(host, explicitFill);
             }
             else if (theme.FillStyle((int)Number(fillRef, "idx")) is { } themed && StyleColor("fillRef") is { } phColor)
             {
@@ -190,6 +191,7 @@ internal static class DmlShapes
             FillGradient = gradient,
             FillPattern = pattern,
             FillImage = fillImage, FillTile = fillTile, FillImageAlpha = fillAlpha,
+            FillCropLeft = fillCrop.L, FillCropTop = fillCrop.T, FillCropRight = fillCrop.R, FillCropBottom = fillCrop.B,
             Shadow = shadow, Glow = glow, SoftEdge = softEdge, Reflection = reflection,
             Paths = paths,
             HeadEnd = End("headEnd"), TailEnd = End("tailEnd"),
@@ -250,7 +252,7 @@ internal static class DmlShapes
     /// the scale, and the offset and alignment) and its opacity (<c>alphaModFix</c>). The image is null when it is missing or unreadable (the
     /// shape then takes the color it would otherwise have); a tiled picture whose size is unknown is stretched instead, which is noted.
     /// </summary>
-    private static (ImageData? Image, ShapeTile? Tile, double Alpha) ReadPictureFill(IDmlHost host, XElement blipFill)
+    private static (ImageData? Image, ShapeTile? Tile, double Alpha, (double L, double T, double R, double B) Crop) ReadPictureFill(IDmlHost host, XElement blipFill)
     {
         var blip = Child(blipFill, "blip");
         var embed = blip?.Attributes().FirstOrDefault(a => a.Name.LocalName == "embed")?.Value;
@@ -258,8 +260,12 @@ internal static class DmlShapes
         if ((embed is null ? null : host.Image(embed, out unreadable)) is not { } image)
         {
             host.Note(unreadable ? "a shape's picture fill whose image could not be read is left out" : "a shape's picture fill whose image is missing is left out");
-            return (null, null, 1);
+            return (null, null, 1, default);
         }
+        var src = Child(blipFill, "srcRect");
+        double Crop(string name) => Math.Clamp(Number(src, name) / 100_000.0, -10, 1);
+        var crop = (L: Crop("l"), T: Crop("t"), R: Crop("r"), B: Crop("b"));
+        if (crop.L + crop.R >= 1 || crop.T + crop.B >= 1) crop = default;
         double alpha = Child(blip, "alphaModFix") is { } fix ? Math.Clamp((fix.Attribute("amt") is null ? 100_000 : Number(fix, "amt")) / 100_000.0, 0, 1) : 1;
         ShapeTile? tile = null;
         if (Child(blipFill, "tile") is { } t)
@@ -272,7 +278,7 @@ internal static class DmlShapes
             }
             if (tile is null) host.Note("tiled picture fills of this picture are stretched over the shape");
         }
-        return (image, tile, alpha);
+        return (image, tile, alpha, crop);
     }
 
     /// <summary>The hatching of a <c>pattFill</c> (null for any other fill): the preset's lines, their spacing and weight, or a tint for dot patterns.</summary>

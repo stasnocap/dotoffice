@@ -272,11 +272,15 @@ public class SheetShapeLayoutTests
         var shadowPolygon = Assert.IsType<PolygonItem>(items[push + 1]);
         Assert.Equal(Color.Black, shadowPolygon.Fill);
         var body = items.OfType<PolygonItem>().Single(p => p.Fill == Red);
-        Assert.Equal(body.Points[0].X + 3, shadowPolygon.Points[0].X, 6);
-        Assert.Equal(body.Points[0].Y + 5, shadowPolygon.Points[0].Y, 6);
+        // The outline is cast together with the fill: one area, grown by half the 2 pt line, so the overlap is not darker.
+        Assert.Equal(body.Points.Min(p => p.X) + 3 - 1, shadowPolygon.Points.Min(p => p.X), 6);
+        Assert.Equal(body.Points.Min(p => p.Y) + 5 - 1, shadowPolygon.Points.Min(p => p.Y), 6);
         Assert.True(items.IndexOf(body) > push); // the shadow lies underneath
-        Assert.DoesNotContain(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Blue);
-        Assert.Contains(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Color.Black);
+        Assert.DoesNotContain(items.Skip(push).TakeWhile(i => i is not PopItem), i => i is LineItem);
+        // An unfilled shape still casts its line.
+        var open = Page(Shape(line: Blue) with { Shadow = new ShapeShadow(Color.Black, 0.4, 3, 5) }).Items.ToList();
+        int openPush = open.FindIndex(i => i is PushItem { Opacity: 0.4 });
+        Assert.Contains(open.Skip(openPush).TakeWhile(i => i is not PopItem), i => i is LineItem l && l.Color == Color.Black);
     }
 
     [Fact]
@@ -320,6 +324,18 @@ public class SheetShapeLayoutTests
         Assert.True(Draw(true).Rectangular);
         Assert.False(Draw(false).Rectangular);
         Assert.False(Page(Shape(fill: Red) with { FillGradient = new GradientFill { Kind = GradientKind.Linear, Stops = RedBlue } }).Items.OfType<GradientItem>().Single().Rectangular);
+    }
+
+    [Fact]
+    public void A_cropped_picture_fill_is_stretched_past_the_frame_and_cut_at_it()
+    {
+        var picture = new ImageData(PngTestEncoder.Encode(1, 1, 2, 8, [1, 2, 3]), "fill");
+        var plain = Page(Shape(fill: Red) with { FillImage = picture }).Items.OfType<ImageItem>().Single();
+        var item = Page(Shape(fill: Red) with { FillImage = picture, FillCropLeft = 0.25, FillCropRight = 0.25, FillCropTop = 0.5 }).Items.OfType<ImageItem>().Single();
+        Assert.Equal((plain.Width * 2, plain.Height * 2), (item.Width, item.Height));
+        Assert.Equal(plain.X - plain.Width * 0.5, item.X, 6);
+        Assert.Equal(plain.Y - plain.Height, item.Y, 6);
+        Assert.Equal(4, item.Clip!.Count);
     }
 
     [Fact]

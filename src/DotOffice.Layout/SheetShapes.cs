@@ -28,10 +28,14 @@ public sealed partial class SheetLayoutEngine
             // over the blur radius, each so faint that the middle, where they all overlap, ends up with the shadow's opacity; at the edge
             // that ramps the opacity across the blur radius, as PowerPoint 2021 does.
             bool filled = shape.Fill is not null || shape.FillGradient is not null || shape.FillPattern is not null || shape.FillImage is not null;
+            // A filled shape's outline is cast with its fill as one area (the frame grown by half the line), so that the translucent copies
+            // do not darken where the line overlaps the fill.
+            bool merged = filled && shape.LineColor is not null && shape.LineWidth > 0 && shape.Geometry != ShapeGeometry.Line;
+            double grow = merged ? shape.LineWidth / 2 : 0;
             var dark = shape with
             {
                 Fill = filled ? shadow.Color : null, FillGradient = null, FillPattern = null, FillImage = null, Shadow = null,
-                LineColor = shape.LineColor is null ? null : shadow.Color, Paragraphs = [],
+                LineColor = shape.LineColor is null || merged ? null : shadow.Color, Paragraphs = [],
             };
             bool soft = shadow.Blur >= 0.5;
             int reach = soft ? 2 : 0;
@@ -41,7 +45,7 @@ public sealed partial class SheetLayoutEngine
                 {
                     double dx = shadow.Dx + gx * spread, dy = shadow.Dy + gy * spread;
                     items.Add(new PushItem(null, 0, cx + dx, cy + dy, shape.FlipH, shape.FlipV, copyOpacity));
-                    EmitOutline(dark, x + dx, y + dy, width, height, items);
+                    EmitOutline(dark, x + dx - grow, y + dy - grow, width + 2 * grow, height + 2 * grow, items);
                     items.Add(new PopItem());
                 }
         }
@@ -384,8 +388,14 @@ public sealed partial class SheetLayoutEngine
         else if (shape.FillImage is { } picture)
         {
             if (shape.FillImageAlpha < 1) items.Add(new PushItem(null, Opacity: shape.FillImageAlpha));
+            bool cropped = shape.FillCropLeft != 0 || shape.FillCropTop != 0 || shape.FillCropRight != 0 || shape.FillCropBottom != 0;
             if (shape.FillTile is not { } tile || !EmitTiles(picture, tile, points, x, y, w, h, items))
-                items.Add(new ImageItem(x, y, w, h, picture) { Clip = shape.Geometry == ShapeGeometry.Rectangle && !clip ? null : points });
+            {
+                // A cropped picture is stretched so that its uncut part fills the frame, then cut at the outline.
+                double imageW = w / (1 - shape.FillCropLeft - shape.FillCropRight), imageH = h / (1 - shape.FillCropTop - shape.FillCropBottom);
+                items.Add(new ImageItem(x - shape.FillCropLeft * imageW, y - shape.FillCropTop * imageH, imageW, imageH, picture)
+                    { Clip = shape.Geometry == ShapeGeometry.Rectangle && !clip && !cropped ? null : points });
+            }
             if (shape.FillImageAlpha < 1) items.Add(new PopItem());
         }
         else if (shape.Fill is { } fill)

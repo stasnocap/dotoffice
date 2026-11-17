@@ -170,6 +170,12 @@ public sealed record SheetShape : SheetObject
     /// <summary>When set, <see cref="FillImage"/> is repeated at this size instead of being stretched.</summary>
     public ShapeTile? FillTile { get; init; }
 
+    /// <summary>The fractions of <see cref="FillImage"/> cut off each edge before it is stretched (the blipFill's srcRect); negative values leave a margin.</summary>
+    public double FillCropLeft { get; init; }
+    public double FillCropTop { get; init; }
+    public double FillCropRight { get; init; }
+    public double FillCropBottom { get; init; }
+
     /// <summary>How opaque the picture fill is (the blip's alphaModFix); 1 is fully opaque.</summary>
     public double FillImageAlpha { get; init; } = 1;
 
