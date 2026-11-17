@@ -314,10 +314,10 @@ qpdf "$pdf" --pages . "$path_page" -- paths-page.pdf && qpdf --qdf --object-stre
 [ "$(grep -ac '^f\*$' paths-page-qdf.pdf || true)" -ge 1 ] || fail "a shape with a hole should be filled by the even-odd rule (f*)"
 hatches=$(grep -ac "^0.7725 0.3529 0.0667 RG$" fills-qdf.pdf || true)
 [ "$hatches" -ge 1 ] || fail "pattern fills should stroke hatch lines in the pattern color"
-# Shadows with a blur are nine faint copies that add up to their opacity (copy = 1 - (1 - alpha)^(1/9)): the drop shadow (40 %, 4 pt blur)
-# is nine copies of 5.5 %; the theme shadow (63 %) and the blurred one (60 %) are nine copies of about 10 % each.
-[ "$(grep -ac '^/GSa6 gs$' fills-qdf.pdf || true)" -ge 9 ] || fail "the drop shadow should be nine copies at about 6 % opacity"
-[ "$(grep -ac '^/GSa10 gs$' fills-qdf.pdf || true)" -ge 18 ] || fail "the theme and the blurred shadow should be eighteen copies at about 10 % opacity"
+# Shadows with a blur are a 7 x 7 grid of faint copies that add up to their opacity (copy = 1 - (1 - alpha)^(1/49)): the drop shadow (40 %, 4 pt blur)
+# is 49 copies of 1 %; the theme shadow (63 %) and the blurred one (60 %) are 49 copies of about 2 % each.
+[ "$(grep -ac '^/GSa1 gs$' fills-qdf.pdf || true)" -ge 49 ] || fail "the drop shadow should be 49 copies at about 1 % opacity"
+[ "$(grep -ac '^/GSa2 gs$' fills-qdf.pdf || true)" -ge 98 ] || fail "the theme and the blurred shadow should be 98 copies at about 2 % opacity"
 # The picture fills are images (one clipped to the ellipse).
 [ "$(pdfimages -list -f "$fills_page" -l "$fills_page" "$pdf" | awk 'NR > 2' | wc -l)" -ge 1 ] || fail "the picture fills should be images"
 # The rectangular path gradient is a stack of rectangles in the colors between white and dark red (no shading object for it).
