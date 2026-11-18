@@ -8,6 +8,7 @@
     <Project Path="src/DotOffice.Docx/DotOffice.Docx.csproj" />
     <Project Path="src/DotOffice.Fonts/DotOffice.Fonts.csproj" />
     <Project Path="src/DotOffice.Layout/DotOffice.Layout.csproj" />
+    <Project Path="src/DotOffice.Odf/DotOffice.Odf.csproj" />
     <Project Path="src/DotOffice.Pdf/DotOffice.Pdf.csproj" />
     <Project Path="src/DotOffice.Pptx/DotOffice.Pptx.csproj" />
     <Project Path="src/DotOffice.Xlsx/DotOffice.Xlsx.csproj" />

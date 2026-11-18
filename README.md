@@ -29,7 +29,8 @@ await DocumentConverter.ConvertAsync(input, output, DocumentFormat.Xlsx, Documen
 | DOCX | Usable: styles, lists, tables, headers/footers, images, fields, floats, columns, footnotes, charts, complex scripts (bidi, Indic, Southeast Asian) |
 | XLSX | Usable: cell styles, number formats, merges, page setup, print areas and titles, breaks, headers/footers, charts |
 | PPTX | Usable: slide/layout/master inheritance, shapes and text, bullets and fields, tables, charts, SmartArt, pictures, OLE and media previews, shadows, hyperlinks |
-| ODF, DOC, XLS | Not supported |
+| ODS (`DotOffice.Odf`) | First version: cached cell values, number/date formats, cell styles (font, fill, borders, alignment), merges, column widths and row heights, hidden sheets/rows/columns, page size, margins and scaling. Not yet: formulas without cached values, drawings, images, charts, headers/footers, print ranges, comments |
+| ODT, ODP, DOC, XLS, PPT | Not supported (planned: ODF and the binary formats get their own readers, `DotOffice.Odf` and `DotOffice.Binary`) |
 
 Fonts the document names but that are not available are substituted (metric-compatible Liberation, Carlito and Caladea fonts are
 preferred when installed) and reported through `ConvertOptions.Warnings`. On Linux and in containers, install those fonts or pass

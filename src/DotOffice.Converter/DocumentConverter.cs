@@ -2,12 +2,13 @@ using DotOffice.Core;
 using DotOffice.Docx;
 using DotOffice.Fonts;
 using DotOffice.Layout;
+using DotOffice.Odf;
 using DotOffice.Pptx;
 using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
 
-public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf }
+public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods }
 
 public sealed class ConvertOptions
 {
@@ -60,13 +61,15 @@ public static class DocumentConverter
 
         ct.ThrowIfCancellationRequested();
         LayoutDocument layout;
-        if (from == DocumentFormat.Xlsx)
+        if (from is DocumentFormat.Xlsx or DocumentFormat.Ods)
         {
-            var workbook = XlsxReader.Read(source, new XlsxReaderOptions
-            {
-                Warnings = options.Warnings,
-                MaxTotalUncompressedSize = options.MaxUncompressedSize,
-            });
+            var workbook = from == DocumentFormat.Ods
+                ? OdsReader.Read(source, new OdfReaderOptions { Warnings = options.Warnings, MaxTotalUncompressedSize = options.MaxUncompressedSize })
+                : XlsxReader.Read(source, new XlsxReaderOptions
+                {
+                    Warnings = options.Warnings,
+                    MaxTotalUncompressedSize = options.MaxUncompressedSize,
+                });
             ct.ThrowIfCancellationRequested();
             layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(workbook, ct);
         }
@@ -108,7 +111,7 @@ public static class DocumentConverter
 
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx) || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 
@@ -119,6 +122,7 @@ public static class DocumentConverter
             ".docx" or ".docm" or ".dotx" or ".dotm" => DocumentFormat.Docx,
             ".xlsx" or ".xlsm" or ".xltx" or ".xltm" => DocumentFormat.Xlsx,
             ".pptx" or ".pptm" or ".potx" or ".potm" or ".ppsx" or ".ppsm" => DocumentFormat.Pptx,
+            ".ods" or ".ots" => DocumentFormat.Ods,
             ".pdf" => DocumentFormat.Pdf,
             var ext => throw new NotSupportedException($"Unknown format '{ext}'."),
         };
