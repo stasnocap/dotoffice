@@ -1,0 +1,112 @@
+using System.Buffers.Binary;
+using System.Text;
+using DotOffice.Binary;
+using DotOffice.Core;
+
+namespace DotOffice.Tests.Binary;
+
+public class DocReaderTests
+{
+    /// <summary>A compound file with up to three streams: header, FAT sector, directory sector, then each stream's sectors in turn.</summary>
+    internal static byte[] Cfb(params (string Name, byte[] Data)[] streams)
+    {
+        // Streams under 4096 bytes would belong in the mini stream, which this helper does not build.
+        streams = streams.Select(s => (s.Name, s.Data.Length >= 4096 ? s.Data : s.Data.Concat(new byte[4096 - s.Data.Length]).ToArray())).ToArray();
+        int total = streams.Sum(s => (s.Data.Length + 511) / 512);
+        var file = new byte[512 * (3 + total)];
+        new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 }.CopyTo(file, 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(file.AsSpan(24), 0x3E);
+        BinaryPrimitives.WriteUInt16LittleEndian(file.AsSpan(26), 3);
+        BinaryPrimitives.WriteUInt16LittleEndian(file.AsSpan(28), 0xFFFE);
+        BinaryPrimitives.WriteUInt16LittleEndian(file.AsSpan(30), 9);
+        BinaryPrimitives.WriteUInt16LittleEndian(file.AsSpan(32), 6);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(44), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(48), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(56), 4096);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(60), 0xFFFFFFFE);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(68), 0xFFFFFFFE);
+        for (int i = 0; i < 109; i++) BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(76 + 4 * i), i == 0 ? 0u : 0xFFFFFFFF);
+        var fat = file.AsSpan(512, 512);
+        for (int i = 0; i < 128; i++) BinaryPrimitives.WriteUInt32LittleEndian(fat[(4 * i)..], 0xFFFFFFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(fat, 0xFFFFFFFD);
+        BinaryPrimitives.WriteUInt32LittleEndian(fat[4..], 0xFFFFFFFE);
+
+        void Entry(int index, string name, int type, uint right, uint child, uint start, long size)
+        {
+            var e = file.AsSpan(1024 + 128 * index, 128);
+            var nameBytes = Encoding.Unicode.GetBytes(name);
+            nameBytes.CopyTo(e);
+            BinaryPrimitives.WriteUInt16LittleEndian(e[64..], (ushort)(nameBytes.Length + 2));
+            e[66] = (byte)type;
+            BinaryPrimitives.WriteUInt32LittleEndian(e[68..], 0xFFFFFFFF);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[72..], right);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[76..], child);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[116..], start);
+            BinaryPrimitives.WriteInt64LittleEndian(e[120..], size);
+        }
+        Entry(0, "Root Entry", 5, 0xFFFFFFFF, 1, 0xFFFFFFFE, 0);
+        int sector = 2;
+        for (int s = 0; s < streams.Length; s++)
+        {
+            var data = streams[s].Data;
+            int count = (data.Length + 511) / 512;
+            for (int i = 0; i < count; i++) BinaryPrimitives.WriteUInt32LittleEndian(fat[(4 * (sector + i))..], i == count - 1 ? 0xFFFFFFFE : (uint)(sector + i + 1));
+            Entry(1 + s, streams[s].Name, 2, s + 1 < streams.Length ? (uint)(s + 2) : 0xFFFFFFFF, 0xFFFFFFFF, (uint)sector, data.Length);
+            data.CopyTo(file, 512 * (1 + sector));
+            sector += count;
+        }
+        return file;
+    }
+
+    /// <summary>
+    /// A minimal Word 97 document: a FIB with the given story lengths and (fc, lcb) pairs into the table stream, one compressed
+    /// (8-bit) piece holding all the text at byte 1024 of the WordDocument stream, and the piece table at the start of the table stream.
+    /// </summary>
+    private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables)
+    {
+        var main = new byte[1024 + text.Length];
+        BinaryPrimitives.WriteUInt16LittleEndian(main, 0xA5EC);
+        BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(2), 0xC1);
+        BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(0x0A), 0x0200); // the table stream is 1Table
+        BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(32), 14);
+        BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(62), 22);
+        for (int i = 0; i < storyLengths.Length; i++) BinaryPrimitives.WriteInt32LittleEndian(main.AsSpan(64 + 4 * (3 + i)), storyLengths[i]);
+        BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(152), 93);
+        Encoding.Latin1.GetBytes(text).CopyTo(main, 1024);
+
+        var table = new List<byte> { 2 };
+        table.AddRange(BitConverter.GetBytes(4 + 4 + 8));
+        table.AddRange(BitConverter.GetBytes(0));
+        table.AddRange(BitConverter.GetBytes(text.Length));
+        table.AddRange(BitConverter.GetBytes((ushort)0));
+        table.AddRange(BitConverter.GetBytes((1024 * 2) | 0x40000000));
+        table.AddRange(BitConverter.GetBytes((ushort)0));
+        void Pair(int pair, int fc, int lcb)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(main.AsSpan(154 + 8 * pair), fc);
+            BinaryPrimitives.WriteInt32LittleEndian(main.AsSpan(154 + 8 * pair + 4), lcb);
+        }
+        Pair(33, 0, table.Count);
+        foreach (var (pair, data) in tables) { Pair(pair, table.Count, data.Length); table.AddRange(data); }
+        return Cfb(("WordDocument", main), ("1Table", table.ToArray()));
+    }
+
+    private static string Text(IEnumerable<Block>? blocks) =>
+        string.Join("|", (blocks ?? []).OfType<Paragraph>().Select(p => string.Concat(p.Inlines.Select(i => i switch { TextRun r => r.Text, FieldRun f => $"[{f.Kind}]", _ => "" }))));
+
+    [Fact]
+    public void Headers_and_footers_come_from_the_header_stories_with_live_page_fields()
+    {
+        const string body = "Body\r", header = "Head\r", footer = "Page \x13 PAGE \x14" + "1\x15\r";
+        int f = header.Length + footer.Length;
+        // Six separator stories, then even header, odd header, even footer, odd footer, first header and first footer, and a guard.
+        int[] cps = [0, 0, 0, 0, 0, 0, 0, 0, header.Length, header.Length, f, f, f, f, f + 1];
+        var plcfHdd = cps.SelectMany(BitConverter.GetBytes).ToArray();
+        var doc = DocReader.Read(new MemoryStream(Doc(body + header + footer + "\r", [body.Length, 0, f + 1], (11, plcfHdd))));
+        var section = Assert.Single(doc.Sections);
+        Assert.Equal("Body", Text(section.Blocks));
+        Assert.Equal("Head", Text(section.DefaultHeader?.Blocks));
+        Assert.Equal("Page [Page]", Text(section.DefaultFooter?.Blocks));
+        Assert.Null(section.FirstHeader);
+    }
+}

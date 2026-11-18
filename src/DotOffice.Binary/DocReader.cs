@@ -65,6 +65,9 @@ internal sealed class DocContext(byte[] main, byte[] table)
     private readonly Dictionary<int, Style> _styles = [];
     private readonly List<(int Start, int End, byte[] Props)> _chpRuns = [], _papRuns = [];
     private int _blocks;
+    private string _text = "";
+    private int _textLength;
+    private readonly Dictionary<(int, int), HeaderFooter?> _stories = [];
 
     private int FcLcb(int pair, out int lcb)
     {
@@ -101,8 +104,12 @@ internal sealed class DocContext(byte[] main, byte[] table)
         ReadStyles();
         ReadRuns(12, _chpRuns, papx: false);
         ReadRuns(13, _papRuns, papx: true);
-        var text = ReadText(textLength);
-        return Build(text);
+        // The text stream holds the main story, then the footnotes, the headers and footers, comments, endnotes and text boxes.
+        long total = 0;
+        for (int k = 3; k <= 10; k++) total += Math.Max(Lw(k), 0);
+        _text = ReadText((int)Math.Min(total, MaxChars));
+        _textLength = Math.Min(textLength, _text.Length);
+        return Build(0, _textLength, story: false);
     }
 
     // ------------------------------------------------------------------ text
@@ -433,7 +440,8 @@ internal sealed class DocContext(byte[] main, byte[] table)
     private Section MakeSection(int sectionIndex)
     {
         double width = 612, height = 792, left = 90, right = 90, top = 72, bottom = 72;
-        bool landscape = false;
+        bool landscape = false, titlePage = false;
+        double headerDistance = 36, footerDistance = 36;
         int fc = FcLcb(6, out int lcb);
         if (lcb >= 16 && fc >= 0 && (long)fc + lcb <= table.Length)
         {
@@ -463,6 +471,9 @@ internal sealed class DocContext(byte[] main, byte[] table)
                             case 0x9023: top = I16(o, 0) / 20.0; break;
                             case 0x9024: bottom = I16(o, 0) / 20.0; break;
                             case 0x301D: landscape = o[0] == 2; break;
+                            case 0x300A: titlePage = o[0] != 0; break;
+                            case 0xB017: headerDistance = U16(o, 0) / 20.0; break;
+                            case 0xB018: footerDistance = U16(o, 0) / 20.0; break;
                         }
                         at += size;
                     }
@@ -475,8 +486,56 @@ internal sealed class DocContext(byte[] main, byte[] table)
         return new Section
         {
             PageWidth = width, PageHeight = height, Orientation = landscape || width > height ? Orientation.Landscape : Orientation.Portrait,
-            Margins = new Thickness(Math.Abs(top), right, Math.Abs(bottom), left), HeaderDistance = 36, FooterDistance = 36,
+            Margins = new Thickness(Math.Abs(top), right, Math.Abs(bottom), left),
+            HeaderDistance = headerDistance is > 0 and < 1000 ? headerDistance : 36, FooterDistance = footerDistance is > 0 and < 1000 ? footerDistance : 36,
+            DifferentFirstPage = titlePage,
+            EvenHeader = Story(sectionIndex, 0), DefaultHeader = Story(sectionIndex, 1), EvenFooter = Story(sectionIndex, 2),
+            DefaultFooter = Story(sectionIndex, 3), FirstHeader = Story(sectionIndex, 4), FirstFooter = Story(sectionIndex, 5),
         };
+    }
+
+    /// <summary>
+    /// A header or footer of a section from the header story table (PlcfHdd): six footnote and endnote separator stories, then six per
+    /// section (even header, odd header, even footer, odd footer, first header, first footer). An empty story repeats the previous section's.
+    /// </summary>
+    private HeaderFooter? Story(int sectionIndex, int kind)
+    {
+        if (_stories.TryGetValue((sectionIndex, kind), out var cached)) return cached;
+        HeaderFooter? result = null;
+        int fc = FcLcb(11, out int lcb);
+        int count = lcb / 4;
+        int baseCp = _textLength + Math.Max(Lw(4), 0);
+        if (fc >= 0 && lcb >= 8 && (long)fc + lcb <= table.Length)
+        {
+            var plc = table.AsSpan(fc, lcb);
+            int index = 6 + sectionIndex * 6 + kind;
+            if (index + 1 < count)
+            {
+                long start = baseCp + U32(plc, 4 * index), end = baseCp + U32(plc, 4 * (index + 1));
+                if (start >= end) result = sectionIndex > 0 ? Story(sectionIndex - 1, kind) : null;
+                else if (end <= _text.Length)
+                {
+                    var built = Build((int)start, (int)end, story: true).Sections[0].Blocks;
+                    result = new HeaderFooter();
+                    result.Blocks.AddRange(built);
+                }
+            }
+        }
+        _stories[(sectionIndex, kind)] = result;
+        return result;
+    }
+
+    /// <summary>The document properties' fFacingPages: different headers and footers on even and odd pages.</summary>
+    private bool FacingPages()
+    {
+        int fc = FcLcb(31, out int lcb);
+        return lcb >= 2 && fc >= 0 && (long)fc + 2 <= table.Length && (table[fc] & 1) != 0;
+    }
+
+    private static FieldKind? PageField(string code)
+    {
+        var word = code.Trim().Split(' ', 2)[0].ToUpperInvariant();
+        return word switch { "PAGE" => FieldKind.Page, "NUMPAGES" => FieldKind.NumPages, "SECTIONPAGES" => FieldKind.SectionPages, _ => null };
     }
 
     private List<int> SectionEnds()
@@ -494,12 +553,14 @@ internal sealed class DocContext(byte[] main, byte[] table)
 
     // ------------------------------------------------------------------ building
 
-    private Document Build(string text)
+    /// <summary>Builds the blocks of the text from <paramref name="from"/> to <paramref name="to"/>: the main story with its sections, or a header or footer story.</summary>
+    private Document Build(int from, int to, bool story)
     {
-        var doc = new Document();
-        var sectionEnds = SectionEnds();
+        var text = _text;
+        var doc = new Document { Settings = new DocumentSettings { EvenAndOddHeaders = !story && FacingPages() } };
+        var sectionEnds = story ? [] : SectionEnds();
         int sectionIndex = 0;
-        var section = MakeSection(0);
+        var section = story ? new Section() : MakeSection(0);
         doc.Sections.Add(section);
         var blocks = section.Blocks;
 
@@ -511,6 +572,7 @@ internal sealed class DocContext(byte[] main, byte[] table)
         List<TableCell>? rowCells = null;
         List<Block>? cellBlocks = null;
         var fieldStack = new List<bool>(); // for each open field: whether its result (after the separator) is being shown
+        var fieldCode = new StringBuilder();
 
         RunProperties Props(Chp c) => new()
         {
@@ -661,16 +723,34 @@ internal sealed class DocContext(byte[] main, byte[] table)
             tablePap = null;
         }
 
-        int cp = 0;
+        int cp = from;
         int fieldDepth = 0;
-        for (; cp < text.Length; cp++)
+        int resultHidden = int.MaxValue; // the depth whose result is replaced by a live page-number field
+        for (; cp < to; cp++)
         {
             char c = text[cp];
-            // Field codes are not shown: only the result (between the separator and the end) is.
-            if (c == '\x13') { fieldStack.Add(false); fieldDepth++; continue; }
-            if (c == '\x14' && fieldStack.Count > 0) { fieldStack[^1] = true; continue; }
-            if (c == '\x15' && fieldStack.Count > 0) { fieldStack.RemoveAt(fieldStack.Count - 1); fieldDepth--; continue; }
-            if (fieldStack.Count > 0 && fieldStack.Any(shown => !shown)) continue;
+            // Field codes are not shown: only the result (between the separator and the end) is. PAGE, NUMPAGES and SECTIONPAGES
+            // become fields evaluated at layout, in place of their stored result.
+            if (c == '\x13') { fieldStack.Add(false); fieldDepth++; fieldCode.Clear(); continue; }
+            if (c == '\x14' && fieldStack.Count > 0)
+            {
+                fieldStack[^1] = true;
+                if (fieldStack.Count < resultHidden && !fieldStack.Take(fieldStack.Count - 1).Any(shown => !shown) && PageField(fieldCode.ToString()) is { } kind)
+                {
+                    var chp = ChpAt(cp, PapAt(cp));
+                    Flush();
+                    inlines.Add(new FieldRun(kind, Props(chp)));
+                    resultHidden = fieldStack.Count;
+                }
+                continue;
+            }
+            if (c == '\x15' && fieldStack.Count > 0)
+            {
+                if (fieldStack.Count == resultHidden) resultHidden = int.MaxValue;
+                fieldStack.RemoveAt(fieldStack.Count - 1); fieldDepth--; continue;
+            }
+            if (fieldStack.Count > 0 && !fieldStack[^1]) { if (fieldCode.Length < 256) fieldCode.Append(c); continue; }
+            if (fieldStack.Count >= resultHidden || fieldStack.Count > 0 && fieldStack.Any(shown => !shown)) continue;
 
             switch (c)
             {
@@ -681,7 +761,7 @@ internal sealed class DocContext(byte[] main, byte[] table)
                 case '\f':
                 {
                     Flush();
-                    bool sectionBreak = sectionEnds.Contains(cp + 1) && sectionIndex + 1 < sectionEnds.Count;
+                    bool sectionBreak = !story && sectionEnds.Contains(cp + 1) && sectionIndex + 1 < sectionEnds.Count;
                     if (sectionBreak)
                     {
                         CloseTable();
@@ -710,7 +790,7 @@ internal sealed class DocContext(byte[] main, byte[] table)
             if (runChp is null || !SameFormat(runChp, current)) { Flush(); runChp = current; }
             if (!current.Hidden) run.Append(c);
         }
-        if (run.Length > 0 || inlines.Count > 0) EndParagraph(Math.Max(0, text.Length - 1), cellMark: false);
+        if (run.Length > 0 || inlines.Count > 0) EndParagraph(Math.Max(from, to - 1), cellMark: false);
         CloseTable();
         _ = fieldDepth;
 
