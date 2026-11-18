@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DotOffice.Docx\DotOffice.Docx.csproj" />
     <ProjectReference Include="..\DotOffice.Xlsx\DotOffice.Xlsx.csproj" />
+    <ProjectReference Include="..\DotOffice.Binary\DotOffice.Binary.csproj" />
     <ProjectReference Include="..\DotOffice.Odf\DotOffice.Odf.csproj" />
     <ProjectReference Include="..\DotOffice.Pptx\DotOffice.Pptx.csproj" />
     <ProjectReference Include="..\DotOffice.Layout\DotOffice.Layout.csproj" />

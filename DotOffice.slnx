@@ -3,6 +3,7 @@
     <Project Path="samples/DotOffice.Samples/DotOffice.Samples.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/DotOffice.Binary/DotOffice.Binary.csproj" />
     <Project Path="src/DotOffice.Converter/DotOffice.Converter.csproj" />
     <Project Path="src/DotOffice.Core/DotOffice.Core.csproj" />
     <Project Path="src/DotOffice.Docx/DotOffice.Docx.csproj" />

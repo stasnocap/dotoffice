@@ -25,6 +25,7 @@
   <ItemGroup>
     <None Include="Assets/**" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\..\src\DotOffice.Pdf\DotOffice.Pdf.csproj" />
+    <ProjectReference Include="..\..\src\DotOffice.Binary\DotOffice.Binary.csproj" />
     <ProjectReference Include="..\..\src\DotOffice.Odf\DotOffice.Odf.csproj" />
   </ItemGroup>
 
