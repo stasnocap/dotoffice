@@ -117,7 +117,18 @@ internal sealed class OdfStyles
         // The data style is named on the style itself.
         for (int i = chain.Count - 1; i >= 0; i--)
             if ((string?)chain[i].Attribute(Ns.Style + "data-style-name") is { } ds) result["style/data-style-name"] = ds;
+        if (chain.Count > 0 && (string?)chain[0].Attribute(Ns.Style + "master-page-name") is { Length: > 0 } mp) result["style/master-page-name"] = mp;
         return result;
+    }
+
+    /// <summary>The <c>style:tab-stop</c> elements of the nearest style in the parent chain that has any.</summary>
+    public IEnumerable<XElement> TabStops(string family, string? name)
+    {
+        var e = Find(family, name);
+        for (int i = 0; e is not null && i < 16; i++, e = Find(family, (string?)e.Attribute(Ns.Style + "parent-style-name")))
+            if (e.Element(Ns.Style + "paragraph-properties")?.Element(Ns.Style + "tab-stops") is { } stops)
+                return stops.Elements(Ns.Style + "tab-stop");
+        return [];
     }
 
     public XElement? PageLayoutOf(string? masterPage) =>

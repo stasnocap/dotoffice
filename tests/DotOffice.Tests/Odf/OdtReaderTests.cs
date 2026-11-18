@@ -11,7 +11,7 @@ public class OdtReaderTests
         "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" " +
         "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\">";
 
-    private static Document Read(string autoStyles, string body, string mime = "application/vnd.oasis.opendocument.text")
+    private static Document Read(string autoStyles, string body, string mime = "application/vnd.oasis.opendocument.text", bool masters = false)
     {
         var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
@@ -22,6 +22,8 @@ public class OdtReaderTests
                 w.Write(text);
             }
             Add("mimetype", mime);
+            if (masters)
+                Add("styles.xml", Header.Replace("document-content", "document-styles") + "<office:master-styles><style:master-page style:name=\"Standard\"/><style:master-page style:name=\"Other\"/></office:master-styles></office:document-styles>");
             Add("content.xml", Header + "<office:automatic-styles>" + autoStyles + "</office:automatic-styles><office:body><office:text>" + body +
                 "</office:text></office:body></office:document-content>");
         }
@@ -90,5 +92,27 @@ public class OdtReaderTests
     {
         Assert.Throws<InvalidDataException>(() => Read("", "<text:p/>", "application/vnd.oasis.opendocument.spreadsheet"));
         Assert.Throws<InvalidDataException>(() => OdtReader.Read(new MemoryStream(Encoding.ASCII.GetBytes("nope"))));
+    }
+
+    [Fact]
+    public void ReadsTabStopsRelativeToTheMargin()
+    {
+        var doc = Read(
+            "<style:style style:name=\"P1\" style:family=\"paragraph\"><style:paragraph-properties fo:margin-left=\"1in\"><style:tab-stops>" +
+            "<style:tab-stop style:position=\"2in\" style:type=\"right\" style:leader-style=\"dotted\"/></style:tab-stops></style:paragraph-properties></style:style>",
+            "<text:p text:style-name=\"P1\">a<text:tab/>b</text:p>");
+        var stop = Assert.Single(((Paragraph)doc.Sections[0].Blocks[0]).Properties.TabStops);
+        Assert.Equal(new TabStop(216, TabAlignment.Right, TabLeader.Dot), stop);
+    }
+
+    [Fact]
+    public void StartsASectionWhereTheParagraphStyleChangesThePageStyle()
+    {
+        var doc = Read(
+            "<style:style style:name=\"P1\" style:family=\"paragraph\" style:master-page-name=\"Other\"/>",
+            "<text:p>one</text:p><text:p text:style-name=\"P1\">two</text:p><text:p>three</text:p>", masters: true);
+        Assert.Equal(2, doc.Sections.Count);
+        Assert.Single(doc.Sections[0].Blocks);
+        Assert.Equal(2, doc.Sections[1].Blocks.Count);
     }
 }

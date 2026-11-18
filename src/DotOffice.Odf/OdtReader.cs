@@ -46,7 +46,39 @@ internal sealed class OdtContext(OpcPackage package, OdfStyles styles, OdfReader
     {
         var props = styles.Properties("paragraph", null);
         _base = Run(props, new RunProperties { FontFamily = "Liberation Serif", FontSize = 12 });
-        var master = styles.MasterPage(FirstMasterName(body)) ?? styles.MasterPage(styles.DefaultMasterPage);
+        var currentName = Effective(FirstMasterName(body) ?? styles.DefaultMasterPage);
+        var doc = new Document { Settings = new DocumentSettings { DefaultTabStop = OdfUnits.Length(props.GetValueOrDefault("paragraph-properties/tab-stop-distance")) ?? 36 } };
+        var section = MakeSection(styles.MasterPage(currentName));
+        doc.Sections.Add(section);
+        // A paragraph or table whose style names another master page starts a new page in that page style.
+        foreach (var e in body.Elements())
+        {
+            if (MasterOf(e) is { } named && Effective(named) is var name && name != currentName && styles.MasterPage(name) is { } next)
+            {
+                currentName = name;
+                section = MakeSection(next);
+                if (doc.Sections[^1].Blocks.Count == 0) doc.Sections[^1] = section;
+                else doc.Sections.Add(section);
+            }
+            ReadBlock(e, section.Blocks, 0, null);
+        }
+        if (doc.Sections[0].Blocks.Count == 0 && doc.Sections.Count == 1) doc.Sections[0].Blocks.Add(new Paragraph());
+        return doc;
+    }
+
+    /// <summary>A first-page style that continues with another one is read as that one: the page where the style changes is not known here.</summary>
+    private string? Effective(string? name) =>
+        styles.MasterPage(name) is { } m && (string?)m.Attribute(Ns.Style + "next-style-name") is { } next && next != name && styles.MasterPage(next) is not null ? next : name;
+
+    private string? MasterOf(XElement e) => e.Name.Namespace switch
+    {
+        _ when e.Name == Ns.Text + "p" || e.Name == Ns.Text + "h" => styles.Properties("paragraph", (string?)e.Attribute(Ns.Text + "style-name"), false).GetValueOrDefault("style/master-page-name"),
+        _ when e.Name == Ns.Table + "table" => styles.Properties("table", (string?)e.Attribute(Ns.Table + "style-name"), false).GetValueOrDefault("style/master-page-name"),
+        _ => null,
+    };
+
+    private Section MakeSection(XElement? master)
+    {
         var layout = styles.PageLayoutOf(master is null ? null : (string?)master.Attribute(Ns.Style + "name"));
         var (header, footer) = (master?.Element(Ns.Style + "header"), master?.Element(Ns.Style + "footer"));
 
@@ -61,7 +93,7 @@ internal sealed class OdtContext(OpcPackage package, OdfStyles styles, OdfReader
         if (mTop + mBottom > h * 0.8) { double f = h * 0.8 / (mTop + mBottom); mTop *= f; mBottom *= f; top *= f; bottom *= f; }
         if (mLeft + mRight > w * 0.8) { double f = w * 0.8 / (mLeft + mRight); mLeft *= f; mRight *= f; }
         double headerHeight = ExtraHeight(layout, "header-style"), footerHeight = ExtraHeight(layout, "footer-style");
-        var section = new Section
+        return new Section
         {
             PageWidth = w,
             PageHeight = h,
@@ -72,17 +104,12 @@ internal sealed class OdtContext(OpcPackage package, OdfStyles styles, OdfReader
             DefaultHeader = header is null ? null : Story(header),
             DefaultFooter = footer is null ? null : Story(footer),
         };
-        ReadBlocks(body, section.Blocks, 0);
-        var doc = new Document { Settings = new DocumentSettings { DefaultTabStop = OdfUnits.Length(props.GetValueOrDefault("paragraph-properties/tab-stop-distance")) ?? 36 } };
-        doc.Sections.Add(section);
-        if (section.Blocks.Count == 0) section.Blocks.Add(new Paragraph());
-        return doc;
     }
 
     private string? FirstMasterName(XElement body)
     {
         foreach (var p in body.Descendants().Where(e => e.Name == Ns.Text + "p" || e.Name == Ns.Text + "h").Take(1))
-            return styles.Properties("paragraph", (string?)p.Attribute(Ns.Text + "style-name")).GetValueOrDefault("style/master-page-name");
+            return styles.Properties("paragraph", (string?)p.Attribute(Ns.Text + "style-name"), false).GetValueOrDefault("style/master-page-name");
         return null;
     }
 
@@ -107,28 +134,30 @@ internal sealed class OdtContext(OpcPackage package, OdfStyles styles, OdfReader
     private void ReadBlocks(XElement parent, List<Block> blocks, int depth, ListContext? list = null)
     {
         if (depth > MaxDepth) throw new InvalidDataException("The document is nested too deeply.");
-        foreach (var e in parent.Elements())
+        foreach (var e in parent.Elements()) ReadBlock(e, blocks, depth, list);
+    }
+
+    private void ReadBlock(XElement e, List<Block> blocks, int depth, ListContext? list)
+    {
+        if (++_blocks > MaxBlocks) throw new InvalidDataException("The document has too many blocks.");
+        if (e.Name.Namespace != Ns.Text && e.Name.Namespace != Ns.Table) return;
+        switch (e.Name.LocalName)
         {
-            if (++_blocks > MaxBlocks) throw new InvalidDataException("The document has too many blocks.");
-            if (e.Name.Namespace != Ns.Text && e.Name.Namespace != Ns.Table) continue;
-            switch (e.Name.LocalName)
-            {
-                case "p" or "h":
-                    blocks.Add(ReadParagraph(e, list, depth));
-                    break;
-                case "list":
-                    ReadList(e, blocks, depth, list);
-                    break;
-                case "table" when e.Name.Namespace == Ns.Table:
-                    blocks.Add(ReadTable(e, depth));
-                    break;
-                case "section" or "index-body" or "table-of-content" or "alphabetical-index" or "illustration-index" or "user-index" or "bibliography":
-                    ReadBlocks(e, blocks, depth + 1, list);
-                    break;
-                case "index-title":
-                    ReadBlocks(e, blocks, depth + 1, list);
-                    break;
-            }
+            case "p" or "h":
+                blocks.Add(ReadParagraph(e, list, depth));
+                break;
+            case "list":
+                ReadList(e, blocks, depth, list);
+                break;
+            case "table" when e.Name.Namespace == Ns.Table:
+                blocks.Add(ReadTable(e, depth));
+                break;
+            case "section" or "index-body" or "table-of-content" or "alphabetical-index" or "illustration-index" or "user-index" or "bibliography":
+                ReadBlocks(e, blocks, depth + 1, list);
+                break;
+            case "index-title":
+                ReadBlocks(e, blocks, depth + 1, list);
+                break;
         }
     }
 
@@ -601,8 +630,21 @@ internal sealed class OdtContext(OpcPackage package, OdfStyles styles, OdfReader
             "justify" => ParagraphAlignment.Justify,
             _ => ParagraphAlignment.Left,
         };
+        var tabs = new List<TabStop>();
+        foreach (var stop in styles.TabStops("paragraph", styleName).Take(64))
+        {
+            if (OdfUnits.Length((string?)stop.Attribute(Ns.Style + "position")) is not { } position) continue;
+            var alignment = (string?)stop.Attribute(Ns.Style + "type") switch { "center" => TabAlignment.Center, "right" => TabAlignment.Right, "char" => TabAlignment.Decimal, _ => TabAlignment.Left };
+            var leaderText = (string?)stop.Attribute(Ns.Style + "leader-text");
+            var leader = (string?)stop.Attribute(Ns.Style + "leader-style") is null or "none" ? TabLeader.None
+                : leaderText is "-" ? TabLeader.Hyphen : leaderText is "_" ? TabLeader.Underscore : (string?)stop.Attribute(Ns.Style + "leader-style") is "dotted" ? TabLeader.Dot
+                : (string?)stop.Attribute(Ns.Style + "leader-style") is "dash" or "long-dash" or "dot-dash" or "dot-dot-dash" ? TabLeader.Hyphen : TabLeader.Underscore;
+            // ODF measures tab positions from the paragraph's left margin, the model from the text area.
+            tabs.Add(new TabStop(position + L("margin-left"), alignment, leader));
+        }
         return new ParagraphProperties
         {
+            TabStops = tabs,
             StyleId = styleName,
             Alignment = align,
             LeftIndent = L("margin-left"),
