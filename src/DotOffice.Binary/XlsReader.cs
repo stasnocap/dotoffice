@@ -32,7 +32,7 @@ public static class XlsReader
     }
 }
 
-internal sealed class XlsContext(byte[] data, BinaryReaderOptions options)
+internal sealed partial class XlsContext(byte[] data, BinaryReaderOptions options)
 {
     private const int MaxCellText = 4096, MaxRows = 65536, MaxColumns = 256;
 
@@ -396,6 +396,7 @@ internal sealed class XlsContext(byte[] data, BinaryReaderOptions options)
         int paper = 1, fitW = 1, fitH = 1, scale = 100;
         string? header = null, footer = null;
         double? left = null, right = null, top = null, bottom = null, headerMargin = null, footerMargin = null;
+        var drawing = new Drawing();
         for (int i = bof; i < _records.Count; i++)
         {
             var r = _records[i];
@@ -498,6 +499,9 @@ internal sealed class XlsContext(byte[] data, BinaryReaderOptions options)
                     headerMargin = BitConverter.ToDouble(d[16..24]); footerMargin = BitConverter.ToDouble(d[24..32]);
                     if ((U16(d, 10) & 1) != 0) setup.PageOrderOverThenDown = true;
                     break;
+                case 0x00EC: i = AddEscher(drawing, i); break;
+                case 0x005D when d.Length >= 10 && U16(d, 0) == 0x15: drawing.Objects.Add((U16(d, 4), U16(d, 8))); break;
+                case 0x01B6 when d.Length >= 14: i = AddText(drawing, i); break;
                 case 0x0081 when d.Length >= 2: fitToPage = (U16(d, 0) & 0x100) != 0; break;
                 case 0x0014 when d.Length >= 3: header = d.Length > 2 ? ReadString16Short(d) : ""; break;
                 case 0x0015 when d.Length >= 3: footer = d.Length > 2 ? ReadString16Short(d) : ""; break;
@@ -512,6 +516,8 @@ internal sealed class XlsContext(byte[] data, BinaryReaderOptions options)
                 case 0x023E when d.Length >= 2: sheet.ShowGridLines = (U16(d, 0) & 0x0002) != 0; break; // WINDOW2 option flags: bit 1 shows gridlines
             }
         }
+
+        AddDrawings(sheet, drawing);
 
         var (pageW, pageH) = PaperSize(paper);
         setup.Orientation = landscape ? Orientation.Landscape : Orientation.Portrait;

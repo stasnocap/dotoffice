@@ -129,4 +129,31 @@ public class XlsReaderTests
         Assert.Equal(1, setup.Scale);
         Assert.Equal(Orientation.Portrait, setup.Orientation);
     }
+
+    private static byte[] Escher(int verInst, int type, params byte[][] body)
+    {
+        var data = Concat(body);
+        return Concat(U16(verInst, type), BitConverter.GetBytes(data.Length), data);
+    }
+
+    [Fact]
+    public void A_text_box_becomes_a_sheet_shape_with_its_text_and_cell_anchor()
+    {
+        var textbox = Escher(0, 0xF00D);
+        var shape = Concat(Escher(202 << 4 | 2, 0xF00A, BitConverter.GetBytes(1025), BitConverter.GetBytes(0xA00)),
+            Escher(0, 0xF010, U16(2, 1, 512, 2, 0, 3, 0, 4, 128)), Escher(0, 0xF011));
+        // The containers' lengths count the ClientTextbox, which comes in the second MSODRAWING record.
+        var sp = Escher(0xF, 0xF004, shape, textbox)[..^textbox.Length];
+        var dg = Escher(0xF, 0xF002, Escher(0xF, 0xF003, sp, textbox))[..^textbox.Length];
+        var records = Concat(Rec(0x00EC, dg), Rec(0x005D, U16(0x15, 0x12, 6, 1, 0x6011)), Rec(0x00EC, textbox),
+            Rec(0x01B6, U16(2 << 1 | 2 << 4, 0, 0, 0, 0, 5, 16, 0, 0)), Rec(0x003C, Concat([0], Encoding.Latin1.GetBytes("Boxed"))),
+            Rec(0x003C, U16(0, 0, 0, 0, 5, 0, 0, 0)));
+        var sheet = XlsReader.Read(new MemoryStream(Cfb("Workbook", Workbook(setup: records)))).Sheets[0];
+        var box = Assert.Single(sheet.Shapes);
+        Assert.Equal(new AnchorPoint(1, 2, sheet.ColumnWidth(1) / 2, 0), box.From);
+        Assert.Equal((3, 4), (box.To.Column, box.To.Row));
+        Assert.Equal("Boxed", string.Concat(Assert.Single(box.Paragraphs).Runs.Select(r => r.Text)));
+        Assert.Equal(HorizontalAlignment.Center, box.Paragraphs[0].Alignment);
+        Assert.Equal(ShapeTextAnchor.Middle, box.TextAnchor);
+    }
 }
