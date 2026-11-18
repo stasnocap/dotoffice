@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Xml;
 using DotOffice.Core;
 
@@ -105,8 +106,25 @@ internal static class WordXml
         };
     }
 
-    /// <summary>Reads all text of the current element and moves past it.</summary>
-    public static string ReadText(this XmlReader r) => r.IsEmptyElement ? Consume(r, "") : r.ReadElementContentAsString();
+    /// <summary>
+    /// Reads all text of the current element and moves past it. Elements nested inside (a stray w:br or w:tab, or unknown markup
+    /// inside w:t) are skipped but their text is kept, as Word and LibreOffice open such files instead of refusing them.
+    /// </summary>
+    public static string ReadText(this XmlReader r)
+    {
+        if (r.IsEmptyElement) return Consume(r, "");
+        int depth = r.Depth;
+        string? single = null;
+        StringBuilder? text = null;
+        while (r.Read() && r.Depth > depth)
+        {
+            if (r.NodeType is not (XmlNodeType.Text or XmlNodeType.CDATA or XmlNodeType.Whitespace or XmlNodeType.SignificantWhitespace)) continue;
+            if (single is null && text is null) single = r.Value;
+            else (text ??= new StringBuilder(single)).Append(r.Value);
+        }
+        r.Read(); // past the end tag
+        return text?.ToString() ?? single ?? "";
+    }
 
     private static string Consume(XmlReader r, string value)
     {

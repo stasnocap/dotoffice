@@ -367,6 +367,14 @@ public class DocxReaderTests
         Assert.Equal("word/x.xml", OpcPackage.Resolve("word/document.xml", "/word/x.xml"));
         Assert.Equal("word/a b.png", OpcPackage.Resolve("word/document.xml", "a%20b.png"));
     }
+
+    [Fact]
+    public void Keeps_the_text_of_a_w_t_holding_stray_elements()
+    {
+        // docx4j's "unknown-elements" files: Word opens them, so they must not be refused as malformed.
+        var doc = Read(new DocxBuilder { Body = "<w:p><w:r><w:t>one<w:br/>two<x:y xmlns:x=\"urn:x\">three</x:y></w:t><w:t>four</w:t></w:r></w:p>" });
+        Assert.Equal("onetwothreefour", string.Concat(Paragraphs(doc)[0].Inlines.OfType<TextRun>().Select(r => r.Text)));
+    }
 }
 public class DocxFuzzTests
 {
