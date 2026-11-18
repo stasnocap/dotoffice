@@ -369,6 +369,8 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
                     else r.Skip();
                     continue;
                 case "pict":
+                    ReadPict(r, state, Props());
+                    continue;
                 case "object":
                     context.WarnOnce("docx.vml", "VML pictures and embedded objects are not supported and were skipped.");
                     break;

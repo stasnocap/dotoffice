@@ -65,6 +65,21 @@ public class TextBoxTests
     }
 
     [Fact]
+    public void Reads_a_vml_text_box_with_its_style_position_and_content()
+    {
+        var pict = "<w:r><w:pict><v:shape xmlns:v=\"urn:schemas-microsoft-com:vml\" style=\"position:absolute;margin-left:1in;margin-top:20pt;width:200pt;height:50pt;mso-position-horizontal-relative:page;mso-position-vertical-relative:page\" fillcolor=\"#ffff00\" stroked=\"f\">" +
+            "<v:textbox inset=\"1pt,2pt,3pt,4pt\"><w:txbxContent><w:p><w:r><w:t>vml</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>";
+        var box = Assert.Single(((Paragraph)Read(P(pict)).Sections[0].Blocks[0]).Inlines.OfType<FloatingTextBox>());
+        Assert.Equal((200.0, 50.0), (box.Width, box.Height));
+        Assert.Equal(new FloatPosition(FloatReference.Page, FloatAlignment.Offset, 72), box.Horizontal);
+        Assert.Equal(new FloatPosition(FloatReference.Page, FloatAlignment.Offset, 20), box.Vertical);
+        Assert.Equal(new Color(255, 255, 0), box.Fill);
+        Assert.Null(box.Outline);
+        Assert.Equal(new Thickness(2, 3, 4, 1), box.Insets);
+        Assert.Single(box.Blocks);
+    }
+
+    [Fact]
     public void Lays_the_content_inside_the_box_below_its_insets_and_clips_it()
     {
         var page = Layout(Read(P(AnchorShape(200, 100, Position("page", "1270000", "page", "2540000"), Box))));
