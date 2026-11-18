@@ -63,11 +63,11 @@ public class XlsReaderTests
         return file;
     }
 
-    private static byte[] Workbook(bool encrypted = false, byte[]? setup = null)
+    private static byte[] Workbook(bool encrypted = false, byte[]? setup = null, byte[]? globals = null)
     {
         var bof = (int type) => Rec(0x0809, U16(0x0600, type, 0, 0, 0, 0, 0, 0));
         var sst = Rec(0x00FC, Concat(BitConverter.GetBytes(1), BitConverter.GetBytes(1), U16(5), [0], Encoding.Latin1.GetBytes("Hello")));
-        byte[] Globals(int sheetOffset) => Concat(bof(5), encrypted ? Rec(0x002F, U16(0, 0, 0)) : [], sst,
+        byte[] Globals(int sheetOffset) => Concat(bof(5), encrypted ? Rec(0x002F, U16(0, 0, 0)) : [], sst, globals ?? [],
             Rec(0x0085, Concat(BitConverter.GetBytes(sheetOffset), [0, 0, 4, 0], Encoding.Latin1.GetBytes("Data"))), Rec(0x000A));
         int offset = Globals(0).Length;
         var sheet = Concat(bof(0x10),
@@ -155,5 +155,27 @@ public class XlsReaderTests
         Assert.Equal("Boxed", string.Concat(Assert.Single(box.Paragraphs).Runs.Select(r => r.Text)));
         Assert.Equal(HorizontalAlignment.Center, box.Paragraphs[0].Alignment);
         Assert.Equal(ShapeTextAnchor.Middle, box.TextAnchor);
+    }
+
+    [Fact]
+    public void A_picture_shape_shows_its_blip_and_a_quarter_turned_shape_swaps_its_anchor_box()
+    {
+        var png = PngTestEncoder.Encode(1, 1, 2, 8, [255, 0, 0]);
+        var blip = Escher(0x6E0 << 4, 0xF01E, new byte[17], png);
+        var fbse = Escher(6 << 4 | 2, 0xF007, new byte[36], blip);
+        var group = Rec(0x00EB, Escher(0xF, 0xF000, Escher(1 << 4 | 0xF, 0xF001, fbse)));
+        byte[] Shape(int type, int pid, uint value) => Escher(0xF, 0xF004,
+            Escher(type << 4 | 2, 0xF00A, BitConverter.GetBytes(1025), BitConverter.GetBytes(0xA00)),
+            Escher(1 << 4 | 3, 0xF00B, U16(pid), BitConverter.GetBytes(value)),
+            Escher(0, 0xF010, U16(2, 0, 0, 0, 0, 4, 0, 1, 0)), Escher(0, 0xF011));
+        var dg = Escher(0xF, 0xF002, Escher(0xF, 0xF003, Shape(75, 0x4104, 1), Shape(1, 0x0004, 90u << 16)));
+        var records = Concat(Rec(0x00EC, dg), Rec(0x005D, U16(0x15, 0x12, 8, 1, 0x6011)), Rec(0x005D, U16(0x15, 0x12, 2, 2, 0x6011)));
+        var sheet = XlsReader.Read(new MemoryStream(Cfb("Workbook", Workbook(setup: records, globals: group)))).Sheets[0];
+        Assert.Equal(ImageFormat.Png, Assert.Single(sheet.Images).Image.Format);
+        var turned = Assert.Single(sheet.Shapes);
+        Assert.Equal(-90, turned.Rotation);
+        double w = 4 * sheet.ColumnWidth(0), h = sheet.RowHeight(0);
+        Assert.Equal(h / w, turned.Frame.Width, 6);
+        Assert.Equal(w / h, turned.Frame.Height, 6);
     }
 }

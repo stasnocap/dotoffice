@@ -12,6 +12,8 @@ internal sealed partial class XlsContext
 {
     private const int MaxDrawingBytes = 64 << 20, MaxShapes = 10_000;
 
+    private readonly List<ImageData?> _pictures = [];
+
     private sealed record TextBox(string Text, List<(int At, int Font)> Runs, int Options);
 
     private sealed class Drawing
@@ -34,7 +36,7 @@ internal sealed partial class XlsContext
         {
             if (depth > 32) return;
             (Anchor, FrameFraction, Rect)? own = null;
-            foreach (var (type, inst, body, length) in Children(escher, start, end))
+            foreach (var (type, inst, body, length) in OfficeArt.Records(escher, start, end))
             {
                 if (type == 0xF002) { Visit(body, body + length, group, depth + 1); continue; }
                 if (type == 0xF003) { Visit(body, body + length, own ?? group, depth + 1); continue; }
@@ -49,8 +51,13 @@ internal sealed partial class XlsContext
                 if (place is not { } p) continue;
                 if (shape.Group) { if (own is null && shape.GroupRect is { } space) own = (p.Anchor, p.Frame, space); continue; }
                 if (sheet.Shapes.Count >= MaxShapes || objFlags is { } f && (f & 0x10) == 0) continue; // fPrint off: not printed
+                if ((objType == 8 || objType is null && shape.Type == 75) && PictureOf(shape) is { } picture)
+                {
+                    if (sheet.Images.Count < MaxShapes) sheet.Images.Add(Placed(new SheetImage { Image = picture, ZOrder = z++ }, sheet, shape, p.Anchor, p.Frame));
+                    continue;
+                }
                 if (objType is not (1 or 2 or 3 or 6 or 7 or 0x0B or 0x0C or 0x0E) && !(objType is null && text is not null)) continue;
-                sheet.Shapes.Add(BuildShape(sheet, shape, p.Anchor, p.Frame, objType, text, z++));
+                sheet.Shapes.Add(Placed(BuildShape(sheet, shape, objType, text, z++), sheet, shape, p.Anchor, p.Frame));
             }
         }
     }
@@ -74,26 +81,12 @@ internal sealed partial class XlsContext
         return new FrameFraction((child.Left - space.Left) / w, (child.Top - space.Top) / h, (child.Right - child.Left) / w, (child.Bottom - child.Top) / h);
     }
 
-    private static IEnumerable<(int Type, int Inst, int Body, int Length)> Children(byte[] escher, int start, int end)
-    {
-        int at = start;
-        while (at + 8 <= end)
-        {
-            int verInst = BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(at)), type = BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(at + 2));
-            long length = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(at + 4));
-            int body = at + 8;
-            if (length > end - body) length = end - body;
-            yield return (type, verInst >> 4, body, (int)length);
-            at = body + (int)length;
-        }
-    }
-
     private static EscherShape ReadShape(byte[] escher, int start, int end)
     {
         var shape = new EscherShape();
         Rect ReadRect(int at) => new(BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 4)),
             BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 8)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 12)));
-        foreach (var (type, inst, body, length) in Children(escher, start, end))
+        foreach (var (type, inst, body, length) in OfficeArt.Records(escher, start, end))
         {
             switch (type)
             {
@@ -123,14 +116,8 @@ internal sealed partial class XlsContext
         return shape;
     }
 
-    private SheetShape BuildShape(Worksheet sheet, EscherShape shape, Anchor a, FrameFraction frame, int? objType, TextBox? text, int z)
+    private SheetShape BuildShape(Worksheet sheet, EscherShape shape, int? objType, TextBox? text, int z)
     {
-        // Offsets are 1/1024 of the column's width and 1/256 of the row's height.
-        AnchorPoint Point(int col, int dx, int row, int dy)
-        {
-            col = Math.Clamp(col, 0, MaxColumns - 1); row = Math.Clamp(row, 0, MaxRows - 1);
-            return new AnchorPoint(col, row, Math.Min(dx, 1024) / 1024.0 * sheet.ColumnWidth(col), Math.Min(dy, 256) / 256.0 * sheet.RowHeight(row));
-        }
         var props = shape.Properties;
         uint Prop(int id, uint fallback) => props.TryGetValue(id, out var v) ? v : fallback;
         bool Bool(int id, uint bit, bool fallback) => props.TryGetValue(id, out var v) && (v & (bit << 16)) != 0 ? (v & bit) != 0 : fallback;
@@ -156,11 +143,6 @@ internal sealed partial class XlsContext
         }
         return new SheetShape
         {
-            Anchor = ImageAnchorKind.TwoCell,
-            From = Point(a.Col1, a.Dx1, a.Row1, a.Dy1),
-            To = Point(a.Col2, a.Dx2, a.Row2, a.Dy2),
-            Frame = frame,
-            FlipH = shape.FlipH, FlipV = shape.FlipV,
             Geometry = geometry,
             Fill = filled ? EscherColor(Prop(0x181, 0xFFFFFF), Color.White) : null,
             LineColor = lined ? EscherColor(Prop(0x1C0, 0), new Color(0, 0, 0)) : null,
@@ -173,6 +155,58 @@ internal sealed partial class XlsContext
             WrapText = Prop(0x85, 0) != 2,
             ZOrder = z,
         };
+    }
+
+    /// <summary>
+    /// Places an object at its cell anchor. Offsets are 1/1024 of the column's width and 1/256 of the row's height. A shape turned by
+    /// 45° to 135° (or 225° to 315°) keeps the anchor of its turned bounds, so its own frame is that box with width and height swapped.
+    /// </summary>
+    private static T Placed<T>(T item, Worksheet sheet, EscherShape shape, Anchor a, FrameFraction frame) where T : SheetObject
+    {
+        AnchorPoint Point(int col, int dx, int row, int dy)
+        {
+            col = Math.Clamp(col, 0, MaxColumns - 1); row = Math.Clamp(row, 0, MaxRows - 1);
+            return new AnchorPoint(col, row, Math.Min(dx, 1024) / 1024.0 * sheet.ColumnWidth(col), Math.Min(dy, 256) / 256.0 * sheet.RowHeight(row));
+        }
+        var from = Point(a.Col1, a.Dx1, a.Row1, a.Dy1);
+        var to = Point(a.Col2, a.Dx2, a.Row2, a.Dy2);
+        double rotation = shape.Properties.TryGetValue(0x0004, out var r) ? (int)r / 65536.0 : 0;
+        if (!double.IsFinite(rotation) || Math.Abs(rotation) > 36_000) rotation = 0;
+        double turn = ((rotation % 360) + 360) % 360;
+        if (turn is >= 45 and < 135 or >= 225 and < 315)
+        {
+            double w = Distance(from.Column, to.Column, sheet.ColumnWidth) + to.ColumnOffset - from.ColumnOffset;
+            double h = Distance(from.Row, to.Row, sheet.RowHeight) + to.RowOffset - from.RowOffset;
+            w *= frame.Width; h *= frame.Height;
+            if (w > 0 && h > 0) frame = frame.Within(new FrameFraction((1 - h / w) / 2, (1 - w / h) / 2, h / w, w / h));
+        }
+        return item with
+        {
+            Anchor = ImageAnchorKind.TwoCell, From = from, To = to, Frame = frame,
+            FlipH = shape.FlipH, FlipV = shape.FlipV,
+            Rotation = -rotation, // clockwise in the file, counter-clockwise in the model
+        };
+    }
+
+    private static double Distance(int first, int last, Func<int, double> size)
+    {
+        double total = 0;
+        for (int i = first; i < last && i - first < 100_000; i++) total += size(i);
+        return total;
+    }
+
+    private ImageData? PictureOf(EscherShape shape) =>
+        shape.Properties.TryGetValue(0x0104, out var pib) && pib >= 1 && pib <= _pictures.Count ? _pictures[(int)pib - 1] : null;
+
+    /// <summary>The MSODRAWINGGROUP record (with its CONTINUE records) in the workbook globals: the pictures the sheets' shapes refer to.</summary>
+    private int ReadDrawingGroup(int index)
+    {
+        var escher = new List<byte>();
+        int last = index;
+        escher.AddRange(Data(_records[index]));
+        while (last + 1 < _records.Count && _records[last + 1].Id is 0x003C or 0x00EB && escher.Count < MaxDrawingBytes) escher.AddRange(Data(_records[++last]));
+        _pictures.AddRange(OfficeArt.ReadStore(escher.ToArray()));
+        return last;
     }
 
     private List<ShapeParagraph> Paragraphs(TextBox text, HorizontalAlignment align)

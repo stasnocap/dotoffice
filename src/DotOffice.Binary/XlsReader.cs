@@ -92,6 +92,7 @@ internal sealed partial class XlsContext(byte[] data, BinaryReaderOptions option
                 case 0x00E0: ReadXf(d); break;
                 case 0x0092: ReadPalette(d); break;
                 case 0x00FC: i = ReadSst(i); break;
+                case 0x00EB: i = ReadDrawingGroup(i); break;
                 case 0x0085:
                     if (d.Length >= 8)
                     {
