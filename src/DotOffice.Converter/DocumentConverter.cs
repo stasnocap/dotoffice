@@ -9,7 +9,7 @@ using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
 
-public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods, Odt, Odp, Xls }
+public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods, Odt, Odp, Xls, Doc }
 
 public sealed class ConvertOptions
 {
@@ -90,7 +90,9 @@ public static class DocumentConverter
         }
         else
         {
-            var document = from == DocumentFormat.Odt
+            var document = from == DocumentFormat.Doc
+                ? DocReader.Read(source, new BinaryReaderOptions { Warnings = options.Warnings, MaxFileSize = options.MaxUncompressedSize })
+                : from == DocumentFormat.Odt
                 ? OdtReader.Read(source, new OdfReaderOptions { Warnings = options.Warnings, MaxTotalUncompressedSize = options.MaxUncompressedSize })
                 : DocxReader.Read(source, new DocxReaderOptions
                 {
@@ -118,7 +120,7 @@ public static class DocumentConverter
 
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods or DocumentFormat.Odt or DocumentFormat.Odp or DocumentFormat.Xls) || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods or DocumentFormat.Odt or DocumentFormat.Odp or DocumentFormat.Xls or DocumentFormat.Doc) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 
@@ -132,6 +134,7 @@ public static class DocumentConverter
             ".ods" or ".ots" or ".fods" => DocumentFormat.Ods,
             ".odt" or ".ott" or ".fodt" => DocumentFormat.Odt,
             ".odp" or ".otp" or ".fodp" => DocumentFormat.Odp,
+            ".doc" or ".dot" => DocumentFormat.Doc,
             ".xls" or ".xlt" => DocumentFormat.Xls,
             ".pdf" => DocumentFormat.Pdf,
             var ext => throw new NotSupportedException($"Unknown format '{ext}'."),
