@@ -329,8 +329,19 @@ public sealed partial class SheetLayoutEngine
         return paragraphs;
     }
 
+    // Thousands of cells can hold one and the same long string (a shared string); laying it out once is enough.
+    private readonly Dictionary<(string, RunProperties, bool, ParagraphAlignment, double, double, double), TextBlock> _longBlocks = [];
+
     /// <summary>Breaks a cell's text into lines; <paramref name="wrapWidth"/> is the text width for wrapping cells.</summary>
     private TextBlock BuildBlock(Cell cell, string text, double wrapWidth, double leftIndent = 0, double firstLineIndent = 0)
+    {
+        if (text.Length < 1000 || cell.Runs is { Count: > 0 }) return BuildBlockUncached(cell, text, wrapWidth, leftIndent, firstLineIndent);
+        var key = (text, cell.Style.Font, cell.Style.Wrap && cell.Kind == CellValueKind.Text, AlignmentOf(cell), wrapWidth, leftIndent, firstLineIndent);
+        if (!_longBlocks.TryGetValue(key, out var cached)) _longBlocks[key] = cached = BuildBlockUncached(cell, text, wrapWidth, leftIndent, firstLineIndent);
+        return cached;
+    }
+
+    private TextBlock BuildBlockUncached(Cell cell, string text, double wrapWidth, double leftIndent, double firstLineIndent)
     {
         var font = cell.Style.Font;
         bool wrap = cell.Style.Wrap && cell.Kind == CellValueKind.Text;

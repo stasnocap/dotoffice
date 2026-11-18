@@ -900,8 +900,30 @@ internal sealed class XlsxContext(OpcPackage package, XlsxReaderOptions options,
 
     private static CellStyle WithColor(CellStyle style, Color? color) => color is { } c ? style with { Font = style.Font with { Color = c } } : style;
 
+    /// <summary>Excel holds at most 32767 characters in a cell and shows far fewer (a row is at most 409.5 pt tall); a hostile file with a megabyte-long string in thousands of cells would stall the line breaker.</summary>
+    private const int MaxCellText = 4096;
+
+    private static RichString Clamp(RichString rich)
+    {
+        if (rich.Text.Length <= MaxCellText) return rich;
+        List<RichRun>? runs = null;
+        if (rich.Runs is { } all)
+        {
+            runs = [];
+            int used = 0;
+            foreach (var run in all)
+            {
+                if (used >= MaxCellText) break;
+                runs.Add(run.Text.Length + used > MaxCellText ? run with { Text = run.Text[..(MaxCellText - used)] } : run);
+                used += run.Text.Length;
+            }
+        }
+        return new RichString(rich.Text[..MaxCellText], runs);
+    }
+
     private Cell TextCell(RichString rich, CellFormat format)
     {
+        rich = Clamp(rich);
         var code = CodeOf(format);
         // Runs are kept only when the text is shown as it is; a text format (e.g. "@" with literals) rewrites it.
         if (code == "General") return new Cell { Text = rich.Text, Runs = ResolveRuns(rich, format.Style.Font), Kind = CellValueKind.Text, Style = format.Style, IsEmptyString = rich.Text.Length == 0 };

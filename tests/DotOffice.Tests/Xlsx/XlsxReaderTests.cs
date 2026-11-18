@@ -156,6 +156,13 @@ public class XlsxReaderTests
     }
 
     [Fact]
+    public void A_megabyte_string_is_cut_to_what_a_cell_can_show()
+    {
+        var wb = Read(new XlsxBuilder().AddSheet("S", Row(1, XlsxBuilder.Inline("A1", new string('x', 1_000_000)))));
+        Assert.Equal(4096, At(wb.Sheets[0], 0, 0).Text.Length);
+    }
+
+    [Fact]
     public void Decodes_excel_escapes()
     {
         var wb = Read(new XlsxBuilder { SharedStrings = "<si><t>a_x000D_b_x005F_c</t></si>" }.AddSheet("S", Row(1, S("A1", 0))));
