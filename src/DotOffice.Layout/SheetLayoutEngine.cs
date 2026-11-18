@@ -1386,7 +1386,9 @@ public sealed partial class SheetLayoutEngine
             for (int i = 0; i < block.Lines.Count; i++, lineTop += block.Metrics[i - 1].Pitch)
             {
                 var (pitch, ascent, descent) = block.Metrics[i];
-                if (lineTop < y - 0.5 || lineTop + pitch > y + height + 0.5) continue; // outside the cell vertically
+                // outside the cell vertically; a lone line taller than its row is still drawn (Excel clips it to the cell)
+                bool outside = lineTop < y - 0.5 || lineTop + pitch > y + height + 0.5;
+                if (outside && (block.Lines.Count > 1 || lineTop >= y + height || lineTop + pitch <= y)) continue;
                 var line = block.Lines[i];
                 if (line.Atoms.Count == 0) continue;
                 double baseline = lineTop + (pitch - (ascent + descent)) / 2 + ascent;

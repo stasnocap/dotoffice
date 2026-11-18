@@ -970,6 +970,13 @@ public class SheetRotationTests
     }
 
     [Fact]
+    public void A_single_line_taller_than_its_row_is_still_drawn()
+    {
+        var (page, _) = Run(SheetLayoutTests.Text("Pet"), s => s.RowHeights[0] = 10);
+        Assert.Equal(["Pet"], page.Items.OfType<TextItem>().Select(t => t.Text));
+    }
+
+    [Fact]
     public void Stacked_text_puts_each_character_on_its_own_upright_line()
     {
         var cell = SheetLayoutTests.Text("ABC", SheetLayoutTests.Style(s => s.Stacked = true));
