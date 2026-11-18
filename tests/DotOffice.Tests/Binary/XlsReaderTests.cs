@@ -63,7 +63,7 @@ public class XlsReaderTests
         return file;
     }
 
-    private static byte[] Workbook(bool encrypted = false)
+    private static byte[] Workbook(bool encrypted = false, byte[]? setup = null)
     {
         var bof = (int type) => Rec(0x0809, U16(0x0600, type, 0, 0, 0, 0, 0, 0));
         var sst = Rec(0x00FC, Concat(BitConverter.GetBytes(1), BitConverter.GetBytes(1), U16(5), [0], Encoding.Latin1.GetBytes("Hello")));
@@ -75,6 +75,7 @@ public class XlsReaderTests
             Rec(0x0203, Concat(U16(0, 1, 0), BitConverter.GetBytes(3.5))),
             Rec(0x027E, Concat(U16(1, 0, 0), BitConverter.GetBytes((12 << 2) | 2 | 1))), // RK: 12 / 100
             Rec(0x00E5, Concat(U16(1), U16(2, 3, 0, 1))),
+            setup ?? [],
             Rec(0x000A));
         var all = Concat(Globals(offset), sheet);
         // Compound files keep streams under 4096 bytes in the mini stream, which this helper does not build.
@@ -108,4 +109,24 @@ public class XlsReaderTests
     [Fact]
     public void RejectsStreamsLargerThanTheLimit() =>
         Assert.Throws<InvalidDataException>(() => XlsReader.Read(new MemoryStream(Cfb("Workbook", Workbook())), new BinaryReaderOptions { MaxStreamSize = 1000 }));
+
+    private static byte[] Setup(int flags) =>
+        Rec(0x00A1, Concat(U16(9, 255, 1, 1, 1, flags, 600, 600), BitConverter.GetBytes(0.5), BitConverter.GetBytes(0.5), U16(1)));
+
+    [Fact]
+    public void UsesThePageSetupScaleAndOrientation()
+    {
+        var setup = XlsReader.Read(new MemoryStream(Cfb("Workbook", Workbook(setup: Setup(0))))).Sheets[0].PageSetup;
+        Assert.Equal(2.55, setup.Scale);
+        Assert.Equal(Orientation.Landscape, setup.Orientation);
+    }
+
+    [Fact]
+    public void IgnoresPrinterFieldsMarkedAsUnset()
+    {
+        // fNoPls: paper, scale and orientation were never set; a stray 255 % scale must not blow the sheet up to hundreds of pages.
+        var setup = XlsReader.Read(new MemoryStream(Cfb("Workbook", Workbook(setup: Setup(4))))).Sheets[0].PageSetup;
+        Assert.Equal(1, setup.Scale);
+        Assert.Equal(Orientation.Portrait, setup.Orientation);
+    }
 }

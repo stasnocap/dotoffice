@@ -488,8 +488,13 @@ internal sealed class XlsContext(byte[] data, BinaryReaderOptions options)
                     break;
                 }
                 case 0x00A1 when d.Length >= 34:
-                    paper = U16(d, 0); scale = U16(d, 2); fitW = U16(d, 6); fitH = U16(d, 8);
-                    landscape = (U16(d, 10) & 2) == 0 && (U16(d, 10) & 0x40) == 0;
+                    // fNoPls (0x04): the printer fields (paper, scale, orientation) were never set and hold junk; Excel uses its defaults.
+                    fitW = U16(d, 6); fitH = U16(d, 8);
+                    if ((U16(d, 10) & 4) == 0)
+                    {
+                        paper = U16(d, 0); scale = U16(d, 2);
+                        landscape = (U16(d, 10) & 2) == 0 && (U16(d, 10) & 0x40) == 0;
+                    }
                     headerMargin = BitConverter.ToDouble(d[16..24]); footerMargin = BitConverter.ToDouble(d[24..32]);
                     if ((U16(d, 10) & 1) != 0) setup.PageOrderOverThenDown = true;
                     break;
