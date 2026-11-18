@@ -49,7 +49,14 @@ public sealed partial class SheetLayoutEngine
             if (sheet.Visibility != SheetVisibility.Visible) continue;
             new SheetPass(this, sheet, document, records, cancellationToken).Run();
         }
-        if (document.Pages.Count == 0) document.Pages.Add(new LayoutPage(612, 792));
+        if (document.Pages.Count == 0)
+        {
+            // Nothing to print: LibreOffice still prints one page of the first visible sheet, with its paper and its header and footer.
+            var first = workbook.Sheets.FirstOrDefault(s => s.Visibility == SheetVisibility.Visible);
+            var page = first is null ? new LayoutPage(612, 792) : new LayoutPage(first.PageSetup.PageWidth, first.PageSetup.PageHeight);
+            document.Pages.Add(page);
+            if (first is not null) records.Add(new PageRecord(page, first, 0));
+        }
 
         // Page numbers continue across sheets, so headers and footers wait until the total is known.
         // A sheet may restart the numbering at its own first page number; the pages after it continue from there.

@@ -704,6 +704,16 @@ public class SheetHeaderFooterTests
     }
 
     [Fact]
+    public void An_empty_workbook_prints_one_page_with_the_first_sheets_header()
+    {
+        var sheet = new Worksheet("S");
+        sheet.PageSetup.Header = new HeaderFooterText { Odd = new HeaderFooterParts("", "head", "") };
+        var document = SheetLayoutTests.Layout(sheet);
+        Assert.Single(document.Pages);
+        Assert.Contains(document.Pages[0].Items.OfType<TextItem>(), t => t.Text == "head");
+    }
+
+    [Fact]
     public void Footers_sit_above_the_bottom_edge_and_headers_below_the_top_edge()
     {
         var sheet = WithText("S");
