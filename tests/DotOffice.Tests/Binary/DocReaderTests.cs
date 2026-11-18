@@ -109,4 +109,26 @@ public class DocReaderTests
         Assert.Equal("Page [Page]", Text(section.DefaultFooter?.Blocks));
         Assert.Null(section.FirstHeader);
     }
+
+    private static byte[] Escher(int verInst, int type, params byte[][] body)
+    {
+        var data = body.SelectMany(b => b).ToArray();
+        return [.. BitConverter.GetBytes((ushort)verInst), .. BitConverter.GetBytes((ushort)type), .. BitConverter.GetBytes(data.Length), .. data];
+    }
+
+    [Fact]
+    public void A_text_box_anchored_in_the_text_floats_with_its_story_and_position()
+    {
+        const string body = "\x08\r", inside = "Inside\r";
+        var sp = Escher(0xF, 0xF004, Escher(202 << 4 | 2, 0xF00A, BitConverter.GetBytes(1026), BitConverter.GetBytes(0xA00)),
+            Escher(2 << 4 | 3, 0xF00B, BitConverter.GetBytes((ushort)0x80), BitConverter.GetBytes(0x10000), BitConverter.GetBytes((ushort)0x390), BitConverter.GetBytes(1)));
+        byte[] art = [.. Escher(0xF, 0xF000), 0, .. Escher(0xF, 0xF002, Escher(0xF, 0xF003, sp))];
+        byte[] spa = [.. new[] { 0, 2, 1026, 200, 400, 2200, 1400 }.SelectMany(BitConverter.GetBytes), 0, 0, 0, 0, 0, 0];
+        byte[] txbx = [.. new[] { 0, inside.Length, inside.Length + 1 }.SelectMany(BitConverter.GetBytes), .. new byte[44]];
+        var doc = DocReader.Read(new MemoryStream(Doc(body + inside + "\r", [body.Length, 0, 0, 0, 0, 0, inside.Length + 1], (40, spa), (50, art), (56, txbx))));
+        var box = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<FloatingTextBox>());
+        Assert.Equal((100, 50), (box.Width, box.Height));
+        Assert.Equal(new FloatPosition(FloatReference.Page, FloatAlignment.Offset, 10), box.Horizontal);
+        Assert.Equal("Inside", Text(box.Blocks));
+    }
 }

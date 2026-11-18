@@ -30,7 +30,7 @@ public static class DocReader
     }
 }
 
-internal sealed class DocContext(byte[] main, byte[] table)
+internal sealed partial class DocContext(byte[] main, byte[] table)
 {
     private const int MaxChars = 50_000_000, MaxBlocks = 2_000_000;
 
@@ -109,6 +109,7 @@ internal sealed class DocContext(byte[] main, byte[] table)
         for (int k = 3; k <= 10; k++) total += Math.Max(Lw(k), 0);
         _text = ReadText((int)Math.Min(total, MaxChars));
         _textLength = Math.Min(textLength, _text.Length);
+        ReadDrawings();
         return Build(0, _textLength, story: false);
     }
 
@@ -781,7 +782,10 @@ internal sealed class DocContext(byte[] main, byte[] table)
                     inlines.Add(new Tab(Props(chp)));
                     continue;
                 }
-                case '\x01' or '\x02' or '\x08' or '\x05' or '\x0E' or '\x0F': continue; // anchors of pictures, notes and drawings
+                case '\x08':
+                    if (FloatingAt(cp, Props(ChpAt(cp, PapAt(cp)))) is { } floating) { Flush(); inlines.Add(floating); }
+                    continue;
+                case '\x01' or '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of pictures and notes
             }
             if (c == '\u001E') c = '-';
             else if (c == '\u001F') continue;

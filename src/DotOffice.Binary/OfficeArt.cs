@@ -13,7 +13,7 @@ internal static class OfficeArt
     /// The pictures of a DggContainer's BStoreContainer, in order (shapes refer to them by 1-based index); null where a picture is
     /// missing, kept outside the record (a delay stream) or in a format that is not read.
     /// </summary>
-    public static List<ImageData?> ReadStore(byte[] escher)
+    public static List<ImageData?> ReadStore(byte[] escher, byte[]? delay = null)
     {
         var result = new List<ImageData?>();
         foreach (var (type, _, body, length) in Records(escher, 0, escher.Length))
@@ -31,6 +31,10 @@ internal static class OfficeArt
                     {
                         int at = bb + 36 + escher[bb + 33];
                         foreach (var blip in Records(escher, at, bb + bl)) { image = Decode(escher, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
+                        // Word keeps the BLIP in its WordDocument stream, at the FBSE's foDelay.
+                        long foDelay = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(bb + 28));
+                        if (image is null && at >= bb + bl && delay is not null && foDelay + 8 <= delay.Length)
+                            foreach (var blip in Records(delay, (int)foDelay, delay.Length)) { image = Decode(delay, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
                     }
                     result.Add(image);
                     if (result.Count > 100_000) return result;
@@ -113,4 +117,56 @@ internal static class OfficeArt
             at = body + (int)length;
         }
     }
+
+    public readonly record struct Rect(int Left, int Top, int Right, int Bottom);
+
+    public sealed class EscherShape
+    {
+        public int Type;
+        public bool Group, Patriarch, FlipH, FlipV, HasClientData, HasTextbox;
+        public int Spid, ClientAnchorAt = -1, ClientAnchorLength;
+        public Rect? ChildRect, GroupRect;
+        public readonly Dictionary<int, uint> Properties = [];
+    }
+
+    public static FrameFraction Relative(Rect child, Rect space)
+    {
+        double w = space.Right - space.Left, h = space.Bottom - space.Top;
+        if (w <= 0 || h <= 0) return FrameFraction.Whole;
+        return new FrameFraction((child.Left - space.Left) / w, (child.Top - space.Top) / h, (child.Right - child.Left) / w, (child.Bottom - child.Top) / h);
+    }
+
+    public static EscherShape ReadShape(byte[] escher, int start, int end)
+    {
+        var shape = new EscherShape();
+        Rect ReadRect(int at) => new(BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 4)),
+            BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 8)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 12)));
+        foreach (var (type, inst, body, length) in Records(escher, start, end))
+        {
+            switch (type)
+            {
+                case 0xF009 when length >= 16: shape.GroupRect = ReadRect(body); break;
+                case 0xF00A when length >= 8:
+                    uint flags = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(body + 4));
+                    shape.Type = inst;
+                    shape.Spid = BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(body));
+                    shape.Group = (flags & 1) != 0; shape.Patriarch = (flags & 4) != 0;
+                    shape.FlipH = (flags & 0x40) != 0; shape.FlipV = (flags & 0x80) != 0;
+                    break;
+                case 0xF00B or 0xF122:
+                    for (int i = 0; i < inst && body + 6 * i + 6 <= body + length; i++)
+                    {
+                        int id = BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(body + 6 * i));
+                        if ((id & 0x8000) == 0) shape.Properties[id & 0x3FFF] = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(body + 6 * i + 2));
+                    }
+                    break;
+                case 0xF00F when length >= 16: shape.ChildRect = ReadRect(body); break;
+                case 0xF010: (shape.ClientAnchorAt, shape.ClientAnchorLength) = (body, length); break;
+                case 0xF011: shape.HasClientData = true; break;
+                case 0xF00D: shape.HasTextbox = true; break;
+            }
+        }
+        return shape;
+    }
+
 }

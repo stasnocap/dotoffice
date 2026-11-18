@@ -32,22 +32,22 @@ internal sealed partial class XlsContext
         Visit(0, escher.Length, null, 0);
 
         // A group's children are placed in the group's own coordinates (its Spgr rectangle) and take its anchor.
-        void Visit(int start, int end, (Anchor Anchor, FrameFraction Frame, Rect Space)? group, int depth)
+        void Visit(int start, int end, (Anchor Anchor, FrameFraction Frame, OfficeArt.Rect Space)? group, int depth)
         {
             if (depth > 32) return;
-            (Anchor, FrameFraction, Rect)? own = null;
+            (Anchor, FrameFraction, OfficeArt.Rect)? own = null;
             foreach (var (type, inst, body, length) in OfficeArt.Records(escher, start, end))
             {
                 if (type == 0xF002) { Visit(body, body + length, group, depth + 1); continue; }
                 if (type == 0xF003) { Visit(body, body + length, own ?? group, depth + 1); continue; }
                 if (type != 0xF004) continue;
-                var shape = ReadShape(escher, body, body + length);
+                var shape = OfficeArt.ReadShape(escher, body, body + length);
                 int? objType = null, objFlags = null;
                 if (shape.HasClientData && obj < drawing.Objects.Count) (objType, objFlags) = drawing.Objects[obj++];
                 TextBox? text = shape.HasTextbox && txo < drawing.Texts.Count ? drawing.Texts[txo++] : null;
                 if (shape.Patriarch) continue;
-                (Anchor Anchor, FrameFraction Frame)? place = shape.Anchor is { } a ? (a, FrameFraction.Whole)
-                    : shape.ChildRect is { } c && group is { } g ? (g.Anchor, g.Frame.Within(Relative(c, g.Space))) : null;
+                (Anchor Anchor, FrameFraction Frame)? place = AnchorOf(escher, shape) is { } a ? (a, FrameFraction.Whole)
+                    : shape.ChildRect is { } c && group is { } g ? (g.Anchor, g.Frame.Within(OfficeArt.Relative(c, g.Space))) : null;
                 if (place is not { } p) continue;
                 if (shape.Group) { if (own is null && shape.GroupRect is { } space) own = (p.Anchor, p.Frame, space); continue; }
                 if (sheet.Shapes.Count >= MaxShapes || objFlags is { } f && (f & 0x10) == 0) continue; // fPrint off: not printed
@@ -63,60 +63,16 @@ internal sealed partial class XlsContext
     }
 
     private readonly record struct Anchor(int Col1, int Dx1, int Row1, int Dy1, int Col2, int Dx2, int Row2, int Dy2);
-    private readonly record struct Rect(int Left, int Top, int Right, int Bottom);
 
-    private sealed class EscherShape
+    /// <summary>An .xls client anchor: flags, then the first and last column and row, each with its offset.</summary>
+    private static Anchor? AnchorOf(byte[] escher, OfficeArt.EscherShape shape)
     {
-        public int Type;
-        public bool Group, Patriarch, FlipH, FlipV, HasClientData, HasTextbox;
-        public Anchor? Anchor;
-        public Rect? ChildRect, GroupRect;
-        public readonly Dictionary<int, uint> Properties = [];
+        if (shape.ClientAnchorAt < 0 || shape.ClientAnchorLength < 18) return null;
+        int U(int k) => BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(shape.ClientAnchorAt + 2 + 2 * k));
+        return new Anchor(U(0), U(1), U(2), U(3), U(4), U(5), U(6), U(7));
     }
 
-    private static FrameFraction Relative(Rect child, Rect space)
-    {
-        double w = space.Right - space.Left, h = space.Bottom - space.Top;
-        if (w <= 0 || h <= 0) return FrameFraction.Whole;
-        return new FrameFraction((child.Left - space.Left) / w, (child.Top - space.Top) / h, (child.Right - child.Left) / w, (child.Bottom - child.Top) / h);
-    }
-
-    private static EscherShape ReadShape(byte[] escher, int start, int end)
-    {
-        var shape = new EscherShape();
-        Rect ReadRect(int at) => new(BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 4)),
-            BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 8)), BinaryPrimitives.ReadInt32LittleEndian(escher.AsSpan(at + 12)));
-        foreach (var (type, inst, body, length) in OfficeArt.Records(escher, start, end))
-        {
-            switch (type)
-            {
-                case 0xF009 when length >= 16: shape.GroupRect = ReadRect(body); break;
-                case 0xF00A when length >= 8:
-                    uint flags = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(body + 4));
-                    shape.Type = inst;
-                    shape.Group = (flags & 1) != 0; shape.Patriarch = (flags & 4) != 0;
-                    shape.FlipH = (flags & 0x40) != 0; shape.FlipV = (flags & 0x80) != 0;
-                    break;
-                case 0xF00B:
-                    for (int i = 0; i < inst && body + 6 * i + 6 <= body + length; i++)
-                    {
-                        int id = BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(body + 6 * i));
-                        if ((id & 0x8000) == 0) shape.Properties[id & 0x3FFF] = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(body + 6 * i + 2));
-                    }
-                    break;
-                case 0xF00F when length >= 16: shape.ChildRect = ReadRect(body); break;
-                case 0xF010 when length >= 18:
-                    int U(int k) => BinaryPrimitives.ReadUInt16LittleEndian(escher.AsSpan(body + 2 + 2 * k));
-                    shape.Anchor = new Anchor(U(0), U(1), U(2), U(3), U(4), U(5), U(6), U(7));
-                    break;
-                case 0xF011: shape.HasClientData = true; break;
-                case 0xF00D: shape.HasTextbox = true; break;
-            }
-        }
-        return shape;
-    }
-
-    private SheetShape BuildShape(Worksheet sheet, EscherShape shape, int? objType, TextBox? text, int z)
+    private SheetShape BuildShape(Worksheet sheet, OfficeArt.EscherShape shape, int? objType, TextBox? text, int z)
     {
         var props = shape.Properties;
         uint Prop(int id, uint fallback) => props.TryGetValue(id, out var v) ? v : fallback;
@@ -161,7 +117,7 @@ internal sealed partial class XlsContext
     /// Places an object at its cell anchor. Offsets are 1/1024 of the column's width and 1/256 of the row's height. A shape turned by
     /// 45° to 135° (or 225° to 315°) keeps the anchor of its turned bounds, so its own frame is that box with width and height swapped.
     /// </summary>
-    private static T Placed<T>(T item, Worksheet sheet, EscherShape shape, Anchor a, FrameFraction frame) where T : SheetObject
+    private static T Placed<T>(T item, Worksheet sheet, OfficeArt.EscherShape shape, Anchor a, FrameFraction frame) where T : SheetObject
     {
         AnchorPoint Point(int col, int dx, int row, int dy)
         {
@@ -195,7 +151,7 @@ internal sealed partial class XlsContext
         return total;
     }
 
-    private ImageData? PictureOf(EscherShape shape) =>
+    private ImageData? PictureOf(OfficeArt.EscherShape shape) =>
         shape.Properties.TryGetValue(0x0104, out var pib) && pib >= 1 && pib <= _pictures.Count ? _pictures[(int)pib - 1] : null;
 
     /// <summary>The MSODRAWINGGROUP record (with its CONTINUE records) in the workbook globals: the pictures the sheets' shapes refer to.</summary>
