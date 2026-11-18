@@ -1040,6 +1040,8 @@ public sealed partial class SheetLayoutEngine
 
         // ---- drawing
 
+        private Dictionary<int, KeyValuePair<(int Row, int Column), Cell>[]>? _cellsByRow;
+
         private void EmitPage(List<int> columns, List<int> rows, double scale)
         {
             var page = new LayoutPage(_setup.PageWidth, _setup.PageHeight);
@@ -1064,10 +1066,15 @@ public sealed partial class SheetLayoutEngine
 
             if (_setup.PrintGridLines) EmitGridLines(columns, rows, columnX, rowY, bandWidth, bandHeight, items);
 
-            var cells = _sheet.Cells
-                .Where(kv => columnX.ContainsKey(kv.Key.Column) && rowY.ContainsKey(kv.Key.Row))
-                .OrderBy(kv => kv.Key.Row).ThenBy(kv => kv.Key.Column)
-                .ToList();
+            // Look the page's cells up by row instead of filtering the whole sheet for every page, which made sheets of
+            // thousands of pages quadratic.
+            _cellsByRow ??= _sheet.Cells.GroupBy(kv => kv.Key.Row)
+                .ToDictionary(g => g.Key, g => g.OrderBy(kv => kv.Key.Column).ToArray());
+            var cells = new List<KeyValuePair<(int Row, int Column), Cell>>();
+            foreach (int r in rows.Distinct().Order())
+                if (_cellsByRow.TryGetValue(r, out var rowCells))
+                    foreach (var kv in rowCells)
+                        if (columnX.ContainsKey(kv.Key.Column)) cells.Add(kv);
 
             var drawn = new List<(Cell Cell, int Row, int Column, double X, double Y, double Width, double Height, CellRange? Merge)>();
             foreach (var ((row, column), cell) in cells)

@@ -1284,6 +1284,22 @@ public class SheetImageTests
     }
 
     [Fact]
+    public void A_sheet_of_many_pages_draws_each_cell_once_in_row_order()
+    {
+        // Cells are looked up per row for each page; every one must still be drawn exactly once, rows top to bottom.
+        var cells = new List<(int, int, Cell)>();
+        for (int r = 0; r < 600; r++)
+            for (int c = 0; c < 30; c++) cells.Add((r, c, SheetLayoutTests.Number($"{r * 30 + c}")));
+        var doc = SheetLayoutTests.Layout(SheetLayoutTests.Sheet([.. cells]));
+        Assert.True(doc.Pages.Count > 10);
+        var drawn = doc.Pages.SelectMany(p => p.Items.OfType<TextItem>()).Select(t => int.Parse(t.Text)).ToList();
+        Assert.Equal(600 * 30, drawn.Count);
+        Assert.Equal(600 * 30, drawn.Distinct().Count());
+        var firstPage = doc.Pages[0].Items.OfType<TextItem>().Select(t => int.Parse(t.Text)).ToList();
+        Assert.Equal(firstPage.Order(), firstPage);
+    }
+
+    [Fact]
     public void Pages_with_only_a_filled_cell_are_kept()
     {
         var doc = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("A")), (200, 0, new Cell { Style = SheetLayoutTests.Style(b => b.Fill = new Color(255, 0, 0)) })));
