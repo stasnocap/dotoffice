@@ -600,11 +600,71 @@ public sealed partial class SheetLayoutEngine
             var columnBands = Bands(columns, c => _sheet.ColumnWidth(c), pageWidth / scale, columnBreaks, titleColumns);
             var rowBands = Bands(rows, RowHeight, pageHeight / scale, rowBreaks, titleRows);
 
+            var used = UsedPages(columnBands, rowBands);
+            var columnIndex = columnBands.Select((b, i) => (b, i)).ToDictionary(p => p.b, p => p.i);
+            var rowIndex = rowBands.Select((b, i) => (b, i)).ToDictionary(p => p.b, p => p.i);
             foreach (var (columnBand, rowBand) in PageOrder(columnBands, rowBands))
             {
                 _ct.ThrowIfCancellationRequested();
+                if (used is not null && !used.Contains((columnIndex[columnBand], rowIndex[rowBand]))) continue;
                 EmitPage(columnBand, rowBand, scale);
             }
+        }
+
+        /// <summary>
+        /// The pages (column band, row band) that show something: a cell with a value, fill or border, a merge, or a drawing.
+        /// Excel and LibreOffice leave out blank pages, so one stray cell at the far corner of a sheet does not print every page
+        /// in between. Text that is not wrapped in a band's edge column may spill into the neighbouring band, which is kept too. Null keeps every page:
+        /// when gridlines are printed, or when nothing is found at all.
+        /// </summary>
+        private HashSet<(int Column, int Row)>? UsedPages(List<List<int>> columnBands, List<List<int>> rowBands)
+        {
+            if (_setup.PrintGridLines || columnBands.Count * rowBands.Count <= 1) return null;
+            var columnBand = new Dictionary<int, int>();
+            var rowBand = new Dictionary<int, int>();
+            for (int i = 0; i < columnBands.Count; i++) foreach (int c in columnBands[i]) columnBand.TryAdd(c, i);
+            for (int i = 0; i < rowBands.Count; i++) foreach (int r in rowBands[i]) rowBand.TryAdd(r, i);
+            var used = new HashSet<(int, int)>();
+            void Mark(int row, int column, bool spills)
+            {
+                if (!rowBand.TryGetValue(row, out int rb) || !columnBand.TryGetValue(column, out int cb)) return;
+                used.Add((cb, rb));
+                if (!spills) return;
+                // Text overflows from the band's last column into the next band, or (right-aligned or centred) from its first into the previous one.
+                if (cb + 1 < columnBands.Count && columnBands[cb][^1] == column) used.Add((cb + 1, rb));
+                if (cb > 0 && columnBands[cb].SkipWhile(c => !columnBand.TryGetValue(c, out int b) || b != cb).FirstOrDefault(-1) == column) used.Add((cb - 1, rb));
+            }
+            int BandAtOrAfter(Dictionary<int, int> map, int index, int last)
+            {
+                for (int i = index; i <= last; i++) if (map.TryGetValue(i, out int b)) return b;
+                return -1;
+            }
+            void MarkArea(int r1, int c1, int r2, int c2)
+            {
+                int rb1 = BandAtOrAfter(rowBand, Math.Max(r1, _range.FirstRow), Math.Min(r2, _range.LastRow));
+                int cb1 = BandAtOrAfter(columnBand, Math.Max(c1, _range.FirstColumn), Math.Min(c2, _range.LastColumn));
+                if (rb1 < 0 || cb1 < 0) return;
+                int rb2 = rb1, cb2 = cb1;
+                for (int r = Math.Min(r2, _range.LastRow); r >= r1; r--) if (rowBand.TryGetValue(r, out rb2)) break;
+                for (int c = Math.Min(c2, _range.LastColumn); c >= c1; c--) if (columnBand.TryGetValue(c, out cb2)) break;
+                for (int rb = rb1; rb <= rb2; rb++)
+                    for (int cb = cb1; cb <= cb2; cb++) used.Add((cb, rb));
+            }
+
+            foreach (var ((row, column), cell) in _sheet.Cells)
+            {
+                bool text = cell.Text.Length > 0 || cell.DataBar is not null || cell.Icon is not null;
+                if (!text && cell.Style.Fill is null && cell.Style.Gradient is null && !cell.Style.Borders.HasAny) continue;
+                Mark(row, column, text && !cell.Style.Wrap && cell.Kind == CellValueKind.Text);
+            }
+            foreach (var merge in _sheet.Merges) MarkArea(merge.FirstRow, merge.FirstColumn, merge.LastRow, merge.LastColumn);
+            foreach (var drawing in _sheet.Images.Cast<SheetObject>().Concat(_sheet.Shapes).Concat(_sheet.Charts))
+            {
+                // Only two-cell anchors give the covered cells directly; for the others keep every page.
+                if (drawing.Anchor != ImageAnchorKind.TwoCell) return null;
+                MarkArea(drawing.From.Row, drawing.From.Column, drawing.To.Row, drawing.To.Column);
+            }
+            return used.Count == 0 ? null : used;
         }
 
         private double RowHeight(int row) => _sheet.HiddenRows.Contains(row) ? 0 : _rowHeights.GetValueOrDefault(row, _sheet.DefaultRowHeight);

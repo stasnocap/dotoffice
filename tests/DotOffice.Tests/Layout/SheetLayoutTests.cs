@@ -1274,4 +1274,20 @@ public class SheetImageTests
     {
         Assert.Empty(SheetLayoutTests.Layout(SheetWith(TwoCell(2, 2, 2, 2))).Pages[0].Items.OfType<ImageItem>());
     }
+
+    [Fact]
+    public void Blank_pages_between_far_apart_cells_are_left_out()
+    {
+        // One cell at A1 and one at the last row and column of an .xls sheet: Excel and LibreOffice print 2 pages, not thousands.
+        var doc = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("Top Left")), (65535, 255, SheetLayoutTests.Text("Bottom Right"))));
+        Assert.Equal(2, doc.Pages.Count);
+    }
+
+    [Fact]
+    public void Pages_with_only_a_filled_cell_are_kept()
+    {
+        var doc = SheetLayoutTests.Layout(SheetLayoutTests.Sheet((0, 0, SheetLayoutTests.Text("A")), (200, 0, new Cell { Style = SheetLayoutTests.Style(b => b.Fill = new Color(255, 0, 0)) })));
+        Assert.True(doc.Pages.Count >= 2);
+        Assert.True(doc.Pages.Count < 6);
+    }
 }
