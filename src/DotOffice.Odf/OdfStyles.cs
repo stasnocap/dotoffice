@@ -14,6 +14,9 @@ internal static class Ns
     public static readonly XNamespace Fo = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0";
     public static readonly XNamespace Number = "urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0";
     public static readonly XNamespace Svg = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0";
+    public static readonly XNamespace Draw = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0";
+    public static readonly XNamespace Presentation = "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0";
+    public static readonly XNamespace XLink = "http://www.w3.org/1999/xlink";
 }
 
 /// <summary>ODF length and colour attribute parsing.</summary>
@@ -54,6 +57,10 @@ internal sealed class OdfStyles
     private readonly Dictionary<string, XElement> _listStyles = [];
     private readonly Dictionary<string, string> _fonts = [];
     private readonly Dictionary<string, XElement> _masters = [];
+    private readonly Dictionary<(string Kind, string Name), XElement> _resources = [];
+
+    /// <summary>A named drawing resource (<c>gradient</c>, <c>hatch</c>, <c>fill-image</c>, <c>stroke-dash</c>, <c>marker</c>) by its <c>draw:name</c>.</summary>
+    public XElement? Resource(string kind, string? name) => name is not null && _resources.TryGetValue((kind, name), out var e) ? e : null;
 
     public XElement? ListStyle(string? name) => name is not null && _listStyles.TryGetValue(name, out var e) ? e : null;
 
@@ -69,6 +76,8 @@ internal sealed class OdfStyles
         foreach (var e in container.Elements())
         {
             if (e.Name == Ns.Style + "default-style" && (string?)e.Attribute(Ns.Style + "family") is { } fam) _defaults[fam] = e;
+            if (e.Name.Namespace == Ns.Draw && (string?)e.Attribute(Ns.Draw + "name") is { } drawName) _resources[(e.Name.LocalName, drawName)] = e;
+            if (e.Name == Ns.Table + "table-template" && (string?)e.Attribute(Ns.Text + "style-name") is { } templateName) _resources[("table-template", templateName)] = e;
             var name = (string?)e.Attribute(Ns.Style + "name");
             if (name is null) continue;
             if (e.Name == Ns.Style + "font-face" && (string?)e.Attribute(Ns.Svg + "font-family") is { } ff) _fonts[name] = ff.Trim('\'', '"');
@@ -91,13 +100,13 @@ internal sealed class OdfStyles
         name is not null && _styles.TryGetValue((family, name), out var e) ? e : null;
 
     /// <summary>The merged properties of a style and its parents, keyed "element/attribute" by local names.</summary>
-    public Dictionary<string, string> Properties(string family, string? name)
+    public Dictionary<string, string> Properties(string family, string? name, bool defaults = true)
     {
         var chain = new List<XElement>();
         for (var e = Find(family, name); e is not null && chain.Count < 16; e = Find(family, (string?)e.Attribute(Ns.Style + "parent-style-name")))
             chain.Add(e);
         var result = new Dictionary<string, string>();
-        if (_defaults.TryGetValue(family, out var def))
+        if (defaults && _defaults.TryGetValue(family, out var def))
             foreach (var props in def.Elements())
                 foreach (var a in props.Attributes())
                     if (!a.IsNamespaceDeclaration) result[props.Name.LocalName + "/" + a.Name.LocalName] = a.Value;

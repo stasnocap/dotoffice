@@ -8,7 +8,7 @@ using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
 
-public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods, Odt }
+public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods, Odt, Odp }
 
 public sealed class ConvertOptions
 {
@@ -73,13 +73,15 @@ public static class DocumentConverter
             ct.ThrowIfCancellationRequested();
             layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(workbook, ct);
         }
-        else if (from == DocumentFormat.Pptx)
+        else if (from is DocumentFormat.Pptx or DocumentFormat.Odp)
         {
-            var presentation = PptxReader.Read(source, new PptxReaderOptions
-            {
-                Warnings = options.Warnings,
-                MaxTotalUncompressedSize = options.MaxUncompressedSize,
-            });
+            var presentation = from == DocumentFormat.Odp
+                ? OdpReader.Read(source, new OdfReaderOptions { Warnings = options.Warnings, MaxTotalUncompressedSize = options.MaxUncompressedSize })
+                : PptxReader.Read(source, new PptxReaderOptions
+                {
+                    Warnings = options.Warnings,
+                    MaxTotalUncompressedSize = options.MaxUncompressedSize,
+                });
             ct.ThrowIfCancellationRequested();
             layout = new SheetLayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(presentation, ct);
         }
@@ -113,7 +115,7 @@ public static class DocumentConverter
 
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods or DocumentFormat.Odt) || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods or DocumentFormat.Odt or DocumentFormat.Odp) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 
@@ -124,8 +126,9 @@ public static class DocumentConverter
             ".docx" or ".docm" or ".dotx" or ".dotm" => DocumentFormat.Docx,
             ".xlsx" or ".xlsm" or ".xltx" or ".xltm" => DocumentFormat.Xlsx,
             ".pptx" or ".pptm" or ".potx" or ".potm" or ".ppsx" or ".ppsm" => DocumentFormat.Pptx,
-            ".ods" or ".ots" => DocumentFormat.Ods,
-            ".odt" or ".ott" => DocumentFormat.Odt,
+            ".ods" or ".ots" or ".fods" => DocumentFormat.Ods,
+            ".odt" or ".ott" or ".fodt" => DocumentFormat.Odt,
+            ".odp" or ".otp" or ".fodp" => DocumentFormat.Odp,
             ".pdf" => DocumentFormat.Pdf,
             var ext => throw new NotSupportedException($"Unknown format '{ext}'."),
         };
