@@ -42,7 +42,7 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
         var workbook = new Workbook();
         var tables = new List<(string Name, string? Style)>();
         reader.MoveToContent();
-        if (reader.LocalName != "document-content") throw new InvalidDataException("content.xml is not an OpenDocument content part.");
+        if (reader.LocalName is not ("document-content" or "document")) throw new InvalidDataException("content.xml is not an OpenDocument content part.");
         int depth = reader.Depth;
         reader.Read();
         while (!reader.EOF && reader.Depth > depth)
@@ -95,6 +95,7 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
         var sheet = new Worksheet(name);
         if (tableStyle.TryGetValue("table-properties/display", out var display) && display == "false") sheet.Visibility = SheetVisibility.Hidden;
         ApplyPageSetup(sheet, tableStyle.GetValueOrDefault("table-properties/master-page-name") ?? styles.DefaultMasterPage);
+        if (reader.GetAttribute("print-ranges", Ns.Table.NamespaceName) is { Length: > 0 } printRanges) ReadPrintRanges(sheet, printRanges);
         sheet.DefaultColumnWidth = 64.26;
         sheet.DefaultRowHeight = 12.8;
 
@@ -391,6 +392,9 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
     {
         if (styles.PageLayoutOf(master) is not { } layout || layout.Element(Ns.Style + "page-layout-properties") is not { } p) return;
         var setup = sheet.PageSetup;
+        var masterPage = styles.MasterPage(master);
+        if (HeaderFooterTextOf(masterPage, "header") is { } header) setup.Header = header;
+        if (HeaderFooterTextOf(masterPage, "footer") is { } footer) setup.Footer = footer;
         if (OdfUnits.Length((string?)p.Attribute(Ns.Fo + "page-width")) is { } w and > 0) setup.PageWidth = w;
         if (OdfUnits.Length((string?)p.Attribute(Ns.Fo + "page-height")) is { } h and > 0) setup.PageHeight = h;
         double Margin(string side, double fallback) => OdfUnits.Length((string?)p.Attribute(Ns.Fo + "margin-" + side)) ?? fallback;
@@ -405,6 +409,81 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
         else if (int.TryParse((string?)p.Attribute(Ns.Style + "scale-to-pages"), out var pages) && pages > 0) { setup.FitToWidth = pages; setup.FitToHeight = pages; }
         if (int.TryParse((string?)p.Attribute(Ns.Style + "scale-to-X"), out var fx) && fx > 0) setup.FitToWidth = fx;
         if (int.TryParse((string?)p.Attribute(Ns.Style + "scale-to-Y"), out var fy) && fy > 0) setup.FitToHeight = fy;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex RangeSplit = new(@"(?<=\d)\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex CellRef = new(@"\.\$?([A-Za-z]{1,3})\$?(\d+)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The <c>table:print-ranges</c> of a sheet: ranges like <c>$Sheet1.$A$1:.$C$5</c> separated by spaces.</summary>
+    private static void ReadPrintRanges(Worksheet sheet, string value)
+    {
+        foreach (var range in RangeSplit.Split(value.Trim()))
+        {
+            var refs = CellRef.Matches(range);
+            if (refs.Count is < 1 or > 2) continue;
+            static (int Row, int Column)? At(System.Text.RegularExpressions.Match m)
+            {
+                int column = 0;
+                foreach (char c in m.Groups[1].Value.ToUpperInvariant()) column = column * 26 + (c - 'A' + 1);
+                return int.TryParse(m.Groups[2].Value, out var row) && row is >= 1 and <= 1_048_576 && column is >= 1 and <= 16_384 ? (row - 1, column - 1) : null;
+            }
+            if (At(refs[0]) is not { } a || At(refs[^1]) is not { } b) continue;
+            sheet.PageSetup.PrintAreas.Add(new CellRange(Math.Min(a.Row, b.Row), Math.Min(a.Column, b.Column), Math.Max(a.Row, b.Row), Math.Max(a.Column, b.Column)));
+        }
+    }
+
+    /// <summary>A header or footer as Excel's <c>&amp;</c> codes, from the regions of a <c>style:header</c>/<c>style:footer</c> element.</summary>
+    private static HeaderFooterParts? HeaderFooterOf(XElement? e)
+    {
+        if (e is null || (string?)e.Attribute(Ns.Style + "display") == "false") return null;
+        static string Text(XElement region)
+        {
+            var sb = new StringBuilder();
+            void Walk(XElement parent)
+            {
+                foreach (var node in parent.Nodes())
+                {
+                    if (node is XText t)
+                    {
+                        // White space collapses to one space.
+                        foreach (char c in t.Value)
+                        {
+                            if (char.IsWhiteSpace(c)) { if (sb.Length > 0 && sb[^1] is not (' ' or '\n')) sb.Append(' '); }
+                            else sb.Append(c);
+                        }
+                    }
+                    else if (node is XElement x && x.Name.Namespace == Ns.Text)
+                        switch (x.Name.LocalName)
+                        {
+                            case "page-number": sb.Append("&P"); break;
+                            case "page-count": sb.Append("&N"); break;
+                            case "sheet-name": sb.Append("&A"); break;
+                            case "file-name": sb.Append("&F"); break;
+                            case "date": sb.Append("&D"); break;
+                            case "time": sb.Append("&T"); break;
+                            case "s": sb.Append(' ', Math.Clamp((int?)x.Attribute(Ns.Text + "c") ?? 1, 0, 100)); break;
+                            case "p": if (sb.Length > 0) sb.Append('\n'); Walk(x); break;
+                            default: Walk(x); break;
+                        }
+                }
+            }
+            Walk(region);
+            return sb.ToString().TrimEnd();
+        }
+        var left = e.Element(Ns.Style + "region-left");
+        var center = e.Element(Ns.Style + "region-center");
+        var right = e.Element(Ns.Style + "region-right");
+        if (left is null && center is null && right is null) return new HeaderFooterParts("", Text(e), "");
+        return new HeaderFooterParts(left is null ? "" : Text(left), center is null ? "" : Text(center), right is null ? "" : Text(right));
+    }
+
+    private static HeaderFooterText? HeaderFooterTextOf(XElement? master, string kind)
+    {
+        var odd = HeaderFooterOf(master?.Element(Ns.Style + kind));
+        var even = HeaderFooterOf(master?.Element(Ns.Style + kind + "-left"));
+        var first = HeaderFooterOf(master?.Element(Ns.Style + kind + "-first"));
+        if (odd is null && even is null && first is null) return null;
+        return new HeaderFooterText { Odd = odd ?? default, Even = even, First = first };
     }
 
     private static int Repeat(XmlReader r, string name) =>

@@ -98,4 +98,25 @@ public class OdsReaderTests
         Assert.Throws<InvalidDataException>(() => OdsReader.Read(new MemoryStream(Encoding.ASCII.GetBytes("not a zip"))));
         Assert.Throws<InvalidDataException>(() => OdsReader.Read(Package("<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\">")));
     }
+
+    [Fact]
+    public void ReadsPrintRangesAndHeaders()
+    {
+        var ms = Package(Header + "<office:automatic-styles/><office:body><office:spreadsheet><table:table table:name=\"S\" table:print-ranges=\"S.A1:S.C5 S.$E$7:.F8\">" +
+            "<table:table-row><table:table-cell office:value-type=\"string\"><text:p>x</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>");
+        var wb = OdsReader.Read(ms);
+        Assert.Equal([new CellRange(0, 0, 4, 2), new CellRange(6, 4, 7, 5)], wb.Sheets[0].PageSetup.PrintAreas);
+    }
+
+    [Fact]
+    public void ReadsFlatFileWithHeaderAndFooter()
+    {
+        var flat = Header.Replace("document-content", "document").Replace("<office:document ", "<office:document office:mimetype=\"application/vnd.oasis.opendocument.spreadsheet\" ") +
+            "<office:automatic-styles><style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"21cm\" fo:page-height=\"29.7cm\"/></style:page-layout></office:automatic-styles>" +
+            "<office:master-styles><style:master-page style:name=\"Default\" style:page-layout-name=\"pm1\"><style:header><style:region-center><text:p>Top <text:page-number>1</text:page-number></text:p></style:region-center></style:header></style:master-page></office:master-styles>" +
+            "<office:body><office:spreadsheet><table:table table:name=\"S\"><table:table-row><table:table-cell office:value-type=\"string\"><text:p>x</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document>";
+        var wb = OdsReader.Read(new MemoryStream(Encoding.UTF8.GetBytes(flat)));
+        Assert.Equal("Top &P", wb.Sheets[0].PageSetup.Header.Odd.Center);
+        Assert.Equal("x", wb.Sheets[0].Cells[(0, 0)].Text);
+    }
 }
