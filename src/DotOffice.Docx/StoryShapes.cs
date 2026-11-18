@@ -9,6 +9,10 @@ namespace DotOffice.Docx;
 internal sealed partial class StoryReader
 {
     private const string WordprocessingShape = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
+    private const string WordprocessingGroup = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
+
+    /// <summary>Child coordinates to the group's own space: <c>final = child * scale + shift</c>, in EMU.</summary>
+    private readonly record struct GroupTransform(double ScaleX, double ScaleY, double ShiftX, double ShiftY);
 
     private sealed class ShapeData
     {
@@ -27,6 +31,10 @@ internal sealed partial class StoryReader
         public TextBoxDirection Direction { get; set; }
         public bool UnsupportedVertical { get; set; }
         public List<Block> Blocks { get; } = [];
+        /// <summary>The shape's own rectangle (EMU) as its <c>a:xfrm</c> gives it; inside a group it is mapped to the group's top-left corner.</summary>
+        public (double X, double Y, double Width, double Height)? Bounds { get; set; }
+        /// <summary>The shapes of a <c>wpg:wgp</c> group (nested groups flattened), each with its <see cref="Bounds"/>.</summary>
+        public List<ShapeData> Children { get; } = [];
     }
 
     /// <summary>Reads the <c>a:graphicData</c> of a wps shape (the reader sits on it) and consumes it.</summary>
@@ -38,10 +46,55 @@ internal sealed partial class StoryReader
         while (r.NextChild(depth))
         {
             if (r.NamespaceURI == WordprocessingShape && r.LocalName == "wsp") ReadShape(r, data);
+            else if (r.NamespaceURI == WordprocessingGroup && r.LocalName == "wgp") ReadGroup(r, data.Children, null, 0);
             else r.Skip();
         }
         return data;
     }
+
+    private void ReadGroup(XmlReader r, List<ShapeData> into, GroupTransform? parent, int nesting)
+    {
+        var transform = new GroupTransform(1, 1, 0, 0);
+        int depth = r.Depth;
+        if (!r.Enter()) return;
+        while (r.NextChild(depth))
+        {
+            if (r.NamespaceURI == WordprocessingGroup && r.LocalName == "grpSpPr")
+            {
+                var xfrm = ((XElement)XNode.ReadFrom(r)).Elements().FirstOrDefault(c => c.Name.LocalName == "xfrm");
+                if (BoundsOf(xfrm, "off", "ext") is { } own)
+                {
+                    var (x, y, w, h) = parent is { } p ? Map(own, p) : (0, 0, own.Width, own.Height);
+                    var chOff = PointOf(xfrm, "chOff", "x", "y") ?? (0, 0);
+                    var chExt = PointOf(xfrm, "chExt", "cx", "cy") ?? (w, h);
+                    double sx = chExt.Item1 > 0 ? w / chExt.Item1 : 1, sy = chExt.Item2 > 0 ? h / chExt.Item2 : 1;
+                    transform = new GroupTransform(sx, sy, x - chOff.Item1 * sx, y - chOff.Item2 * sy);
+                }
+            }
+            else if (r.NamespaceURI == WordprocessingShape && r.LocalName == "wsp")
+            {
+                var child = new ShapeData();
+                ReadShape(r, child);
+                if (child.Bounds is { } b) child.Bounds = Map(b, transform);
+                into.Add(child);
+            }
+            else if (r.NamespaceURI == WordprocessingGroup && r.LocalName == "wgp" && nesting < 16) ReadGroup(r, into, transform, nesting + 1);
+            else r.Skip();
+        }
+    }
+
+    private static (double X, double Y, double Width, double Height) Map((double X, double Y, double Width, double Height) b, GroupTransform t) =>
+        (b.X * t.ScaleX + t.ShiftX, b.Y * t.ScaleY + t.ShiftY, b.Width * t.ScaleX, b.Height * t.ScaleY);
+
+    private static (double, double)? PointOf(XElement? xfrm, string name, string a, string b)
+    {
+        var e = xfrm?.Elements().FirstOrDefault(c => c.Name.LocalName == name);
+        return e is not null && double.TryParse((string?)e.Attribute(a), NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+            && double.TryParse((string?)e.Attribute(b), NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ? (x, y) : null;
+    }
+
+    private static (double X, double Y, double Width, double Height)? BoundsOf(XElement? xfrm, string offName, string extName) =>
+        PointOf(xfrm, offName, "x", "y") is var (x, y) && PointOf(xfrm, extName, "cx", "cy") is var (w, h) ? (x, y, w, h) : null;
 
     private void ReadShape(XmlReader r, ShapeData data)
     {
@@ -72,6 +125,7 @@ internal sealed partial class StoryReader
             r.Skip();
         }
         ApplyShapeProperties(data, properties, style);
+        data.Bounds = BoundsOf(properties?.Elements().FirstOrDefault(c => c.Name.LocalName == "xfrm"), "off", "ext");
     }
 
     private static void ReadBodyProperties(XmlReader r, ShapeData data)

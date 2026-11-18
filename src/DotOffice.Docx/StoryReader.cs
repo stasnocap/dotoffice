@@ -540,7 +540,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         r.Read();
         while (!r.EOF && r.Depth > depth)
         {
-            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") == WordprocessingShape)
+            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") is WordprocessingShape or WordprocessingGroup)
             {
                 shape = ReadShapeData(r);
                 continue;
@@ -595,7 +595,7 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         r.Read();
         while (!r.EOF && r.Depth > depth)
         {
-            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") == WordprocessingShape)
+            if (r.NodeType == XmlNodeType.Element && r.IsA() && r.LocalName == "graphicData" && r.GetAttribute("uri") is WordprocessingShape or WordprocessingGroup)
             {
                 graphicType = WordprocessingShape;
                 shape = ReadShapeData(r);
@@ -650,7 +650,19 @@ internal sealed partial class StoryReader(DocxContext context, string partName)
         }
         if (r.NodeType == XmlNodeType.EndElement && r.Depth == depth) r.Read();
 
-        if (shape is not null)
+        if (shape is { Children.Count: > 0 })
+        {
+            // A group: each shape floats at the group's anchor plus its own offset in the group.
+            foreach (var child in shape.Children)
+            {
+                if (child.Bounds is not { } b) continue;
+                var at = horizontal with { Offset = horizontal.Offset + (horizontal.Alignment == FloatAlignment.Offset ? Units.FromEmu((long)b.X) : 0) };
+                var down = vertical with { Offset = vertical.Offset + (vertical.Alignment == FloatAlignment.Offset ? Units.FromEmu((long)b.Y) : 0) };
+                if (CreateShape(child, Units.FromEmu((long)b.Width), Units.FromEmu((long)b.Height), props, at, down, wrap, behind, distance) is { } part)
+                    AddInline(state, part);
+            }
+        }
+        else if (shape is not null)
         {
             if (CreateShape(shape, Units.FromEmu(cx), Units.FromEmu(cy), props, horizontal, vertical, wrap, behind, distance) is { } box)
                 AddInline(state, box);

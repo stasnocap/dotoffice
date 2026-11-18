@@ -47,6 +47,24 @@ public class TextBoxTests
     }
 
     [Fact]
+    public void A_group_floats_each_of_its_shapes_at_the_group_anchor_plus_its_scaled_offset()
+    {
+        const string Shape = "<wps:wsp><wps:spPr><a:xfrm><a:off x=\"{0}\" y=\"0\"/><a:ext cx=\"{1}\" cy=\"{1}\"/></a:xfrm><a:prstGeom prst=\"rect\"/><a:solidFill><a:srgbClr val=\"FFFF00\"/></a:solidFill></wps:spPr></wps:wsp>";
+        // The child space is 2000 units wide and drawn 200 pt wide: one unit is 1270 EMU.
+        var group = "<wpg:wgp xmlns:wpg=\"http://schemas.microsoft.com/office/word/2010/wordprocessingGroup\"><wpg:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2540000\" cy=\"2540000\"/>" +
+            "<a:chOff x=\"1000\" y=\"0\"/><a:chExt cx=\"2000\" cy=\"2000\"/></a:xfrm></wpg:grpSpPr>" +
+            string.Format(Shape, 1000, 1000) + string.Format(Shape, 2000, 1000) + "</wpg:wgp>";
+        var xml = "<w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"1\" behindDoc=\"0\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\">" +
+            "<wp:simplePos x=\"0\" y=\"0\"/>" + Position("page", "1270000", "page", "0") + "<wp:extent cx=\"2540000\" cy=\"2540000\"/><wp:wrapNone/><wp:docPr id=\"2\" name=\"G\"/>" +
+            "<a:graphic><a:graphicData uri=\"http://schemas.microsoft.com/office/word/2010/wordprocessingGroup\">" + group + "</a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>";
+        var boxes = ((Paragraph)Read(P(xml)).Sections[0].Blocks[0]).Inlines.OfType<FloatingTextBox>().ToList();
+        Assert.Equal(2, boxes.Count);
+        Assert.Equal((1270.0 * 1000 / 12700, 1270.0 * 1000 / 12700), (boxes[0].Width, boxes[0].Height));
+        Assert.Equal(100.0, boxes[0].Horizontal.Offset, 3); // anchor at 100 pt; the first shape sits on the child origin
+        Assert.Equal(200.0, boxes[1].Horizontal.Offset, 3); // 1000 child units further = 1000 * 1270 EMU = 100 pt
+    }
+
+    [Fact]
     public void Lays_the_content_inside_the_box_below_its_insets_and_clips_it()
     {
         var page = Layout(Read(P(AnchorShape(200, 100, Position("page", "1270000", "page", "2540000"), Box))));
