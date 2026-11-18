@@ -15,46 +15,9 @@ public static class OdsReader
     public static Workbook Read(Stream stream, OdfReaderOptions? options = null)
     {
         options ??= new OdfReaderOptions();
-        if (!stream.CanSeek)
-        {
-            var buffer = new MemoryStream();
-            var chunk = new byte[81920];
-            long total = 0;
-            int n;
-            while ((n = stream.Read(chunk)) > 0)
-            {
-                total += n;
-                if (total > options.MaxTotalUncompressedSize) throw new InvalidDataException("Input is larger than the limit.");
-                buffer.Write(chunk, 0, n);
-            }
-            buffer.Position = 0;
-            stream = buffer;
-        }
         try
         {
-            using var package = new OpcPackage(stream, new OpcLimits(options.MaxPartSize, options.MaxTotalUncompressedSize, options.MaxPartCount));
-            if (!package.Exists("content.xml")) throw new InvalidDataException("Package has no content.xml; it is not an OpenDocument file.");
-            if (package.Exists("META-INF/manifest.xml"))
-            {
-                using var r = package.OpenXml("META-INF/manifest.xml");
-                var manifest = XElement.Load(r);
-                if (manifest.Descendants().Any(e => e.Name.LocalName == "encryption-data"))
-                    throw new InvalidDataException("The document is encrypted.");
-            }
-            if (package.Exists("mimetype"))
-            {
-                var mime = Encoding.ASCII.GetString(package.ReadAllBytes("mimetype")).Trim();
-                if (mime.Length > 0 && !mime.StartsWith("application/vnd.oasis.opendocument.spreadsheet", StringComparison.Ordinal))
-                    throw new InvalidDataException($"The package is '{mime}', not an OpenDocument spreadsheet.");
-            }
-            var styles = new OdfStyles();
-            if (package.Exists("styles.xml"))
-            {
-                using var r = package.OpenXml("styles.xml");
-                var root = XElement.Load(r);
-                foreach (var part in root.Elements().Where(e => e.Name.LocalName is "styles" or "automatic-styles" or "master-styles"))
-                    styles.Add(part);
-            }
+            using var package = OdfPackage.Open(stream, options, "application/vnd.oasis.opendocument.spreadsheet", out var styles);
             using var content = package.OpenXml("content.xml");
             return new OdsContext(styles, options).Read(content);
         }
@@ -85,7 +48,7 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
         while (!reader.EOF && reader.Depth > depth)
         {
             if (reader.NodeType != XmlNodeType.Element) { reader.Read(); continue; }
-            if (reader.LocalName == "automatic-styles") styles.Add((XElement)XNode.ReadFrom(reader));
+            if (reader.LocalName is "automatic-styles" or "font-face-decls") styles.Add((XElement)XNode.ReadFrom(reader));
             else if (reader.LocalName == "body") ReadBody(reader, workbook);
             else reader.Skip();
         }
@@ -367,7 +330,7 @@ internal sealed class OdsContext(OdfStyles styles, OdfReaderOptions options)
         var p = styles.Properties("table-cell", name.Length == 0 ? "Default" : name);
         var font = DefaultFont;
         string? family = p.GetValueOrDefault("text-properties/font-family") ?? p.GetValueOrDefault("text-properties/font-name");
-        if (family is not null) font = font with { FontFamily = family.Trim('\'', '"') };
+        if (family is not null) font = font with { FontFamily = styles.FontFamily(family) };
         if (OdfUnits.Length(p.GetValueOrDefault("text-properties/font-size")) is { } size && size > 0) font = font with { FontSize = size };
         if (p.GetValueOrDefault("text-properties/font-weight") is { } w) font = font with { Bold = w == "bold" || (int.TryParse(w, out var wn) && wn >= 600) };
         if (p.GetValueOrDefault("text-properties/font-style") is { } fs) font = font with { Italic = fs is "italic" or "oblique" };

@@ -30,7 +30,8 @@ await DocumentConverter.ConvertAsync(input, output, DocumentFormat.Xlsx, Documen
 | XLSX | Usable: cell styles, number formats, merges, page setup, print areas and titles, breaks, headers/footers, charts |
 | PPTX | Usable: slide/layout/master inheritance, shapes and text, bullets and fields, tables, charts, SmartArt, pictures, OLE and media previews, shadows, hyperlinks |
 | ODS (`DotOffice.Odf`) | First version: cached cell values, number/date formats, cell styles (font, fill, borders, alignment), merges, column widths and row heights, hidden sheets/rows/columns, page size, margins and scaling. Not yet: formulas without cached values, drawings, images, charts, headers/footers, print ranges, comments |
-| ODT, ODP, DOC, XLS, PPT | Not supported (planned: ODF and the binary formats get their own readers, `DotOffice.Odf` and `DotOffice.Binary`) |
+| ODT (`DotOffice.Odf`) | First version: paragraphs and headings with styles and inheritance, spans, white-space rules, lists (bullets, numbers, indents), tables (spans, widths, borders, shading), pictures and text boxes (inline and floating), hyperlinks and bookmarks, footnotes, page number fields, page size and margins, headers and footers. Not yet: sections and page-style changes, tab stops, outline numbering of headings, drawing shapes, charts, columns, tracked changes |
+| ODP, DOC, XLS, PPT | Not supported (planned: ODF and the binary formats get their own readers, `DotOffice.Odf` and `DotOffice.Binary`) |
 
 Fonts the document names but that are not available are substituted (metric-compatible Liberation, Carlito and Caladea fonts are
 preferred when installed) and reported through `ConvertOptions.Warnings`. On Linux and in containers, install those fonts or pass

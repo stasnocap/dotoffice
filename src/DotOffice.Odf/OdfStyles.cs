@@ -50,18 +50,38 @@ internal sealed class OdfStyles
     private readonly Dictionary<string, XElement> _pageLayouts = [];
     private readonly Dictionary<string, string> _masterLayouts = [];
     private readonly Dictionary<string, string> _codes = [];
+    private readonly Dictionary<string, XElement> _defaults = [];
+    private readonly Dictionary<string, XElement> _listStyles = [];
+    private readonly Dictionary<string, string> _fonts = [];
+    private readonly Dictionary<string, XElement> _masters = [];
+
+    public XElement? ListStyle(string? name) => name is not null && _listStyles.TryGetValue(name, out var e) ? e : null;
+
+    public XElement? MasterPage(string? name) => name is not null && _masters.TryGetValue(name, out var e) ? e : null;
+
+    public IEnumerable<XElement> MasterPages => _masters.Values;
+
+    /// <summary>The family a <c>style:font-name</c> stands for (from the font face declarations), or the name itself.</summary>
+    public string FontFamily(string name) => _fonts.TryGetValue(name, out var f) ? f : name.Trim('\'', '"');
 
     public void Add(XElement container)
     {
         foreach (var e in container.Elements())
         {
+            if (e.Name == Ns.Style + "default-style" && (string?)e.Attribute(Ns.Style + "family") is { } fam) _defaults[fam] = e;
             var name = (string?)e.Attribute(Ns.Style + "name");
             if (name is null) continue;
-            if (e.Name == Ns.Style + "style")
+            if (e.Name == Ns.Style + "font-face" && (string?)e.Attribute(Ns.Svg + "font-family") is { } ff) _fonts[name] = ff.Trim('\'', '"');
+            else if (e.Name == Ns.Text + "list-style") _listStyles[name] = e;
+            else if (e.Name == Ns.Style + "style")
                 _styles[((string?)e.Attribute(Ns.Style + "family") ?? "", name)] = e;
             else if (e.Name == Ns.Style + "page-layout") _pageLayouts[name] = e;
             else if (e.Name == Ns.Style + "master-page")
+            {
                 _masterLayouts[name] = (string?)e.Attribute(Ns.Style + "page-layout-name") ?? "";
+                _masters[name] = e;
+                DefaultMasterPage ??= name;
+            }
             else if (e.Name.Namespace == Ns.Number && e.Name.LocalName.EndsWith("-style", StringComparison.Ordinal))
                 _numberStyles[name] = e;
         }
@@ -77,6 +97,10 @@ internal sealed class OdfStyles
         for (var e = Find(family, name); e is not null && chain.Count < 16; e = Find(family, (string?)e.Attribute(Ns.Style + "parent-style-name")))
             chain.Add(e);
         var result = new Dictionary<string, string>();
+        if (_defaults.TryGetValue(family, out var def))
+            foreach (var props in def.Elements())
+                foreach (var a in props.Attributes())
+                    if (!a.IsNamespaceDeclaration) result[props.Name.LocalName + "/" + a.Name.LocalName] = a.Value;
         for (int i = chain.Count - 1; i >= 0; i--)
             foreach (var props in chain[i].Elements())
                 foreach (var a in props.Attributes())

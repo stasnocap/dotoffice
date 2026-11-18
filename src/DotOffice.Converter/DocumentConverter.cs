@@ -8,7 +8,7 @@ using DotOffice.Xlsx;
 
 namespace DotOffice.Converter;
 
-public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods }
+public enum DocumentFormat { Docx, Xlsx, Pptx, Pdf, Ods, Odt }
 
 public sealed class ConvertOptions
 {
@@ -85,11 +85,13 @@ public static class DocumentConverter
         }
         else
         {
-            var document = DocxReader.Read(source, new DocxReaderOptions
-            {
-                Warnings = options.Warnings,
-                MaxTotalUncompressedSize = options.MaxUncompressedSize,
-            });
+            var document = from == DocumentFormat.Odt
+                ? OdtReader.Read(source, new OdfReaderOptions { Warnings = options.Warnings, MaxTotalUncompressedSize = options.MaxUncompressedSize })
+                : DocxReader.Read(source, new DocxReaderOptions
+                {
+                    Warnings = options.Warnings,
+                    MaxTotalUncompressedSize = options.MaxUncompressedSize,
+                });
             ct.ThrowIfCancellationRequested();
             layout = new LayoutEngine(new LayoutOptions { Fonts = CreateResolver(options), Warnings = options.Warnings }).Layout(document, ct);
         }
@@ -111,7 +113,7 @@ public static class DocumentConverter
 
     private static void EnsureSupported(DocumentFormat from, DocumentFormat to)
     {
-        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods) || to != DocumentFormat.Pdf)
+        if (from is not (DocumentFormat.Docx or DocumentFormat.Xlsx or DocumentFormat.Pptx or DocumentFormat.Ods or DocumentFormat.Odt) || to != DocumentFormat.Pdf)
             throw new NotSupportedException($"Conversion {from} -> {to} is not implemented yet.");
     }
 
@@ -123,6 +125,7 @@ public static class DocumentConverter
             ".xlsx" or ".xlsm" or ".xltx" or ".xltm" => DocumentFormat.Xlsx,
             ".pptx" or ".pptm" or ".potx" or ".potm" or ".ppsx" or ".ppsm" => DocumentFormat.Pptx,
             ".ods" or ".ots" => DocumentFormat.Ods,
+            ".odt" or ".ott" => DocumentFormat.Odt,
             ".pdf" => DocumentFormat.Pdf,
             var ext => throw new NotSupportedException($"Unknown format '{ext}'."),
         };
