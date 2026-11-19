@@ -291,6 +291,7 @@ internal sealed class DocxContext
                 PageBreakBeforeDropsSpaceBefore = Settings.CompatibilityMode >= 15,
                 JustifyLinesEndingWithBreak = !Settings.DoNotExpandShiftReturn,
             },
+            Fonts = ReadPart(Package.FindRelationship(MainPart, "fontTable"), FontTable.Read) ?? [],
         };
         ReadCoreProperties(document);
 

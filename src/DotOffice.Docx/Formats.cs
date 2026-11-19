@@ -511,6 +511,8 @@ internal static class Borders
         };
         if (style == BorderStyle.None) return Border.None;
         double width = Math.Clamp(Units.FromEighthPoints(r.DoubleAttr("sz") ?? 2), 0.25, 12);
+        // A double border is two lines of the given width with a gap of the same width.
+        if (val == "double") width *= 3;
         double space = Math.Clamp(r.DoubleAttr("space") ?? 0, 0, 31);
         var color = r.WAttr("color") is "auto" or null ? (Color?)null : Color.TryParseHex(r.WAttr("color"));
         return new Border(style, width, color, space);

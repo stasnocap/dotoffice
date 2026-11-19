@@ -9,9 +9,20 @@ public sealed class Document
     public List<Note> Endnotes { get; } = [];
 
     public DocumentSettings Settings { get; init; } = new();
+
+    /// <summary>
+    /// The document's font table (w:fonts, the .doc FFNs) by font name, or null when the format has none. When it is set,
+    /// fonts that are not installed are replaced as Word does: by the declared alternative name, else by Cambria (roman
+    /// family) or Calibri (any other family, or a font that is not declared).
+    /// </summary>
+    public Dictionary<string, FontDeclaration>? Fonts { get; set; }
+
     public string? Title { get; set; }
     public string? Author { get; set; }
 }
+
+/// <summary>A font table entry: the alternative name to use when the font is missing, and whether it is of the roman (serif) family.</summary>
+public sealed record FontDeclaration(string? AltName, bool Roman);
 
 public sealed class DocumentSettings
 {

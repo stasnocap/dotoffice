@@ -106,6 +106,26 @@ public class DocxReaderTests
         Assert.Equal(new Color(0xEE, 0xEE, 0xEE), p.Shading);
     }
 
+    [Fact]
+    public void A_double_border_is_two_lines_of_its_width_with_a_gap_of_the_same_width()
+    {
+        var doc = Read(new DocxBuilder { Body = P(R("x"), "<w:pBdr><w:bottom w:val=\"double\" w:sz=\"12\" w:space=\"13\"/></w:pBdr>") });
+        Assert.Equal(new Border(BorderStyle.Double, 4.5, null, 13), Paragraphs(doc)[0].Properties.Borders.Bottom);
+    }
+
+    [Fact]
+    public void The_font_table_declares_each_fonts_family_and_alternative_name()
+    {
+        var b = new DocxBuilder { Body = P(R("x")) };
+        b.AddPart("fontTable.xml", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
+            "<w:fonts xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
+            "<w:font w:name=\"Old Roman\"><w:altName w:val=\"Times New Roman\"/><w:family w:val=\"roman\"/></w:font>" +
+            "<w:font w:name=\"Odd Sans\"><w:panose1 w:val=\"020B0604020202020204\"/><w:family w:val=\"swiss\"/></w:font></w:fonts>");
+        var doc = Read(b);
+        Assert.Equal(new FontDeclaration("Times New Roman", true), doc.Fonts!["Old Roman"]);
+        Assert.Equal(new FontDeclaration(null, false), doc.Fonts["Odd Sans"]);
+    }
+
     private const string ListNumbering =
         "<w:abstractNum w:abstractNumId=\"0\">" +
         "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>" +

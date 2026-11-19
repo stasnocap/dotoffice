@@ -66,27 +66,37 @@ public class DocReaderTests
     /// </summary>
     private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables) => Doc(text, storyLengths, [], null, tables);
 
-    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, byte[]? data = null, params (int Pair, byte[] Data)[] tables)
+    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, byte[]? data = null, params (int Pair, byte[] Data)[] tables) =>
+        Doc(text, storyLengths, runs, [], data, tables);
+
+    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, (int Length, byte[] Sprms)[] paras, byte[]? data = null,
+        params (int Pair, byte[] Data)[] tables)
     {
         int fkpPage = (1024 + text.Length + 511) / 512;
-        var main = new byte[runs.Length > 0 ? 512 * (fkpPage + 1) : 1024 + text.Length];
-        if (runs.Length > 0)
+        int pages = (runs.Length > 0 ? 1 : 0) + (paras.Length > 0 ? 1 : 0);
+        var main = new byte[pages > 0 ? 512 * (fkpPage + pages) : 1024 + text.Length];
+        // One FKP page: the runs' fcs, then per run its offset (CHPX) or a BX (offset and 12-byte PHE, PAPX), and the property sets from the end.
+        void Fkp(int page, (int Length, byte[] Sprms)[] items, bool papx, int pair)
         {
-            var fkp = main.AsSpan(512 * fkpPage, 512);
-            int fc = 1024, at = 511;
-            for (int r = 0; r < runs.Length; r++)
+            var fkp = main.AsSpan(512 * page, 512);
+            int fc = 1024, at = 511, entry = papx ? 13 : 1;
+            for (int r = 0; r < items.Length; r++)
             {
                 BinaryPrimitives.WriteInt32LittleEndian(fkp[(4 * r)..], fc);
-                fc += runs[r].Length;
-                at = (at - runs[r].Sprms.Length - 1) & ~1;
-                fkp[at] = (byte)runs[r].Sprms.Length;
-                runs[r].Sprms.CopyTo(fkp[(at + 1)..]);
-                fkp[4 * (runs.Length + 1) + r] = (byte)(at / 2);
+                fc += items[r].Length;
+                // a PAPX is cb (or 0 and cb') and the istd (0) with the sprms, 2 * cb - 1 (or 2 * cb') bytes long
+                byte[] props = papx ? [.. (byte[])(items[r].Sprms.Length % 2 == 1 ? [(byte)((items[r].Sprms.Length + 3) / 2)] : [0, (byte)((items[r].Sprms.Length + 2) / 2)]), 0, 0, .. items[r].Sprms]
+                    : [(byte)items[r].Sprms.Length, .. items[r].Sprms];
+                at = (at - props.Length) & ~1;
+                props.CopyTo(fkp[at..]);
+                fkp[4 * (items.Length + 1) + entry * r] = (byte)(at / 2);
             }
-            BinaryPrimitives.WriteInt32LittleEndian(fkp[(4 * runs.Length)..], fc);
-            fkp[511] = (byte)runs.Length;
-            tables = [.. tables, (12, [.. BitConverter.GetBytes(1024), .. BitConverter.GetBytes(fc), .. BitConverter.GetBytes(fkpPage)])];
+            BinaryPrimitives.WriteInt32LittleEndian(fkp[(4 * items.Length)..], fc);
+            fkp[511] = (byte)items.Length;
+            tables = [.. tables, (pair, [.. BitConverter.GetBytes(1024), .. BitConverter.GetBytes(fc), .. BitConverter.GetBytes(page)])];
         }
+        if (runs.Length > 0) Fkp(fkpPage, runs, false, 12);
+        if (paras.Length > 0) Fkp(fkpPage + pages - 1, paras, true, 13);
         BinaryPrimitives.WriteUInt16LittleEndian(main, 0xA5EC);
         BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(2), 0xC1);
         BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(0x0A), 0x0200); // the table stream is 1Table
@@ -176,6 +186,84 @@ public class DocReaderTests
         var image = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<ImageRun>());
         Assert.Equal((100, 25), (image.Width, image.Height));
         Assert.Equal(png, image.Image.Data);
+    }
+
+    /// <summary>A font table (SttbfFfn) of FFNs: the family in the second byte, the alternative name's index at byte 5, the names at 40.</summary>
+    private static byte[] Fonts(params (string Name, string? Alt, int Family)[] fonts)
+    {
+        var table = new List<byte>();
+        table.AddRange(BitConverter.GetBytes((ushort)fonts.Length));
+        table.AddRange(BitConverter.GetBytes((ushort)0));
+        foreach (var (name, alt, family) in fonts)
+        {
+            var names = Encoding.Unicode.GetBytes(name + "\0" + (alt is null ? "" : alt + "\0"));
+            var ffn = new byte[40 + names.Length];
+            ffn[0] = (byte)(ffn.Length - 1);
+            ffn[1] = (byte)(family << 4 | 2);
+            ffn[5] = (byte)(alt is null ? 0 : name.Length + 1);
+            names.CopyTo(ffn, 40);
+            table.AddRange(ffn);
+        }
+        return [.. table];
+    }
+
+    [Fact]
+    public void The_font_table_declares_each_fonts_family_and_alternative_name()
+    {
+        var doc = DocReader.Read(new MemoryStream(Doc("x\r", [2], (15, Fonts(("Times New Roman", null, 1), ("PragmaticaWINCTT", null, 2), ("Monotype Sorts", "Courier10 BT", 0))))));
+        Assert.Equal(new FontDeclaration(null, true), doc.Fonts!["Times New Roman"]);
+        Assert.Equal(new FontDeclaration(null, false), doc.Fonts["pragmaticawinctt"]);
+        Assert.Equal(new FontDeclaration("Courier10 BT", false), doc.Fonts["Monotype Sorts"]);
+    }
+
+    [Fact]
+    public void Paragraph_borders_come_from_both_border_sprms_and_doubles_are_three_widths()
+    {
+        const string text = "Old\rNew\r";
+        byte[] old80 = [0x26, 0x64, 12, 3, 0, 13]; // sprmPBrcBottom80: width 12/8 pt, double, auto, 13 pt space
+        byte[] brc = [0x4E, 0xC6, 8, 0xFF, 0, 0, 0, 4, 1, 4, 0]; // sprmPBrcTop: red, 1/2 pt, single, 4 pt space
+        var doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], [], paras: [(4, old80), (4, brc)])));
+        var paragraphs = doc.Sections[0].Blocks.OfType<Paragraph>().ToList();
+        Assert.Equal(new Border(BorderStyle.Double, 4.5, Color.Black, 13), paragraphs[0].Properties.Borders.Bottom);
+        Assert.Equal(new Border(BorderStyle.Single, 0.5, new Color(255, 0, 0), 4), paragraphs[1].Properties.Borders.Top);
+        Assert.False(paragraphs[1].Properties.Borders.Bottom.IsVisible);
+    }
+
+    [Fact]
+    public void Tab_stops_come_from_both_tab_sprms_measured_from_the_margin()
+    {
+        const string text = "A\tB\r";
+        byte[] left = [0x0F, 0x84, 0xAA, 0x01]; // a 426-twip left indent does not move the tabs
+        byte[] papx = [0x0D, 0xC6, 5, 0, 1, 0x96, 0x25, 0x0A]; // sprmPChgTabsPapx: add a right tab at 9622 twips with a dot leader
+        byte[] chg = [0x15, 0xC6, 9, 1, 0x96, 0x25, 0x28, 0, 1, 0xA0, 0x05, 0]; // sprmPChgTabs: delete it (40-twip tolerance), add a left tab at 1440
+        var doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], [], paras: [(text.Length, [.. left, .. papx])])));
+        var tab = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().Single().Properties.TabStops);
+        Assert.Equal(new TabStop(481.1, TabAlignment.Right, TabLeader.Dot), tab);
+        doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], [], paras: [(text.Length, [.. papx, .. chg])])));
+        Assert.Equal(new TabStop(72, TabAlignment.Left), Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().Single().Properties.TabStops));
+    }
+
+    [Fact]
+    public void Frame_sprms_float_a_paragraph_and_a_framed_header_paragraph_does_not_push_the_body_down()
+    {
+        const string body = "Body\r", header = "\x13 PAGE \x14" + "1\x15\r\r\r";
+        // centered on the margin, one twip below the paragraph, wrapped around
+        byte[] frame = [0x18, 0x84, 0xFC, 0xFF, 0x19, 0x84, 1, 0, 0x1B, 0x26, 0x60, 0x23, 0x24, 2];
+        int[] cps = [0, 0, 0, 0, 0, 0, 0, 0, header.Length, header.Length, header.Length, header.Length, header.Length, header.Length + 1];
+        var file = Doc(body + header + "\r", [body.Length, 0, header.Length + 1], [], paras: [(body.Length, []), (header.Length - 2, frame), (3, [])],
+            tables: (11, cps.SelectMany(BitConverter.GetBytes).ToArray()));
+        var doc = DocReader.Read(new MemoryStream(file));
+        var blocks = doc.Sections[0].DefaultHeader!.Blocks.OfType<Paragraph>().ToList();
+        Assert.Equal(2, blocks.Count); // the story's guard paragraph mark is left out
+        var f = blocks[0].Properties.Frame!;
+        Assert.Equal(new FloatPosition(FloatReference.Margin, FloatAlignment.Center, 0), f.Horizontal);
+        Assert.Equal(new FloatPosition(FloatReference.Paragraph, FloatAlignment.Offset, 0.05), f.Vertical);
+        Assert.Null(blocks[1].Properties.Frame);
+        Assert.False(doc.Settings.PageBreakBeforeDropsSpaceBefore);
+
+        var page = Layout.LayoutTestHelpers.Render(doc).Pages[0];
+        var bodyText = Layout.LayoutTestHelpers.Texts(page).First(t => t.Text.StartsWith("Body"));
+        Assert.True(bodyText.Baseline < doc.Sections[0].Margins.Top + 20, $"body baseline {bodyText.Baseline}");
     }
 
     private static byte[] Escher(int verInst, int type, params byte[][] body)

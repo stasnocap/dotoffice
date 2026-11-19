@@ -49,9 +49,16 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
     {
         public int Istd, Jc, Left, Right, First, Before, After, Line = 240, LineMult = 1;
         public bool Keep, KeepNext, PageBreakBefore, InTable, Ttp;
+
+        /// <summary>Frame position (sprmPDxaAbs, sprmPDyaAbs, sprmPPc), size and wrapping; <see cref="Framed"/> when any is set.</summary>
+        public int DxaAbs, DyaAbs, Pc, FrameWidth, FrameHeight, Wr, DxaFromText, DyaFromText;
+        public bool Framed;
         public List<TabStop> Tabs = [];
         public byte[]? TableDef;
-        public Pap Clone() { var p = (Pap)MemberwiseClone(); p.Tabs = [.. Tabs]; return p; }
+
+        /// <summary>Paragraph borders: top, left, bottom, right, between.</summary>
+        public Border[] Borders = [Border.None, Border.None, Border.None, Border.None, Border.None];
+        public Pap Clone() { var p = (Pap)MemberwiseClone(); p.Tabs = [.. Tabs]; p.Borders = [.. Borders]; return p; }
     }
 
     private sealed class Style
@@ -64,6 +71,7 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
 
     private readonly List<Piece> _pieces = [];
     private readonly List<string> _fonts = [];
+    private readonly Dictionary<string, FontDeclaration> _fontTable = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, Style> _styles = [];
     private readonly List<(int Start, int End, byte[] Props)> _chpRuns = [], _papRuns = [];
     private int _blocks;
@@ -178,9 +186,15 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         {
             int cb = d[at] + 1;
             if (cb < 41 || at + cb > d.Length) break;
-            var name = Encoding.Unicode.GetString(d.Slice(at + 40, Math.Max(0, cb - 40)));
-            int nul = name.IndexOf('\0');
-            _fonts.Add(nul >= 0 ? name[..nul] : name);
+            var names = Encoding.Unicode.GetString(d.Slice(at + 40, Math.Max(0, cb - 40)));
+            int nul = names.IndexOf('\0');
+            var name = nul >= 0 ? names[..nul] : names;
+            _fonts.Add(name);
+            // FFN: ff (font family, 1 = roman) in bits 4-6 of the second byte; ixchSzAlt (start of the alternative name, 0 when none) at 5
+            int alt = d[at + 5];
+            string? altName = null;
+            if (alt > 0 && alt < names.Length) { altName = names[alt..]; nul = altName.IndexOf('\0'); if (nul >= 0) altName = altName[..nul]; }
+            if (name.Length > 0) _fontTable.TryAdd(name, new FontDeclaration(string.IsNullOrEmpty(altName) ? null : altName, (d[at + 1] >> 4 & 7) == 1));
             at += cb;
         }
     }
@@ -334,24 +348,41 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                     break;
                 case 0x6412 when size >= 4: pap.Line = I16(o, 0); pap.LineMult = U16(o, 2); break;
                 case 0xD608: pap.TableDef = o.ToArray(); break;
-                case 0xC615 when size >= 2: ApplyTabs(pap, o); break;
+                case 0x8418 when size >= 2: pap.DxaAbs = I16(o, 0); pap.Framed = true; break;
+                case 0x8419 when size >= 2: pap.DyaAbs = I16(o, 0); pap.Framed = true; break;
+                case 0x261B:
+                    // sprmPPc: pcVert in bits 4-5 and pcHorz in bits 6-7; 3 leaves the current value
+                    if ((o[0] >> 4 & 3) != 3) pap.Pc = pap.Pc & ~0x30 | o[0] & 0x30;
+                    if ((o[0] >> 6 & 3) != 3) pap.Pc = pap.Pc & ~0xC0 | o[0] & 0xC0;
+                    pap.Framed = true;
+                    break;
+                case 0x841A when size >= 2: pap.FrameWidth = U16(o, 0); pap.Framed = true; break;
+                case 0x442B when size >= 2: pap.FrameHeight = U16(o, 0); break;
+                case 0x2423: pap.Wr = o[0]; break;
+                case 0x842F when size >= 2: pap.DxaFromText = U16(o, 0); break;
+                case 0x842E when size >= 2: pap.DyaFromText = U16(o, 0); break;
+                case >= 0x6424 and <= 0x6428 when size >= 4: pap.Borders[sprm - 0x6424] = Brc(o, 0) with { Space = o[3] & 0x1F }; break;
+                case >= 0xC64E and <= 0xC652 when size >= 9: pap.Borders[sprm - 0xC64E] = BrcNew(o[1..]); break; // cb, then the BRC
+                case 0xC615 when size >= 2: ApplyTabs(pap, o, tolerances: true); break;
+                case 0xC60D when size >= 2: ApplyTabs(pap, o, tolerances: false); break;
             }
             at += size;
         }
     }
 
-    private static void ApplyTabs(Pap pap, ReadOnlySpan<byte> o)
+    private static void ApplyTabs(Pap pap, ReadOnlySpan<byte> o, bool tolerances)
     {
-        // sprmPChgTabs: cb, then the deleted positions (count + shorts), then the added ones (count, positions, descriptors).
+        // sprmPChgTabs / sprmPChgTabsPapx: cb, then the deleted positions (count + shorts, and for sprmPChgTabs a
+        // close tolerance per deleted tab), then the added ones (count, positions, descriptors).
         int cb = o[0], at = 1;
         if (cb == 0xFF || at >= o.Length) return;
         int deleted = o[at++];
-        for (int i = 0; i < deleted && at + 2 <= o.Length; i++)
+        for (int i = 0; i < deleted && at + 2 * i + 2 <= o.Length; i++)
         {
-            int pos = I16(o, at);
-            pap.Tabs.RemoveAll(t => Math.Abs(t.Position - pos / 20.0) < 0.5);
-            at += 2;
+            double pos = I16(o, at + 2 * i) / 20.0, close = tolerances && at + 2 * (deleted + i) + 2 <= o.Length ? I16(o, at + 2 * (deleted + i)) / 20.0 : 0;
+            pap.Tabs.RemoveAll(t => Math.Abs(t.Position - pos) <= Math.Max(0.5, close));
         }
+        at += deleted * (tolerances ? 4 : 2);
         if (at >= o.Length) return;
         int added = o[at++];
         if (at + added * 3 > o.Length) return;
@@ -522,6 +553,8 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                 else if (end <= _text.Length)
                 {
                     var built = Build((int)start, (int)end, story: true).Sections[0].Blocks;
+                    // A story ends with a guard paragraph mark that Word does not show.
+                    if (built.Count > 1 && built[^1] is Paragraph { Inlines.Count: 0 }) built.RemoveAt(built.Count - 1);
                     result = new HeaderFooter();
                     result.Blocks.AddRange(built);
                 }
@@ -563,7 +596,8 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
     private Document Build(int from, int to, bool story)
     {
         var text = _text;
-        var doc = new Document { Settings = new DocumentSettings { EvenAndOddHeaders = !story && FacingPages() } };
+        // Word opens .doc files in compatibility mode, where a paragraph after a page break keeps its space before.
+        var doc = new Document { Settings = new DocumentSettings { EvenAndOddHeaders = !story && FacingPages(), PageBreakBeforeDropsSpaceBefore = false }, Fonts = _fontTable };
         var sectionEnds = story ? [] : SectionEnds();
         int sectionIndex = 0;
         var section = story ? new Section() : MakeSection(0);
@@ -620,7 +654,11 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
             SpaceBefore = p.Before / 20.0, SpaceAfter = p.After / 20.0,
             LineSpacing = p.LineMult == 1 ? new LineSpacing(Math.Max(0.1, p.Line / 240.0), LineSpacingRule.Auto)
                 : p.Line < 0 ? new LineSpacing(-p.Line / 20.0, LineSpacingRule.Exact) : p.Line > 0 ? new LineSpacing(p.Line / 20.0, LineSpacingRule.AtLeast) : LineSpacing.Single,
-            KeepWithNext = p.KeepNext, KeepLinesTogether = p.Keep, PageBreakBefore = p.PageBreakBefore, TabStops = p.Tabs.Select(t => t with { Position = t.Position + p.Left / 20.0 }).ToList(),
+            KeepWithNext = p.KeepNext, KeepLinesTogether = p.Keep, PageBreakBefore = p.PageBreakBefore, TabStops = [.. p.Tabs],
+            Frame = p.Framed && !p.InTable ? FrameOf(p) : null,
+            Borders = p.Borders.Any(b => b.IsVisible)
+                ? new BorderSet { Top = p.Borders[0], Left = p.Borders[1], Bottom = p.Borders[2], Right = p.Borders[3], InsideHorizontal = p.Borders[4] }
+                : BorderSet.Empty,
         };
 
         void EndParagraph(int markCp, bool cellMark)
@@ -826,8 +864,57 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         int width = d[at], type = d[at + 1], ico = d[at + 2];
         if (width == 0xFF || type is 0 or 0xFF || width == 0) return Border.None;
         var kind = type switch { 3 => BorderStyle.Double, 6 or 7 => BorderStyle.Dotted, 5 or 8 => BorderStyle.Dashed, 2 => BorderStyle.Thick, _ => BorderStyle.Single };
-        return new Border(kind, Math.Max(0.25, width / 8.0), ColorOf(ico == 0 ? -1 : ico) ?? Color.Black);
+        return new Border(kind, BrcWidth(width, type), ColorOf(ico == 0 ? -1 : ico) ?? Color.Black);
     }
+
+    /// <summary>
+    /// A frame from the frame sprms: horizontal position from the column, margin or page (pcHorz 0-2) at an offset or
+    /// aligned (dxaAbs -4 center, -8 right, -12 inside, -16 outside; 0 left); vertical from the margin, page or paragraph
+    /// (pcVert 0-2), offset or aligned (dyaAbs -4 top, -8 center, -12 bottom, -16 inside, -20 outside). A height has the
+    /// minimum flag in bit 15 (exact when clear).
+    /// </summary>
+    private static FrameProperties FrameOf(Pap p)
+    {
+        static (FloatAlignment, double) Pos(int v) => v switch
+        {
+            -4 => (FloatAlignment.Center, 0), -8 => (FloatAlignment.End, 0), -12 => (FloatAlignment.Inside, 0), -16 => (FloatAlignment.Outside, 0),
+            _ => (FloatAlignment.Offset, v / 20.0),
+        };
+        static (FloatAlignment, double) VPos(int v) => v switch
+        {
+            -4 => (FloatAlignment.Start, 0), -8 => (FloatAlignment.Center, 0), -12 => (FloatAlignment.End, 0), -16 => (FloatAlignment.Inside, 0), -20 => (FloatAlignment.Outside, 0),
+            _ => (FloatAlignment.Offset, v / 20.0),
+        };
+        var (hAlign, x) = p.DxaAbs == 0 ? (FloatAlignment.Start, 0.0) : Pos(p.DxaAbs);
+        var (vAlign, y) = VPos(p.DyaAbs);
+        var hRef = (p.Pc >> 6 & 3) switch { 1 => FloatReference.Margin, 2 => FloatReference.Page, _ => FloatReference.Column };
+        var vRef = (p.Pc >> 4 & 3) switch { 1 => FloatReference.Page, 2 => FloatReference.Paragraph, _ => FloatReference.Margin };
+        int height = p.FrameHeight & 0x7FFF;
+        double dx = p.DxaFromText / 20.0, dy = p.DyaFromText / 20.0;
+        return new FrameProperties
+        {
+            Width = p.FrameWidth > 0 ? p.FrameWidth / 20.0 : null,
+            Height = height > 0 ? height / 20.0 : null,
+            HeightExact = height > 0 && (p.FrameHeight & 0x8000) == 0,
+            Horizontal = new FloatPosition(hRef, hAlign, x),
+            Vertical = new FloatPosition(vRef, vAlign, y),
+            Distance = new Thickness(dy, dx, dy, dx),
+            Wrap = p.Wr == 1 ? TextWrap.TopAndBottom : TextWrap.Square,
+        };
+    }
+
+    /// <summary>A BRC (the 8-byte border of the Word 2000 sprms): COLORREF, width in eighths of a point, type, space in points.</summary>
+    private static Border BrcNew(ReadOnlySpan<byte> d)
+    {
+        int width = d[4], type = d[5];
+        if (type is 0 or 0xFF || width == 0) return Border.None;
+        var kind = type switch { 3 => BorderStyle.Double, 6 or 7 => BorderStyle.Dotted, 5 or 8 => BorderStyle.Dashed, 2 => BorderStyle.Thick, _ => BorderStyle.Single };
+        var color = d[3] == 0xFF ? Color.Black : new Color(d[0], d[1], d[2]);
+        return new Border(kind, BrcWidth(width, type), color, d[6] & 0x1F);
+    }
+
+    /// <summary>A border's total width in points: a double border (type 3) is two lines of the given width with a gap of the same width.</summary>
+    private static double BrcWidth(int eighths, int type) => Math.Max(0.25, eighths / 8.0) * (type == 3 ? 3 : 1);
 
     private static Color? ColorOf(int c)
     {

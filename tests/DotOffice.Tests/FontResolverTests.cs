@@ -54,6 +54,15 @@ public class FontResolverTests
     }
 
     [Fact]
+    public void Unknown_family_takes_the_given_fallbacks_and_their_substitutes_before_generic_families()
+    {
+        var provider = new AliasProvider(Noto, "Carlito", "Liberation Sans");
+        var resolved = new FontResolver(provider).Resolve("PragmaticaWINCTT", false, false, ["Calibri"]);
+        Assert.Same(Noto, resolved.Font);
+        Assert.Equal(["PragmaticaWINCTT", "Calibri", "Carlito"], provider.Requests);
+    }
+
+    [Fact]
     public void Unknown_family_falls_back_to_generic_family_then_any_registered_font()
     {
         var generic = new FontResolver(new AliasProvider(Noto, "DejaVu Serif"));

@@ -65,7 +65,7 @@ public sealed class FontResolver
     ];
 
     private readonly IFontProvider[] _providers;
-    private readonly Dictionary<(string, bool, bool), ResolvedFont> _cache = [];
+    private readonly Dictionary<(string, bool, bool, string), ResolvedFont> _cache = [];
     private readonly Dictionary<(int, bool, bool), ResolvedFont?> _fallbackCache = [];
     private readonly Dictionary<(string, bool, bool), TrueTypeFont?> _lookups = [];
 
@@ -75,13 +75,20 @@ public sealed class FontResolver
     public static FontResolver CreateDefault(IFontProvider? userFonts = null) =>
         userFonts is null ? new FontResolver(SystemFontProvider.Shared) : new FontResolver(userFonts, SystemFontProvider.Shared);
 
-    public ResolvedFont Resolve(string family, bool bold, bool italic)
+    public ResolvedFont Resolve(string family, bool bold, bool italic) => Resolve(family, bold, italic, []);
+
+    /// <summary>
+    /// Like <see cref="Resolve(string, bool, bool)"/>, but a family that is neither available nor has an available
+    /// metric-compatible substitute is replaced by the first available of <paramref name="unknownFallbacks"/> (or one of
+    /// their substitutes) before the generic families are tried.
+    /// </summary>
+    public ResolvedFont Resolve(string family, bool bold, bool italic, IReadOnlyList<string> unknownFallbacks)
     {
-        var key = (family, bold, italic);
+        var key = (family, bold, italic, string.Join('\n', unknownFallbacks));
         lock (_cache)
         {
             if (_cache.TryGetValue(key, out var cached)) return cached;
-            var resolved = ResolveCore(family, bold, italic);
+            var resolved = ResolveCore(family, bold, italic, unknownFallbacks);
             _cache[key] = resolved;
             return resolved;
         }
@@ -111,10 +118,15 @@ public sealed class FontResolver
         }
     }
 
-    private ResolvedFont ResolveCore(string family, bool bold, bool italic)
+    private ResolvedFont ResolveCore(string family, bool bold, bool italic, IReadOnlyList<string> unknownFallbacks)
     {
         var candidates = new List<string> { family };
         if (Substitutes.TryGetValue(family, out var subs)) candidates.AddRange(subs);
+        foreach (var fallback in unknownFallbacks)
+        {
+            candidates.Add(fallback);
+            if (Substitutes.TryGetValue(fallback, out var fallbackSubs)) candidates.AddRange(fallbackSubs);
+        }
         candidates.AddRange(GenericFamilies(family));
 
         // The first family that exists wins, even if it has to synthesize the style: a metric-compatible

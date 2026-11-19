@@ -34,13 +34,24 @@ internal readonly record struct FontMetrics(double Ascent, double Descent)
 internal sealed class FontSelector(FontResolver resolver, IConversionWarningSink? warnings)
 {
     private readonly HashSet<string> _reported = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] Calibri = ["Calibri"], Cambria = ["Cambria"];
+
+    /// <summary>The document's font table; when set, missing fonts are replaced as Word does (see <see cref="Document.Fonts"/>).</summary>
+    public IReadOnlyDictionary<string, FontDeclaration>? Declarations { get; set; }
 
     public ResolvedFont Resolve(string family, bool bold, bool italic)
     {
-        var resolved = resolver.Resolve(family, bold, italic);
+        var resolved = Declarations is null ? resolver.Resolve(family, bold, italic) : resolver.Resolve(family, bold, italic, WordFallbacks(family));
         if (resolved.IsSubstitute && _reported.Add(family))
             warnings.Warn("font.substituted", $"Font '{family}' is not available; using '{resolved.Font.FamilyName}'.");
         return resolved;
+    }
+
+    private string[] WordFallbacks(string family)
+    {
+        if (!Declarations!.TryGetValue(family, out var declared)) return Calibri;
+        var generic = declared.Roman ? Cambria : Calibri;
+        return string.IsNullOrEmpty(declared.AltName) ? generic : [declared.AltName, .. generic];
     }
 
     /// <summary>The font a run uses for a character, before glyph-coverage fallback.</summary>

@@ -149,6 +149,7 @@ public sealed class LayoutEngine
 
     public LayoutDocument Layout(Document document, CancellationToken cancellationToken = default)
     {
+        _fonts.Declarations = document.Fonts;
         // PAGEREF results are only known after pagination; when the document has any, it is laid out
         // a second time with the page numbers from the first pass so that their widths are right.
         var pages = Paginate(document, null, out bool usesPageRefs, cancellationToken);
@@ -449,14 +450,16 @@ public sealed class LayoutEngine
         var placeholder = Context(settings, field => field.Kind == FieldKind.Page
             ? Format(number, field.NumberFormat ?? section.PageNumberFormat)
             : field.Kind == FieldKind.PageRef ? field.CachedResult ?? "99" : "99");
+        // Framed paragraphs float (see Frames below), so only the rest of a header or footer pushes the body.
+        static List<Block> Unframed(HeaderFooter story) => [.. story.Blocks.Where(b => b is not Paragraph { Properties.Frame: not null })];
         if (header is not null)
         {
-            double h = BlockFlow.Stack(BlockFlow.Build(header.Blocks, margins.Left, section.ContentWidth, placeholder), []);
+            double h = BlockFlow.Stack(BlockFlow.Build(Unframed(header), margins.Left, section.ContentWidth, placeholder), []);
             top = Math.Max(top, section.HeaderDistance + h);
         }
         if (footer is not null)
         {
-            double h = BlockFlow.Stack(BlockFlow.Build(footer.Blocks, margins.Left, section.ContentWidth, placeholder), []);
+            double h = BlockFlow.Stack(BlockFlow.Build(Unframed(footer), margins.Left, section.ContentWidth, placeholder), []);
             bottom = Math.Min(bottom, section.PageHeight - section.FooterDistance - h);
         }
         if (bottom - top < 36) bottom = top + 36; // absurd margins: keep a usable body area
