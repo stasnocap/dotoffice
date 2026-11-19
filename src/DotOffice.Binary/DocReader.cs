@@ -783,7 +783,8 @@ internal sealed partial class DocContext(byte[] main, byte[] table)
                     continue;
                 }
                 case '\x08':
-                    if (FloatingAt(cp, Props(ChpAt(cp, PapAt(cp)))) is { } floating) { Flush(); inlines.Add(floating); }
+                    Flush();
+                    AddFloating(cp, Props(ChpAt(cp, PapAt(cp))), inlines);
                     continue;
                 case '\x01' or '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of pictures and notes
             }

@@ -143,6 +143,21 @@ public class DocReaderTests
         Assert.True(runs[^1].Properties.SmallCaps && !runs[^1].Properties.Caps);
     }
 
+    [Fact]
+    public void A_group_floats_each_shape_at_its_place_in_the_anchor_frame()
+    {
+        static byte[] Rect(int l, int t, int r, int b) => [.. new[] { l, t, r, b }.SelectMany(BitConverter.GetBytes)];
+        var group = Escher(0xF, 0xF004, Escher(0x1, 0xF009, Rect(0, 0, 1000, 1000)), Escher(2, 0xF00A, BitConverter.GetBytes(1025), BitConverter.GetBytes(0x201)));
+        var child = Escher(0xF, 0xF004, Escher(1 << 4 | 2, 0xF00A, BitConverter.GetBytes(1026), BitConverter.GetBytes(0xA02)), Escher(0, 0xF00F, Rect(500, 0, 1000, 500)));
+        var patriarch = Escher(0xF, 0xF004, Escher(2, 0xF00A, BitConverter.GetBytes(1024), BitConverter.GetBytes(0x5)));
+        byte[] art = [.. Escher(0xF, 0xF000), 0, .. Escher(0xF, 0xF002, Escher(0xF, 0xF003, patriarch, Escher(0xF, 0xF003, group, child)))];
+        byte[] spa = [.. new[] { 0, 2, 1025, 200, 400, 2200, 1400 }.SelectMany(BitConverter.GetBytes), 0, 0, 0, 0, 0, 0];
+        var doc = DocReader.Read(new MemoryStream(Doc("\x08\r", [2], (40, spa), (50, art))));
+        var box = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<FloatingTextBox>());
+        Assert.Equal((50, 25), (box.Width, box.Height));
+        Assert.Equal((60, 20), (box.Horizontal.Offset, box.Vertical.Offset));
+    }
+
     private static byte[] Escher(int verInst, int type, params byte[][] body)
     {
         var data = body.SelectMany(b => b).ToArray();

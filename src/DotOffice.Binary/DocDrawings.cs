@@ -16,6 +16,7 @@ internal sealed partial class DocContext
 
     private readonly Dictionary<int, Fspa> _mainSpas = [], _headerSpas = [];
     private readonly Dictionary<int, OfficeArt.EscherShape> _shapes = [];
+    private readonly Dictionary<int, List<int>> _groupChildren = []; // each group shape's direct children, nested groups by their group shape
     private readonly List<(int Start, int End)> _textBoxes = [], _headerTextBoxes = [];
     private List<ImageData?> _pictures = [];
     private int _drawingDepth;
@@ -34,7 +35,7 @@ internal sealed partial class DocContext
             {
                 foreach (var (type, _, body, length) in OfficeArt.Records(escher, at + 1, escher.Length))
                 {
-                    if (type == 0xF002) Collect(escher, body, body + length, 0);
+                    if (type == 0xF002) Collect(escher, body, body + length, null, 0);
                     at = body + length;
                     break;
                 }
@@ -58,16 +59,20 @@ internal sealed partial class DocContext
         for (int i = 0; i < n; i++) into.Add((baseCp + (int)U32(plc, 4 * i), baseCp + (int)U32(plc, 4 * (i + 1))));
     }
 
-    private void Collect(byte[] escher, int start, int end, int depth)
+    /// <summary>Collects the shapes of a container; in a group container (0xF003) the first shape is the group's own, the rest its children.</summary>
+    private void Collect(byte[] escher, int start, int end, List<int>? siblings, int depth)
     {
         if (depth > 32) return;
+        List<int>? children = null;
         foreach (var (type, _, body, length) in OfficeArt.Records(escher, start, end))
         {
-            if (type == 0xF003) Collect(escher, body, body + length, depth + 1);
+            if (type == 0xF003) Collect(escher, body, body + length, children ?? siblings, depth + 1);
             else if (type == 0xF004 && _shapes.Count < 100_000)
             {
                 var shape = OfficeArt.ReadShape(escher, body, body + length);
-                _shapes.TryAdd(shape.Spid, shape);
+                if (!_shapes.TryAdd(shape.Spid, shape)) continue;
+                (children ?? siblings)?.Add(shape.Spid);
+                if (shape.Group && children is null && _groupChildren.TryAdd(shape.Spid, [])) children = _groupChildren[shape.Spid];
             }
         }
     }
@@ -87,20 +92,16 @@ internal sealed partial class DocContext
         }
     }
 
-    /// <summary>The floating picture or text box anchored at <paramref name="cp"/>, or null when there is none (or it is not drawn).</summary>
-    private Inline? FloatingAt(int cp, RunProperties props)
+    /// <summary>Adds the floating picture, text box or group of them anchored at <paramref name="cp"/>, if there is one that is drawn.</summary>
+    private void AddFloating(int cp, RunProperties props, List<Inline> into)
     {
         bool header = cp >= _textLength;
         int headerBase = _textLength + Math.Max(Lw(4), 0);
-        if (!(header ? _headerSpas.TryGetValue(cp - headerBase, out var spa) : _mainSpas.TryGetValue(cp, out spa))) return null;
-        if (!_shapes.TryGetValue(spa.Spid, out var shape) || shape.Group) return null;
-        var p = shape.Properties;
-        uint Prop(int id, uint fallback) => p.TryGetValue(id, out var v) ? v : fallback;
-        bool Bool(int id, uint bit, bool fallback) => p.TryGetValue(id, out var v) && (v & (bit << 16)) != 0 ? (v & bit) != 0 : fallback;
-        double Emu(int id, double fallback) => p.TryGetValue(id, out var v) && v < 20_000_000 ? v / 12700.0 : fallback;
-
+        if (!(header ? _headerSpas.TryGetValue(cp - headerBase, out var spa) : _mainSpas.TryGetValue(cp, out spa))) return;
+        if (!_shapes.TryGetValue(spa.Spid, out var shape)) return;
         double width = (spa.Right - spa.Left) / 20.0, height = (spa.Bottom - spa.Top) / 20.0;
-        if (!(width > 0 && height > 0 && width < 20_000 && height < 20_000)) return null;
+        if (!(width > 0 && height > 0 && width < 20_000 && height < 20_000)) return;
+        var p = shape.Properties;
         // Word 2000 and later put the position in the shape (posh, posrelh, posv, posrelv); the FSPA's bx and by are the older form.
         var horizontalTo = p.TryGetValue(0x390, out var rh)
             ? rh switch { 0 => FloatReference.Margin, 1 => FloatReference.Page, 3 => FloatReference.Character, _ => FloatReference.Column }
@@ -109,11 +110,44 @@ internal sealed partial class DocContext
             ? rv switch { 0 => FloatReference.Margin, 1 => FloatReference.Page, 3 => FloatReference.Line, _ => FloatReference.Paragraph }
             : ((spa.Flags >> 3) & 3) switch { 0 => FloatReference.Margin, 1 => FloatReference.Page, _ => FloatReference.Paragraph };
         static FloatAlignment Align(uint v) => v switch { 1 => FloatAlignment.Start, 2 => FloatAlignment.Center, 3 => FloatAlignment.End, 4 => FloatAlignment.Inside, 5 => FloatAlignment.Outside, _ => FloatAlignment.Offset };
-        var horizontal = new FloatPosition(horizontalTo, Align(Prop(0x38F, 0)), spa.Left / 20.0);
-        var vertical = new FloatPosition(verticalTo, Align(Prop(0x391, 0)), spa.Top / 20.0);
+        var horizontal = new FloatPosition(horizontalTo, Align(p.TryGetValue(0x38F, out var ah) ? ah : 0), spa.Left / 20.0);
+        var vertical = new FloatPosition(verticalTo, Align(p.TryGetValue(0x391, out var av) ? av : 0), spa.Top / 20.0);
         int wr = (spa.Flags >> 5) & 0xF;
-        var wrap = wr switch { 1 => TextWrap.TopAndBottom, 3 => TextWrap.None, _ => TextWrap.Square };
-        bool behind = (spa.Flags & 0x4000) != 0;
+        var place = new Placement(horizontal, vertical, wr switch { 1 => TextWrap.TopAndBottom, 3 => TextWrap.None, _ => TextWrap.Square }, (spa.Flags & 0x4000) != 0, header);
+        int count = 0;
+        Add(shape, FrameFraction.Whole, 0);
+
+        // A group: each shape floats at the group's anchor plus its own offset in the group, nested groups flattened.
+        void Add(OfficeArt.EscherShape s, FrameFraction frame, int depth)
+        {
+            if (!s.Group)
+            {
+                var at = place with
+                {
+                    Horizontal = horizontal with { Offset = horizontal.Offset + (horizontal.Alignment == FloatAlignment.Offset ? frame.X * width : 0) },
+                    Vertical = vertical with { Offset = vertical.Offset + (vertical.Alignment == FloatAlignment.Offset ? frame.Y * height : 0) },
+                };
+                if (Floating(s, frame.Width * width, frame.Height * height, props, at) is { } inline) into.Add(inline);
+                return;
+            }
+            if (depth > 8 || s.GroupRect is not { } space || !_groupChildren.TryGetValue(s.Spid, out var children)) return;
+            foreach (int id in children)
+                if (count++ < 1000 && _shapes.TryGetValue(id, out var child) && child.ChildRect is { } c)
+                    Add(child, frame.Within(OfficeArt.Relative(c, space)), depth + 1);
+        }
+    }
+
+    private readonly record struct Placement(FloatPosition Horizontal, FloatPosition Vertical, TextWrap Wrap, bool BehindText, bool Header);
+
+    /// <summary>One picture or text box of the given size in points, or null when the shape is not drawn.</summary>
+    private Inline? Floating(OfficeArt.EscherShape shape, double width, double height, RunProperties props, Placement place)
+    {
+        if (!(width > 0 && height > 0)) return null;
+        var (horizontal, vertical, wrap, behind, header) = place;
+        var p = shape.Properties;
+        uint Prop(int id, uint fallback) => p.TryGetValue(id, out var v) ? v : fallback;
+        bool Bool(int id, uint bit, bool fallback) => p.TryGetValue(id, out var v) && (v & (bit << 16)) != 0 ? (v & bit) != 0 : fallback;
+        double Emu(int id, double fallback) => p.TryGetValue(id, out var v) && v < 20_000_000 ? v / 12700.0 : fallback;
 
         if (p.TryGetValue(0x104, out var pib) && pib >= 1 && pib <= _pictures.Count && _pictures[(int)pib - 1] is { } picture)
             return new FloatingImage(picture, width, height, props) { Horizontal = horizontal, Vertical = vertical, Wrap = wrap, BehindText = behind };
