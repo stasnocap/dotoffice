@@ -25,23 +25,27 @@ internal static class OfficeArt
                 foreach (var (bt, _, bb, bl) in Records(escher, b, b + l))
                 {
                     if (bt != 0xF007) continue;
-                    ImageData? image = null;
-                    // FBSE: 36 bytes, then the name (cbName at offset 33), then the BLIP record itself.
-                    if (bl >= 36)
-                    {
-                        int at = bb + 36 + escher[bb + 33];
-                        foreach (var blip in Records(escher, at, bb + bl)) { image = Decode(escher, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
-                        // Word keeps the BLIP in its WordDocument stream, at the FBSE's foDelay.
-                        long foDelay = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(bb + 28));
-                        if (image is null && at >= bb + bl && delay is not null && foDelay + 8 <= delay.Length)
-                            foreach (var blip in Records(delay, (int)foDelay, delay.Length)) { image = Decode(delay, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
-                    }
-                    result.Add(image);
+                    result.Add(Bse(escher, bb, bl, delay));
                     if (result.Count > 100_000) return result;
                 }
             }
         }
         return result;
+    }
+
+    /// <summary>The picture of one FBSE record body, or null when it is missing or not read.</summary>
+    public static ImageData? Bse(byte[] escher, int body, int length, byte[]? delay = null)
+    {
+        // FBSE: 36 bytes, then the name (cbName at offset 33), then the BLIP record itself.
+        if (length < 36) return null;
+        ImageData? image = null;
+        int at = body + 36 + escher[body + 33];
+        foreach (var blip in Records(escher, at, body + length)) { image = Decode(escher, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
+        // Word keeps the BLIP in its WordDocument stream, at the FBSE's foDelay.
+        long foDelay = BinaryPrimitives.ReadUInt32LittleEndian(escher.AsSpan(body + 28));
+        if (image is null && at >= body + length && delay is not null && foDelay + 8 <= delay.Length)
+            foreach (var blip in Records(delay, (int)foDelay, delay.Length)) { image = Decode(delay, blip.Type, blip.Inst, blip.Body, blip.Length); break; }
+        return image;
     }
 
     /// <summary>Decodes one BLIP record body: JPEG, PNG, DIB (given a bitmap file header), TIFF, or an EMF, WMF or PICT metafile (inflated).</summary>

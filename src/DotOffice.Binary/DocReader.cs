@@ -21,7 +21,7 @@ public static class DocReader
         var table = file.ReadStream((flags & 0x0200) != 0 ? "1Table" : "0Table") ?? throw new InvalidDataException("The document's table stream is missing.");
         try
         {
-            return new DocContext(main, table).Read();
+            return new DocContext(main, table, file.ReadStream("Data") ?? []).Read();
         }
         catch (Exception e) when (e is IndexOutOfRangeException or ArgumentException or OverflowException)
         {
@@ -30,7 +30,7 @@ public static class DocReader
     }
 }
 
-internal sealed partial class DocContext(byte[] main, byte[] table)
+internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
 {
     private const int MaxChars = 50_000_000, MaxBlocks = 2_000_000;
 
@@ -40,6 +40,8 @@ internal sealed partial class DocContext(byte[] main, byte[] table)
     {
         public bool Bold, Italic, Strike, SmallCaps, Caps, Hidden;
         public int Underline, Size = 20, Font, Color = -1, Script;
+        public long PicLocation = -1; // where a picture character's PICF is in the Data stream
+        public bool Ole2, FData;
         public Chp Clone() => (Chp)MemberwiseClone();
     }
 
@@ -297,6 +299,9 @@ internal sealed partial class DocContext(byte[] main, byte[] table)
                 case 0x2A42: chp.Color = o[0] == 0 ? -1 : o[0]; break;
                 case 0x6870 when size >= 4: chp.Color = 0x1000000 | (o[0] << 16) | (o[1] << 8) | o[2]; break;
                 case 0x2A48: chp.Script = o[0]; break;
+                case 0x6A03 when size >= 4: chp.PicLocation = U32(o, 0); break;
+                case 0x080A: chp.Ole2 = o[0] != 0; break;
+                case 0x0806: chp.FData = o[0] != 0; break;
             }
             at += size;
         }
@@ -786,7 +791,14 @@ internal sealed partial class DocContext(byte[] main, byte[] table)
                     Flush();
                     AddFloating(cp, Props(ChpAt(cp, PapAt(cp))), inlines);
                     continue;
-                case '\x01' or '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of pictures and notes
+                case '\x01':
+                    if (ChpAt(cp, PapAt(cp)) is { PicLocation: >= 0, Ole2: false, FData: false } pictureChp && InlinePicture(pictureChp.PicLocation, Props(pictureChp)) is { } picture)
+                    {
+                        Flush();
+                        inlines.Add(picture);
+                    }
+                    continue;
+                case '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of notes
             }
             if (c == '\u001E') c = '-';
             else if (c == '\u001F') continue;

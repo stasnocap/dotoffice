@@ -61,11 +61,12 @@ public class DocReaderTests
     /// <summary>
     /// A minimal Word 97 document: a FIB with the given story lengths and (fc, lcb) pairs into the table stream, one compressed
     /// (8-bit) piece holding all the text at byte 1024 of the WordDocument stream, and the piece table at the start of the table stream.
-    /// Character runs, if given, go in one CHPX FKP page after the text, each run's sprms covering its length of text in turn.
+    /// Character runs, if given, go in one CHPX FKP page after the text, each run's sprms covering its length of text in turn; a Data
+    /// stream, if given, goes in the file too.
     /// </summary>
-    private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables) => Doc(text, storyLengths, [], tables);
+    private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables) => Doc(text, storyLengths, [], null, tables);
 
-    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, params (int Pair, byte[] Data)[] tables)
+    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, byte[]? data = null, params (int Pair, byte[] Data)[] tables)
     {
         int fkpPage = (1024 + text.Length + 511) / 512;
         var main = new byte[runs.Length > 0 ? 512 * (fkpPage + 1) : 1024 + text.Length];
@@ -108,8 +109,8 @@ public class DocReaderTests
             BinaryPrimitives.WriteInt32LittleEndian(main.AsSpan(154 + 8 * pair + 4), lcb);
         }
         Pair(33, 0, table.Count);
-        foreach (var (pair, data) in tables) { Pair(pair, table.Count, data.Length); table.AddRange(data); }
-        return Cfb(("WordDocument", main), ("1Table", table.ToArray()));
+        foreach (var (pair, bytes) in tables) { Pair(pair, table.Count, bytes.Length); table.AddRange(bytes); }
+        return data is null ? Cfb(("WordDocument", main), ("1Table", table.ToArray())) : Cfb(("WordDocument", main), ("1Table", table.ToArray()), ("Data", data));
     }
 
     private static string Text(IEnumerable<Block>? blocks) =>
@@ -156,6 +157,25 @@ public class DocReaderTests
         var box = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<FloatingTextBox>());
         Assert.Equal((50, 25), (box.Width, box.Height));
         Assert.Equal((60, 20), (box.Horizontal.Offset, box.Vertical.Offset));
+    }
+
+    [Fact]
+    public void A_picture_character_shows_the_picture_its_PICF_points_to_in_the_Data_stream()
+    {
+        var png = PngTestEncoder.Encode(2, 2, 2, 8, new int[12]);
+        var shape = Escher(0xF, 0xF004, Escher(75 << 4 | 2, 0xF00A, BitConverter.GetBytes(1025), BitConverter.GetBytes(0xA00)),
+            Escher(1 << 4 | 3, 0xF00B, BitConverter.GetBytes((ushort)0x4104), BitConverter.GetBytes(3))); // pib numbers the document's store
+        var bse = Escher(6 << 4 | 2, 0xF007, new byte[36], Escher(0x6E0, 0xF01E, new byte[17], png));
+        var picf = new byte[0x44];
+        BinaryPrimitives.WriteUInt16LittleEndian(picf.AsSpan(4), 0x44);
+        BinaryPrimitives.WriteUInt16LittleEndian(picf.AsSpan(6), 0x66); // a picture name follows the header
+        foreach (var (at, value) in new[] { (28, 2000), (30, 1000), (32, 1000), (34, 500) }) BinaryPrimitives.WriteUInt16LittleEndian(picf.AsSpan(at), (ushort)value);
+        byte[] picture = [.. new byte[16], .. picf, 1, (byte)'x', .. shape, .. bse];
+        BinaryPrimitives.WriteInt32LittleEndian(picture.AsSpan(16), picture.Length - 16);
+        var doc = DocReader.Read(new MemoryStream(Doc("\x01\r", [2], runs: [(1, [0x03, 0x6A, 16, 0, 0, 0, 0x55, 0x08, 1]), (1, [])], data: picture)));
+        var image = Assert.Single(doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<ImageRun>());
+        Assert.Equal((100, 25), (image.Width, image.Height));
+        Assert.Equal(png, image.Image.Data);
     }
 
     private static byte[] Escher(int verInst, int type, params byte[][] body)

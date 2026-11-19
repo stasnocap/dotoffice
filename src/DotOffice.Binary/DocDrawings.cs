@@ -178,6 +178,27 @@ internal sealed partial class DocContext
         return box;
     }
 
+    /// <summary>
+    /// The inline picture whose PICF is at <paramref name="at"/> in the Data stream: the header (with the picture's size), the picture name when
+    /// mm is 0x66, then a shape container and the FBSE holding its BLIP (the shape's pib numbers the document's store, not this record).
+    /// </summary>
+    private ImageRun? InlinePicture(long at, RunProperties props)
+    {
+        if (at < 0 || at + 0x44 > data.Length) return null;
+        int start = (int)at;
+        long end = Math.Min(data.Length, at + U32(data, start));
+        int cbHeader = U16(data, start + 4), mm = U16(data, start + 6);
+        if (cbHeader < 0x44 || start + cbHeader > end) return null;
+        // PICMID: dxaGoal and dyaGoal (twips), then mx and my (scale in thousandths).
+        double width = U16(data, start + 28) / 20.0 * U16(data, start + 32) / 1000, height = U16(data, start + 30) / 20.0 * U16(data, start + 34) / 1000;
+        if (!(width > 0 && height > 0)) return null;
+        int records = start + cbHeader;
+        if (mm == 0x66 && records < end) records += 1 + data[records];
+        foreach (var (type, _, body, length) in OfficeArt.Records(data, records, (int)end))
+            if (type == 0xF007) return OfficeArt.Bse(data, body, length, data) is { } image ? new ImageRun(image, width, height, props) : null;
+        return null;
+    }
+
     /// <summary>An Office Art color: RGB in the low three bytes; scheme, system and other indirect colors give the fallback.</summary>
     private static Color Rgb(uint value, Color fallback) =>
         (value & 0xFF000000) != 0 ? fallback : new Color((byte)value, (byte)(value >> 8), (byte)(value >> 16));
