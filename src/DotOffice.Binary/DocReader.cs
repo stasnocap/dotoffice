@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using DotOffice.Core;
+using DotOffice.Docx;
 
 namespace DotOffice.Binary;
 
@@ -52,6 +53,9 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
 
         /// <summary>Frame position (sprmPDxaAbs, sprmPDyaAbs, sprmPPc), size and wrapping; <see cref="Framed"/> when any is set.</summary>
         public int DxaAbs, DyaAbs, Pc, FrameWidth, FrameHeight, Wr, DxaFromText, DyaFromText;
+
+        /// <summary>The list override (1-based; 0 for none) and level of a list paragraph.</summary>
+        public int Ilfo, Ilvl;
         public bool Framed;
         public List<TabStop> Tabs = [];
         public byte[]? TableDef;
@@ -112,6 +116,7 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         ReadPieces();
         ReadFonts();
         ReadStyles();
+        ReadLists();
         ReadRuns(12, _chpRuns, papx: false);
         ReadRuns(13, _papRuns, papx: true);
         // The text stream holds the main story, then the footnotes, the headers and footers, comments, endnotes and text boxes.
@@ -120,7 +125,12 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         _text = ReadText((int)Math.Min(total, MaxChars));
         _textLength = Math.Min(textLength, _text.Length);
         ReadDrawings();
-        return Build(0, _textLength, story: false);
+        ReadNotes();
+        var document = Build(0, _textLength, story: false);
+        // Without a separator story, Word draws its own in an empty paragraph of the Normal style.
+        if (_footnotes > 0)
+            document.NoteSeparator = Story(-1, 0, 0)?.Blocks ?? [new Paragraph { MarkProperties = Props(StyleChp(0)) }];
+        return document;
     }
 
     // ------------------------------------------------------------------ text
@@ -254,6 +264,14 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         return style.ResolvedChp = chp;
     }
 
+    /// <summary>Applies a character style's sprms, after those of the character styles it is based on, over the formatting so far.</summary>
+    private void ApplyCharacterStyle(Chp chp, int istd, int depth = 0)
+    {
+        if (!_styles.TryGetValue(istd, out var style) || style.Kind != 2 || depth > 20) return;
+        if (style.Base != 0x0FFF && style.Base != istd) ApplyCharacterStyle(chp, style.Base, depth + 1);
+        ApplyChp(chp, style.Chpx);
+    }
+
     private Pap StylePap(int istd, int depth = 0)
     {
         if (!_styles.TryGetValue(istd, out var style) || depth > 20) return new Pap();
@@ -294,13 +312,7 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
             var o = d.Slice(at, size);
             switch (sprm)
             {
-                case 0x4A30 when size >= 2: // character style: its formatting comes first, then what follows in this list
-                {
-                    var style = StyleChp(U16(o, 0));
-                    chp.Bold = style.Bold; chp.Italic = style.Italic; chp.Strike = style.Strike; chp.Underline = style.Underline;
-                    chp.Size = style.Size; chp.Font = style.Font; chp.Color = style.Color; chp.Script = style.Script; chp.SmallCaps = style.SmallCaps; chp.Caps = style.Caps; chp.Hidden = style.Hidden;
-                    break;
-                }
+                case 0x4A30 when size >= 2: ApplyCharacterStyle(chp, U16(o, 0)); break; // its formatting comes first, then what follows in this list
                 case 0x0835: chp.Bold = Toggle(chp.Bold, o[0]); break;
                 case 0x0836: chp.Italic = Toggle(chp.Italic, o[0]); break;
                 case 0x0837: chp.Strike = Toggle(chp.Strike, o[0]); break;
@@ -339,6 +351,8 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                 case 0x2406: pap.KeepNext = o[0] == 1; break;
                 case 0x2407: pap.PageBreakBefore = o[0] == 1; break;
                 case 0x2416: pap.InTable = o[0] == 1; break;
+                case 0x460B when size >= 2: pap.Ilfo = I16(o, 0); break;
+                case 0x260A: pap.Ilvl = o[0]; break;
                 case 0x2417: pap.Ttp = o[0] == 1; break;
                 case 0x845E or 0x840F when size >= 2: pap.Left = I16(o, 0); break;
                 case 0x845D or 0x840E when size >= 2: pap.Right = I16(o, 0); break;
@@ -535,7 +549,10 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
     /// A header or footer of a section from the header story table (PlcfHdd): six footnote and endnote separator stories, then six per
     /// section (even header, odd header, even footer, odd footer, first header, first footer). An empty story repeats the previous section's.
     /// </summary>
-    private HeaderFooter? Story(int sectionIndex, int kind)
+    private HeaderFooter? Story(int sectionIndex, int kind) => Story(sectionIndex, kind, 6 + sectionIndex * 6 + kind);
+
+    /// <summary>The story at <paramref name="index"/> of the header story table; the first is the footnote separator.</summary>
+    private HeaderFooter? Story(int sectionIndex, int kind, int index)
     {
         if (_stories.TryGetValue((sectionIndex, kind), out var cached)) return cached;
         HeaderFooter? result = null;
@@ -545,11 +562,10 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         if (fc >= 0 && lcb >= 8 && (long)fc + lcb <= table.Length)
         {
             var plc = table.AsSpan(fc, lcb);
-            int index = 6 + sectionIndex * 6 + kind;
             if (index + 1 < count)
             {
                 long start = baseCp + U32(plc, 4 * index), end = baseCp + U32(plc, 4 * (index + 1));
-                if (start >= end) result = sectionIndex > 0 ? Story(sectionIndex - 1, kind) : null;
+                if (start >= end) result = sectionIndex > 0 && index >= 6 ? Story(sectionIndex - 1, kind) : null;
                 else if (end <= _text.Length)
                 {
                     var built = Build((int)start, (int)end, story: true).Sections[0].Blocks;
@@ -569,6 +585,16 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
     {
         int fc = FcLcb(31, out int lcb);
         return lcb >= 2 && fc >= 0 && (long)fc + 2 <= table.Length && (table[fc] & 1) != 0;
+    }
+
+    /// <summary>
+    /// Whether Word collapses the space between paragraphs to the larger of the space after and the space before (HTML paragraph auto spacing):
+    /// when the Word 2000 copts in the DOP leave fDontUseHTMLParagraphAutoSpacing (byte 512, bit 2) clear. Older DOPs do not have it.
+    /// </summary>
+    private bool HtmlParagraphSpacing()
+    {
+        int fc = FcLcb(31, out int lcb);
+        return lcb > 512 && fc >= 0 && (long)fc + 513 <= table.Length && (table[fc + 512] & 4) == 0;
     }
 
     private static FieldKind? PageField(string code)
@@ -592,12 +618,22 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
 
     // ------------------------------------------------------------------ building
 
+    private RunProperties Props(Chp c) => new()
+    {
+        FontFamily = FontName(c.Font), FontSize = Math.Max(1, c.Size / 2.0), Bold = c.Bold, Italic = c.Italic, Strike = c.Strike,
+        Underline = c.Underline switch { 0 => UnderlineStyle.None, 3 => UnderlineStyle.Double, 6 => UnderlineStyle.Thick, 4 => UnderlineStyle.Dotted, 7 => UnderlineStyle.Dashed, 11 => UnderlineStyle.Wavy, _ => UnderlineStyle.Single },
+        Color = ColorOf(c.Color), SmallCaps = c.SmallCaps, Caps = c.Caps, Hidden = c.Hidden,
+        VerticalPosition = c.Script == 1 ? VerticalPosition.Superscript : c.Script == 2 ? VerticalPosition.Subscript : VerticalPosition.Baseline,
+    };
+
     /// <summary>Builds the blocks of the text from <paramref name="from"/> to <paramref name="to"/>: the main story with its sections, or a header or footer story.</summary>
     private Document Build(int from, int to, bool story)
     {
         var text = _text;
         // Word opens .doc files in compatibility mode, where a paragraph after a page break keeps its space before.
-        var doc = new Document { Settings = new DocumentSettings { EvenAndOddHeaders = !story && FacingPages(), PageBreakBeforeDropsSpaceBefore = false }, Fonts = _fontTable };
+        var doc = new Document { Settings = new DocumentSettings { EvenAndOddHeaders = !story && FacingPages(), PageBreakBeforeDropsSpaceBefore = false, CollapseParagraphSpacing = !story && HtmlParagraphSpacing() },
+            Fonts = _fontTable,
+        };
         var sectionEnds = story ? [] : SectionEnds();
         int sectionIndex = 0;
         var section = story ? new Section() : MakeSection(0);
@@ -613,14 +649,6 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
         List<Block>? cellBlocks = null;
         var fieldStack = new List<bool>(); // for each open field: whether its result (after the separator) is being shown
         var fieldCode = new StringBuilder();
-
-        RunProperties Props(Chp c) => new()
-        {
-            FontFamily = FontName(c.Font), FontSize = Math.Max(1, c.Size / 2.0), Bold = c.Bold, Italic = c.Italic, Strike = c.Strike,
-            Underline = c.Underline switch { 0 => UnderlineStyle.None, 3 => UnderlineStyle.Double, 6 => UnderlineStyle.Thick, 4 => UnderlineStyle.Dotted, 7 => UnderlineStyle.Dashed, 11 => UnderlineStyle.Wavy, _ => UnderlineStyle.Single },
-            Color = ColorOf(c.Color), SmallCaps = c.SmallCaps, Caps = c.Caps, Hidden = c.Hidden,
-            VerticalPosition = c.Script == 1 ? VerticalPosition.Superscript : c.Script == 2 ? VerticalPosition.Subscript : VerticalPosition.Baseline,
-        };
 
         void Flush()
         {
@@ -643,6 +671,15 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
             int istd = props.Length >= 2 ? U16(props, 0) : 0;
             var pap = StylePap(istd).Clone();
             if (props.Length > 2) ApplyPap(pap, props.AsSpan(2));
+            // A list level's indents and tabs come between the style and the paragraph's own formatting.
+            if (LevelOf(pap.Ilfo, pap.Ilvl) is { Papx.Length: > 0 } level)
+            {
+                var (ilfo, ilvl) = (pap.Ilfo, pap.Ilvl);
+                pap = StylePap(istd).Clone();
+                ApplyPap(pap, level.Papx);
+                if (props.Length > 2) ApplyPap(pap, props.AsSpan(2));
+                (pap.Ilfo, pap.Ilvl) = (ilfo, ilvl);
+            }
             pap.Istd = istd;
             return pap;
         }
@@ -661,6 +698,21 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                 : BorderSet.Empty,
         };
 
+        // The label takes the paragraph mark's formatting with the level's character sprms; symbol-font bullets become Unicode.
+        ListLabel? Label(Pap pap, Chp mark)
+        {
+            if (LevelOf(pap.Ilfo, pap.Ilvl) is not { } level || NextLabel(pap.Ilfo, pap.Ilvl) is not { } text) return null;
+            var chp = mark.Clone();
+            ApplyChp(chp, level.Chpx);
+            var props = Props(chp);
+            if (SymbolFonts.IsSymbolFont(props.FontFamily))
+            {
+                text = SymbolFonts.Map(props.FontFamily, text, unknown: '•');
+                props = props with { FontFamily = FontName(mark.Font) };
+            }
+            return new ListLabel(text, props, SuffixOf(level), LabelAlignment(level));
+        }
+
         void EndParagraph(int markCp, bool cellMark)
         {
             if (++_blocks > MaxBlocks) throw new InvalidDataException("The document has too many paragraphs.");
@@ -674,7 +726,7 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                 inlines.Clear();
                 return;
             }
-            var paragraph = new Paragraph { Properties = ParagraphProps(pap), MarkProperties = Props(markChp) };
+            var paragraph = new Paragraph { Properties = ParagraphProps(pap), MarkProperties = Props(markChp), ListLabel = Label(pap, markChp) };
             paragraph.Inlines.AddRange(inlines);
             inlines.Clear();
             if (pap.InTable)
@@ -836,7 +888,16 @@ internal sealed partial class DocContext(byte[] main, byte[] table, byte[] data)
                         inlines.Add(picture);
                     }
                     continue;
-                case '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of notes
+                case '\x02' when !story && NoteAt(cp, doc) is { } note:
+                    Flush();
+                    inlines.Add(new NoteReference(note, Props(ChpAt(cp, PapAt(cp)))));
+                    continue;
+                case '\x02' when story && _currentNote is { } owner:
+                    Flush();
+                    inlines.Add(new NoteMark(owner, Props(ChpAt(cp, PapAt(cp)))));
+                    continue;
+                case '\x02' or '\x05' or '\x0E' or '\x0F': continue; // anchors of notes and comments
+                case '\x03' or '\x04': continue; // the note separator lines, drawn by layout
             }
             if (c == '\u001E') c = '-';
             else if (c == '\u001F') continue;

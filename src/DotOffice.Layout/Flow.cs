@@ -239,6 +239,8 @@ internal static class ParagraphLayouter
         bool sameStyleNext = next is not null && next.Properties.StyleId == props.StyleId;
         double spaceBefore = props.ContextualSpacing && sameStylePrev || continued ? 0 : props.SpaceBefore;
         double spaceAfter = props.ContextualSpacing && sameStyleNext ? 0 : props.SpaceAfter;
+        if (ctx.Settings.CollapseParagraphSpacing && prev is not null && !(prev.Properties.ContextualSpacing && sameStylePrev))
+            spaceBefore = Math.Max(0, spaceBefore - prev.Properties.SpaceAfter);
 
         var borders = props.Borders;
         bool groupedPrev = borders.HasAny && prev is not null && SameBorderGroup(prev, p);

@@ -13,10 +13,11 @@ public sealed class LayoutEngine
 {
     private const double Epsilon = 0.01;
 
-    /// <summary>Space taken by the line separating footnotes from the body text.</summary>
-    private const double NoteSeparatorHeight = 12;
+    /// <summary>Space taken by the line separating notes from the body text when the document has no separator story.</summary>
+    private const double DefaultNoteSeparatorHeight = 12;
 
     private readonly LayoutOptions _options;
+    private double _noteSeparator = DefaultNoteSeparatorHeight;
     private readonly FontSelector _fonts;
     private readonly Itemizer _itemizer;
 
@@ -47,7 +48,7 @@ public sealed class LayoutEngine
     private readonly record struct NoteLine(Slice Line, Note Note, double X, double Width);
 
     /// <summary>Footnote lines at the bottom of one column (the whole text width in single-column text).</summary>
-    private sealed class NoteArea(double x, double width)
+    private sealed class NoteArea(double x, double width, double separator)
     {
         public double X { get; } = x;
         public double Width { get; } = width;
@@ -58,7 +59,10 @@ public sealed class LayoutEngine
         /// <summary>The first lines continue a footnote from the previous page.</summary>
         public bool Continued { get; set; }
 
-        public double Height => Lines.Count == 0 ? 0 : NoteSeparatorHeight + Lines.Sum(n => n.Slice.Height + n.Slice.TrailingSpace);
+        /// <summary>Height of the separator above the notes.</summary>
+        public double Separator { get; } = separator;
+
+        public double Height => Lines.Count == 0 ? 0 : Separator + Lines.Sum(n => n.Slice.Height + n.Slice.TrailingSpace);
 
         public bool Overlaps((double X, double Width) column) => X < column.X + column.Width - Epsilon && column.X < X + Width - Epsilon;
     }
@@ -102,6 +106,9 @@ public sealed class LayoutEngine
         public HashSet<Slice> Repeated { get; } = [];
         public bool IsRepeated(Slice s) => Repeated.Contains(s);
 
+        /// <summary>Height of the separator line above footnotes.</summary>
+        public double NoteSeparator { get; init; } = DefaultNoteSeparatorHeight;
+
         /// <summary>Footnote areas at the page bottom, one per column that has footnotes.</summary>
         public List<NoteArea> NoteAreas { get; } = [];
 
@@ -113,7 +120,7 @@ public sealed class LayoutEngine
         {
             var area = NoteAreas.Find(a => a.Lines.Count > 0 && a.Overlaps(column))
                        ?? NoteAreas.Find(a => Math.Abs(a.X - column.X) < 0.5 && Math.Abs(a.Width - column.Width) < 0.5);
-            if (area is null) NoteAreas.Add(area = new NoteArea(column.X, column.Width));
+            if (area is null) NoteAreas.Add(area = new NoteArea(column.X, column.Width, NoteSeparator));
             return area;
         }
 
@@ -150,6 +157,7 @@ public sealed class LayoutEngine
     public LayoutDocument Layout(Document document, CancellationToken cancellationToken = default)
     {
         _fonts.Declarations = document.Fonts;
+        _noteSeparator = NoteSeparatorHeight(document);
         // PAGEREF results are only known after pagination; when the document has any, it is laid out
         // a second time with the page numbers from the first pass so that their widths are right.
         var pages = Paginate(document, null, out bool usesPageRefs, cancellationToken);
@@ -324,8 +332,8 @@ public sealed class LayoutEngine
         {
             // Endnotes follow the text of the last section, after a short separator line.
             var (x, width) = last.Column;
-            var separator = new Slice { Height = NoteSeparatorHeight, LeadingSpace = NoteSeparatorHeight };
-            separator.Items.Add(new LineItem(x, NoteSeparatorHeight / 2, x + Math.Min(144, width / 3), NoteSeparatorHeight / 2, 0.5, Color.Black));
+            var separator = new Slice { Height = _noteSeparator, LeadingSpace = _noteSeparator };
+            separator.Items.Add(new LineItem(x, _noteSeparator / 2, x + Math.Min(144, width / 3), _noteSeparator / 2, 0.5, Color.Black));
             last.Add(separator, x);
             var blocks = document.Endnotes.SelectMany(n => n.Blocks).ToList();
             bool keep = false;
@@ -393,6 +401,15 @@ public sealed class LayoutEngine
             if (section.PageNumberStart is { } start) return number = start;
         }
         return ++number;
+    }
+
+    /// <summary>The height of the document's separator story (its empty paragraph sets the gap), or the default without one.</summary>
+    private double NoteSeparatorHeight(Document document)
+    {
+        if (document.NoteSeparator is not { Count: > 0 } blocks || document.Sections.Count == 0) return DefaultNoteSeparatorHeight;
+        var section = document.Sections[0];
+        var context = Context(document.Settings, field => "1");
+        return BlockFlow.Stack(BlockFlow.Build(blocks, 0, section.ContentWidth, context), []);
     }
 
     private FlowContext Context(DocumentSettings settings, Func<FieldRun, string> fieldText) => new()
@@ -468,7 +485,7 @@ public sealed class LayoutEngine
         {
             Section = section, Margins = margins, Mirrored = mirrored, Width = section.PageWidth, Height = section.PageHeight,
             ContentTop = top, ContentBottom = bottom,
-            Header = header, Footer = footer, Number = number, IsSectionStart = sectionStart,
+            Header = header, Footer = footer, Number = number, IsSectionStart = sectionStart, NoteSeparator = _noteSeparator,
         };
         page.StartRegion(section, top);
         return page;
@@ -607,8 +624,8 @@ public sealed class LayoutEngine
             double x = area.X;
             // A continued footnote gets a full-width separator, as in Word.
             double length = area.Continued ? area.Width : Math.Min(144, area.Width / 3);
-            output.Items.Add(new LineItem(x, y + NoteSeparatorHeight / 2, x + length, y + NoteSeparatorHeight / 2, 0.5, Color.Black));
-            y += NoteSeparatorHeight;
+            output.Items.Add(new LineItem(x, y + area.Separator / 2, x + length, y + area.Separator / 2, 0.5, Color.Black));
+            y += area.Separator;
             foreach (var (slice, _) in area.Lines)
             {
                 Emit(output, slice, y, page, fields);
@@ -925,7 +942,7 @@ public sealed class LayoutEngine
         {
             double skip = page.NaturalBreak && page.ColumnCount == 0 ? slice.LeadingSpace : 0;
             double limit = Math.Max(page.Cursor + slice.Height - skip, OtherColumnsBottom(page, area));
-            bool Fits(Slice line) => limit <= page.ContentBottom - area.Height - (area.Lines.Count == 0 ? NoteSeparatorHeight : 0) - line.Height + Epsilon;
+            bool Fits(Slice line) => limit <= page.ContentBottom - area.Height - (area.Lines.Count == 0 ? area.Separator : 0) - line.Height + Epsilon;
             // Lines still waiting from earlier footnotes go first, so new ones can only follow them.
             bool fits = carry.Count > 0 ? limit <= page.BodyBottom + Epsilon : Fits(notes[0].Line);
             if (!fits && !force) return false;

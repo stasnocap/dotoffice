@@ -266,6 +266,116 @@ public class DocReaderTests
         Assert.True(bodyText.Baseline < doc.Sections[0].Margins.Top + 20, $"body baseline {bodyText.Baseline}");
     }
 
+    /// <summary>An LVL: the LVLF (start, number format, what follows, the sprm lengths), the paragraph and character sprms, the label text.</summary>
+    private static byte[] Lvl(int start, int nfc, string text, byte[] papx, byte[]? chpx = null, int follow = 0)
+    {
+        var lvlf = new byte[28];
+        BinaryPrimitives.WriteInt32LittleEndian(lvlf, start);
+        lvlf[4] = (byte)nfc;
+        lvlf[15] = (byte)follow;
+        lvlf[24] = (byte)(chpx?.Length ?? 0);
+        lvlf[25] = (byte)papx.Length;
+        return [.. lvlf, .. papx, .. chpx ?? [], .. BitConverter.GetBytes((ushort)text.Length), .. Encoding.Unicode.GetBytes(text)];
+    }
+
+    [Fact]
+    public void List_paragraphs_get_numbers_and_bullets_from_their_list_levels()
+    {
+        const string text = "One\rTwo\rSub\rThree\rDot\r";
+        byte[] Lstf(int lsid, bool simple) => [.. BitConverter.GetBytes(lsid), .. new byte[22], (byte)(simple ? 1 : 0), 0];
+        byte[] hanging = [0x0F, 0x84, 0xD0, 0x02, 0x11, 0x84, 0x70, 0xFE]; // left 720, first line -400
+        var numbered = Enumerable.Range(0, 9).SelectMany(l => Lvl(1, l == 1 ? 4 : 0, l == 1 ? "\0.\u0001)" : "\0.", hanging)).ToArray();
+        byte[] plfLst = [.. BitConverter.GetBytes((short)2), .. Lstf(7, false), .. Lstf(9, true), .. numbered,
+            .. Lvl(1, 23, "\uF0B7", [], [0x4F, 0x4A, 1, 0], follow: 1)]; // a Symbol bullet followed by a space
+        byte[] Lfo(int lsid) => [.. BitConverter.GetBytes(lsid), .. new byte[12]];
+        byte[] plfLfo = [.. BitConverter.GetBytes(2), .. Lfo(7), .. Lfo(9), .. new byte[8]];
+        byte[] Item(int ilfo, int ilvl) => [0x0B, 0x46, (byte)ilfo, 0, 0x0A, 0x26, (byte)ilvl];
+        var fonts = Fonts(("Times New Roman", null, 1), ("Symbol", null, 1));
+        var doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], [], paras: [(4, Item(1, 0)), (4, Item(1, 0)), (4, Item(1, 1)), (6, Item(1, 0)), (4, Item(2, 0))],
+            tables: [(15, fonts), (73, plfLst), (74, plfLfo)])));
+        var paragraphs = doc.Sections[0].Blocks.OfType<Paragraph>().ToList();
+        Assert.Equal(["1.", "2.", "2.a)", "3.", "•"], paragraphs.Select(p => p.ListLabel?.Text));
+        Assert.Equal((36.0, -20.0), (paragraphs[0].Properties.LeftIndent, paragraphs[0].Properties.FirstLineIndent));
+        Assert.Equal(ListLabelSuffix.Space, paragraphs[4].ListLabel!.Suffix);
+        Assert.Equal("Times New Roman", paragraphs[4].ListLabel!.Properties.FontFamily);
+    }
+
+    [Fact]
+    public void A_character_style_adds_its_formatting_to_the_paragraph_styles()
+    {
+        // style 0: Normal, bold, 12 pt; style 10: Default Paragraph Font; style 22: Hyperlink, underlined
+        static byte[] Std(int sgc, int istdBase, string name, byte[][] upx)
+        {
+            var body = new List<byte>();
+            body.AddRange(BitConverter.GetBytes((ushort)0));
+            body.AddRange(BitConverter.GetBytes((ushort)(sgc | istdBase << 4)));
+            body.AddRange(BitConverter.GetBytes((ushort)upx.Length));
+            body.AddRange(new byte[4]);
+            body.AddRange(BitConverter.GetBytes((ushort)name.Length));
+            body.AddRange(Encoding.Unicode.GetBytes(name + "\0"));
+            foreach (var u in upx)
+            {
+                if ((body.Count & 1) != 0) body.Add(0);
+                body.AddRange(BitConverter.GetBytes((ushort)u.Length));
+                body.AddRange(u);
+            }
+            return [.. BitConverter.GetBytes((ushort)body.Count), .. body];
+        }
+        var stsh = new List<byte>();
+        stsh.AddRange(BitConverter.GetBytes((ushort)18));
+        stsh.AddRange(BitConverter.GetBytes((ushort)23));
+        stsh.AddRange(BitConverter.GetBytes((ushort)10));
+        stsh.AddRange(new byte[14]);
+        for (int i = 0; i < 23; i++)
+            stsh.AddRange(i switch
+            {
+                0 => Std(1, 0xFFF, "Normal", [[0, 0], [0x35, 0x08, 1, 0x43, 0x4A, 24, 0]]),
+                10 => Std(2, 0xFFF, "Default Paragraph Font", [[]]),
+                22 => Std(2, 10, "Hyperlink", [[0x3E, 0x2A, 1]]),
+                _ => BitConverter.GetBytes((ushort)0),
+            });
+        const string text = "Link\r";
+        var doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], runs: [(4, [0x30, 0x4A, 22, 0]), (1, [])], tables: (1, stsh.ToArray()))));
+        var run = doc.Sections[0].Blocks.OfType<Paragraph>().Single().Inlines.OfType<TextRun>().Single();
+        Assert.True(run.Properties.Bold);
+        Assert.Equal(12, run.Properties.FontSize);
+        Assert.Equal(UnderlineStyle.Single, run.Properties.Underline);
+    }
+
+    [Fact]
+    public void Footnotes_are_numbered_and_their_text_starts_with_their_mark()
+    {
+        const string body = "Text\x02 more\x02\r", notes = "\x02 First\r\x02 Second\r";
+        byte[] fndRef = [.. new[] { 4, 10, 12 }.SelectMany(BitConverter.GetBytes), .. BitConverter.GetBytes((short)1), .. BitConverter.GetBytes((short)1)];
+        byte[] fndTxt = [.. new[] { 0, 8, notes.Length, notes.Length + 1 }.SelectMany(BitConverter.GetBytes)];
+        var doc = DocReader.Read(new MemoryStream(Doc(body + notes + "\r", [body.Length, notes.Length + 1], (2, fndRef), (3, fndTxt))));
+        var references = doc.Sections[0].Blocks.OfType<Paragraph>().Single().Inlines.OfType<NoteReference>().ToList();
+        Assert.Equal(["1", "2"], references.Select(r => r.Mark));
+        var first = references[0].Note.Blocks.OfType<Paragraph>().Single();
+        Assert.IsType<NoteMark>(first.Inlines[0]);
+        Assert.Equal(" First", Assert.IsType<TextRun>(first.Inlines[1]).Text);
+        Assert.NotNull(doc.NoteSeparator); // no separator story: Word's own, an empty Normal paragraph
+    }
+
+    [Fact]
+    public void Html_paragraph_auto_spacing_collapses_the_space_between_paragraphs()
+    {
+        const string text = "One\rTwo\r";
+        var dop = new byte[544];
+        byte[] spaced = [0x13, 0xA4, 120, 0, 0x14, 0xA4, 120, 0]; // 6 pt before and after
+        byte[] File(byte copts) { dop[512] = copts; return Doc(text, [text.Length], [], paras: [(4, spaced), (4, spaced)], tables: (31, dop)); }
+        Assert.True(DocReader.Read(new MemoryStream(File(0))).Settings.CollapseParagraphSpacing);
+        Assert.False(DocReader.Read(new MemoryStream(File(4))).Settings.CollapseParagraphSpacing); // fDontUseHTMLParagraphAutoSpacing
+
+        double Gap(byte copts)
+        {
+            var page = Layout.LayoutTestHelpers.Render(DocReader.Read(new MemoryStream(File(copts)))).Pages[0];
+            var lines = Layout.LayoutTestHelpers.Texts(page).ToList();
+            return lines.First(t => t.Text.StartsWith("Two")).Baseline - lines.First(t => t.Text.StartsWith("One")).Baseline;
+        }
+        Assert.Equal(6, Gap(4) - Gap(0), 3);
+    }
+
     private static byte[] Escher(int verInst, int type, params byte[][] body)
     {
         var data = body.SelectMany(b => b).ToArray();

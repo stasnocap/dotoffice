@@ -17,6 +17,11 @@ public sealed class Document
     /// </summary>
     public Dictionary<string, FontDeclaration>? Fonts { get; set; }
 
+    /// <summary>
+    /// The story drawn above footnotes (the separator line's paragraph), whose height is the gap the separator takes; null for a 12-point gap.
+    /// </summary>
+    public List<Block>? NoteSeparator { get; set; }
+
     public string? Title { get; set; }
     public string? Author { get; set; }
 }
@@ -59,6 +64,12 @@ public sealed class DocumentSettings
 
     /// <summary>Words in capitals are not hyphenated (w:doNotHyphenateCaps).</summary>
     public bool DoNotHyphenateCaps { get; init; }
+
+    /// <summary>
+    /// The space between two paragraphs is the larger of the first one's space after and the second one's space before, not their sum
+    /// (Word's HTML paragraph auto spacing, on when compatibility option w:doNotUseHTMLParagraphAutoSpacing is off).
+    /// </summary>
+    public bool CollapseParagraphSpacing { get; init; }
 
     /// <summary>When false, lines ending in a manual line break are not stretched in justified paragraphs.</summary>
     public bool JustifyLinesEndingWithBreak { get; init; } = true;
