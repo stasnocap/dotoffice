@@ -282,15 +282,15 @@ internal sealed partial class DocContext(byte[] main, byte[] table)
                 {
                     var style = StyleChp(U16(o, 0));
                     chp.Bold = style.Bold; chp.Italic = style.Italic; chp.Strike = style.Strike; chp.Underline = style.Underline;
-                    chp.Size = style.Size; chp.Font = style.Font; chp.Color = style.Color; chp.Script = style.Script; chp.SmallCaps = style.SmallCaps; chp.Caps = style.Caps;
+                    chp.Size = style.Size; chp.Font = style.Font; chp.Color = style.Color; chp.Script = style.Script; chp.SmallCaps = style.SmallCaps; chp.Caps = style.Caps; chp.Hidden = style.Hidden;
                     break;
                 }
                 case 0x0835: chp.Bold = Toggle(chp.Bold, o[0]); break;
                 case 0x0836: chp.Italic = Toggle(chp.Italic, o[0]); break;
                 case 0x0837: chp.Strike = Toggle(chp.Strike, o[0]); break;
-                case 0x083B: chp.SmallCaps = Toggle(chp.SmallCaps, o[0]); break;
-                case 0x083C: chp.Caps = Toggle(chp.Caps, o[0]); break;
-                case 0x083D: chp.Hidden = Toggle(chp.Hidden, o[0]); break;
+                case 0x083A: chp.SmallCaps = Toggle(chp.SmallCaps, o[0]); break;
+                case 0x083B: chp.Caps = Toggle(chp.Caps, o[0]); break;
+                case 0x083C: chp.Hidden = Toggle(chp.Hidden, o[0]); break;
                 case 0x2A3E: chp.Underline = o[0]; break;
                 case 0x4A43 when size >= 2: chp.Size = Math.Max(2, U16(o, 0)); break;
                 case 0x4A4F when size >= 2: chp.Font = U16(o, 0); break;

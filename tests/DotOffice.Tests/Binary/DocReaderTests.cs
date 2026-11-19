@@ -61,10 +61,31 @@ public class DocReaderTests
     /// <summary>
     /// A minimal Word 97 document: a FIB with the given story lengths and (fc, lcb) pairs into the table stream, one compressed
     /// (8-bit) piece holding all the text at byte 1024 of the WordDocument stream, and the piece table at the start of the table stream.
+    /// Character runs, if given, go in one CHPX FKP page after the text, each run's sprms covering its length of text in turn.
     /// </summary>
-    private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables)
+    private static byte[] Doc(string text, int[] storyLengths, params (int Pair, byte[] Data)[] tables) => Doc(text, storyLengths, [], tables);
+
+    private static byte[] Doc(string text, int[] storyLengths, (int Length, byte[] Sprms)[] runs, params (int Pair, byte[] Data)[] tables)
     {
-        var main = new byte[1024 + text.Length];
+        int fkpPage = (1024 + text.Length + 511) / 512;
+        var main = new byte[runs.Length > 0 ? 512 * (fkpPage + 1) : 1024 + text.Length];
+        if (runs.Length > 0)
+        {
+            var fkp = main.AsSpan(512 * fkpPage, 512);
+            int fc = 1024, at = 511;
+            for (int r = 0; r < runs.Length; r++)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(fkp[(4 * r)..], fc);
+                fc += runs[r].Length;
+                at = (at - runs[r].Sprms.Length - 1) & ~1;
+                fkp[at] = (byte)runs[r].Sprms.Length;
+                runs[r].Sprms.CopyTo(fkp[(at + 1)..]);
+                fkp[4 * (runs.Length + 1) + r] = (byte)(at / 2);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(fkp[(4 * runs.Length)..], fc);
+            fkp[511] = (byte)runs.Length;
+            tables = [.. tables, (12, [.. BitConverter.GetBytes(1024), .. BitConverter.GetBytes(fc), .. BitConverter.GetBytes(fkpPage)])];
+        }
         BinaryPrimitives.WriteUInt16LittleEndian(main, 0xA5EC);
         BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(2), 0xC1);
         BinaryPrimitives.WriteUInt16LittleEndian(main.AsSpan(0x0A), 0x0200); // the table stream is 1Table
@@ -108,6 +129,18 @@ public class DocReaderTests
         Assert.Equal("Head", Text(section.DefaultHeader?.Blocks));
         Assert.Equal("Page [Page]", Text(section.DefaultFooter?.Blocks));
         Assert.Null(section.FirstHeader);
+    }
+
+    [Fact]
+    public void Caps_small_caps_and_hidden_text_use_their_own_sprms()
+    {
+        const string text = "Caps small gone\r";
+        var doc = DocReader.Read(new MemoryStream(Doc(text, [text.Length], runs:
+            [(5, [0x3B, 0x08, 1]), (6, [0x3A, 0x08, 1]), (4, [0x3C, 0x08, 1]), (1, [])])));
+        var runs = doc.Sections[0].Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<TextRun>().ToList();
+        Assert.Equal("Caps small ", string.Concat(runs.Select(r => r.Text)));
+        Assert.True(runs[0].Properties.Caps && !runs[0].Properties.SmallCaps);
+        Assert.True(runs[^1].Properties.SmallCaps && !runs[^1].Properties.Caps);
     }
 
     private static byte[] Escher(int verInst, int type, params byte[][] body)
